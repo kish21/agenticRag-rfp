@@ -11,7 +11,7 @@ Usage:
     python checkpoint_runner.py all             # Regression on all passed
 """
 
-import sys, os, json, subprocess, time, traceback
+import sys, os, json, subprocess, time, traceback, tempfile, re
 from datetime import datetime
 from pathlib import Path
 
@@ -57,7 +57,35 @@ def mark_failed(cp_id: str, state: dict):
 
 
 def _run(cmd: str) -> tuple[int, str]:
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(ROOT))
+    # When the command contains a multiline python -c "...", extract the code
+    # and run it via a temp file — multiline shell quoting is unreliable on Windows.
+    stripped = cmd.strip()
+    if "\n" in stripped and re.match(r"python\s+-c\s+\"", stripped):
+        match = re.search(r'python\s+-c\s+"(.*?)"\s*$', stripped, re.DOTALL)
+        if match:
+            code = match.group(1)
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False,
+                dir=str(ROOT), encoding="utf-8"
+            ) as f:
+                f.write(code)
+                fname = f.name
+            try:
+                r = subprocess.run(
+                    [sys.executable, fname],
+                    capture_output=True, text=True, cwd=str(ROOT),
+                    env={**os.environ, "PYTHONUTF8": "1"}
+                )
+                return r.returncode, (r.stdout + r.stderr).strip()
+            finally:
+                os.unlink(fname)
+
+    # Single-line commands: replace bare 'python' with the running interpreter
+    cmd = re.sub(r"^python(\s)", sys.executable.replace("\\", "/") + r"\1", stripped)
+    r = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True, cwd=str(ROOT),
+        env={**os.environ, "PYTHONUTF8": "1"}
+    )
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
