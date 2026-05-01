@@ -1,11 +1,12 @@
 # SKILL 03 — Ingestion Agent
+
 **Sequence:** THIRD.
 
-> **Multi-LLM note:** Section classification in ingestion uses `call_llm()` 
-> from `app.core.llm_provider`. Heavy PDFs (>50 pages or scanned) are 
+> **Multi-LLM note:** Section classification in ingestion uses `call_llm()`
+> from `app.core.llm_provider`. Heavy PDFs (>50 pages or scanned) are
 > offloaded to Modal — see `app_modal.py` built in Skill 01. Skills 01 and 02 complete and verified.
-**Time:** 2-3 days.
-**Output:** Documents ingested into Qdrant with LlamaIndex. Structured facts extracted into PostgreSQL immediately after ingestion. ZIP multi-file submissions handled.
+> **Time:** 2-3 days.
+> **Output:** Documents ingested into Qdrant with LlamaIndex. Structured facts extracted into PostgreSQL immediately after ingestion. ZIP multi-file submissions handled.
 
 ---
 
@@ -33,37 +34,64 @@ Run this SQL before building any Python code. Everything else depends on these t
 ```sql
 -- app/db/schema.sql
 -- Run via: psql -U platformuser -d agenticplatform -f app/db/schema.sql
+--
+-- DESIGN DECISIONS:
+-- 1. Users and authorisation are in a SEPARATE SKILL (Skill 01b).
+--    This file does not create users or auth tables.
+-- 2. EvaluationSetup is persisted as a JSONB blob — simple, no child tables.
+-- 3. Five typed extraction tables stay for standard procurement facts
+--    where typed SQL columns enable meaningful comparisons (e.g. amount_gbp >= 2000000).
+-- 4. extracted_facts is the PRIMARY store for customer-defined criteria.
+--    It links to ExtractionTarget.target_id and EvaluationSetup.setup_id.
+--    Every department uses this table for their custom criteria.
 
 -- ── Core tables ───────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS organisations (
-    org_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_name        TEXT NOT NULL,
-    industry        TEXT,
+    org_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_name          TEXT NOT NULL,
+    industry          TEXT,
     subscription_tier TEXT DEFAULT 'starter',
-    created_at      TIMESTAMPTZ DEFAULT now(),
-    is_active       BOOLEAN DEFAULT true
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    is_active         BOOLEAN DEFAULT true
 );
 
 CREATE TABLE IF NOT EXISTS agent_registry (
-    agent_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id          UUID REFERENCES organisations(org_id),
-    agent_name      TEXT NOT NULL,
-    agent_type      TEXT NOT NULL,
-    config          JSONB NOT NULL,
-    is_active       BOOLEAN DEFAULT true,
-    created_at      TIMESTAMPTZ DEFAULT now(),
-    updated_at      TIMESTAMPTZ DEFAULT now()
+    agent_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id       UUID REFERENCES organisations(org_id),
+    agent_name   TEXT NOT NULL,
+    agent_type   TEXT NOT NULL,   -- "procurement" | "hr" | "legal" | "finance" | "custom"
+    department   TEXT,            -- department this agent serves
+    config       JSONB NOT NULL,  -- AgentConfig JSON — department criteria template
+    is_active    BOOLEAN DEFAULT true,
+    created_at   TIMESTAMPTZ DEFAULT now(),
+    updated_at   TIMESTAMPTZ DEFAULT now()
+);
+
+-- ── EvaluationSetup — persists what the customer confirmed on Page 4b ─
+-- Stored as JSONB blob. The Planner reads this. Auditors can reproduce
+-- exactly what criteria were used for any completed evaluation.
+
+CREATE TABLE IF NOT EXISTS evaluation_setups (
+    setup_id       TEXT PRIMARY KEY,           -- matches EvaluationSetup.setup_id
+    org_id         UUID NOT NULL,
+    department     TEXT NOT NULL,
+    rfp_id         TEXT NOT NULL,
+    setup_json     JSONB NOT NULL,             -- full EvaluationSetup as JSON
+    confirmed_by   TEXT NOT NULL,              -- user_id who confirmed
+    confirmed_at   TIMESTAMPTZ NOT NULL,
+    source         TEXT NOT NULL,              -- "department_template" | "rfp_extracted" | "mixed"
+    created_at     TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_runs (
     run_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id          UUID NOT NULL,
+    setup_id        TEXT REFERENCES evaluation_setups(setup_id),
     rfp_id          TEXT NOT NULL,
-    agent_id        UUID,
-    status          TEXT DEFAULT 'running',
+    agent_id        UUID REFERENCES agent_registry(agent_id),
+    status          TEXT DEFAULT 'running',    -- running | complete | failed | blocked
     vendor_ids      TEXT[],
-    config_snapshot JSONB,
     contract_value  NUMERIC,
     approval_tier   INTEGER,
     langsmith_trace TEXT,
@@ -74,20 +102,24 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
 -- ── Vendor documents ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS vendor_documents (
-    doc_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id          UUID NOT NULL,
-    vendor_id       TEXT NOT NULL,
-    rfp_id          TEXT NOT NULL,
-    filename        TEXT NOT NULL,
-    content_hash    TEXT NOT NULL,
-    quality_score   FLOAT,
-    total_chunks    INTEGER,
-    ingested_at     TIMESTAMPTZ DEFAULT now(),
+    doc_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id        UUID NOT NULL,
+    vendor_id     TEXT NOT NULL,
+    rfp_id        TEXT NOT NULL,
+    setup_id      TEXT REFERENCES evaluation_setups(setup_id),
+    filename      TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    quality_score FLOAT,
+    total_chunks  INTEGER,
+    ingested_at   TIMESTAMPTZ DEFAULT now(),
     UNIQUE(org_id, vendor_id, rfp_id, content_hash)
 );
 
--- ── Structured fact tables ────────────────────────────────────────────
--- Every row links back to Qdrant via source_chunk_id
+-- ── Standard typed extraction tables ─────────────────────────────────
+-- These five tables stay for standard procurement facts.
+-- Typed columns (amount_gbp, valid_until, uptime_percentage) enable
+-- SQL comparisons: WHERE amount_gbp >= 2000000, WHERE valid_until > now()
+-- Every row links back to Qdrant via source_chunk_id.
 
 CREATE TABLE IF NOT EXISTS extracted_certifications (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -100,10 +132,10 @@ CREATE TABLE IF NOT EXISTS extracted_certifications (
     issuing_body    TEXT,
     scope           TEXT,
     valid_until     DATE,
-    status          TEXT,              -- current | pending | expired | not_mentioned
+    status          TEXT,          -- current | pending | expired | not_mentioned
     confidence      FLOAT,
-    grounding_quote TEXT NOT NULL,     -- REQUIRED — verbatim from source
-    source_chunk_id TEXT NOT NULL,     -- Links to Qdrant point
+    grounding_quote TEXT NOT NULL,
+    source_chunk_id TEXT NOT NULL,
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
@@ -114,6 +146,7 @@ CREATE TABLE IF NOT EXISTS extracted_insurance (
     vendor_id       TEXT NOT NULL,
     insurance_type  TEXT,
     amount_gbp      NUMERIC,
+    currency        TEXT DEFAULT 'GBP',
     provider        TEXT,
     confidence      FLOAT,
     grounding_quote TEXT NOT NULL,
@@ -122,34 +155,34 @@ CREATE TABLE IF NOT EXISTS extracted_insurance (
 );
 
 CREATE TABLE IF NOT EXISTS extracted_slas (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    doc_id          UUID REFERENCES vendor_documents(doc_id),
-    org_id          UUID NOT NULL,
-    vendor_id       TEXT NOT NULL,
-    priority_level  TEXT,
-    response_minutes INTEGER,
-    resolution_hours INTEGER,
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_id            UUID REFERENCES vendor_documents(doc_id),
+    org_id            UUID NOT NULL,
+    vendor_id         TEXT NOT NULL,
+    priority_level    TEXT,
+    response_minutes  INTEGER,
+    resolution_hours  INTEGER,
     uptime_percentage FLOAT,
-    confidence      FLOAT,
-    grounding_quote TEXT NOT NULL,
-    source_chunk_id TEXT NOT NULL,
-    created_at      TIMESTAMPTZ DEFAULT now()
+    confidence        FLOAT,
+    grounding_quote   TEXT NOT NULL,
+    source_chunk_id   TEXT NOT NULL,
+    created_at        TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS extracted_projects (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    doc_id          UUID REFERENCES vendor_documents(doc_id),
-    org_id          UUID NOT NULL,
-    vendor_id       TEXT NOT NULL,
-    client_name     TEXT,
-    client_sector   TEXT,
-    user_count      INTEGER,
-    outcomes        TEXT,
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_id              UUID REFERENCES vendor_documents(doc_id),
+    org_id              UUID NOT NULL,
+    vendor_id           TEXT NOT NULL,
+    client_name         TEXT,
+    client_sector       TEXT,
+    user_count          INTEGER,
+    outcomes            TEXT,
     reference_available BOOLEAN,
-    confidence      FLOAT,
-    grounding_quote TEXT NOT NULL,
-    source_chunk_id TEXT NOT NULL,
-    created_at      TIMESTAMPTZ DEFAULT now()
+    confidence          FLOAT,
+    grounding_quote     TEXT NOT NULL,
+    source_chunk_id     TEXT NOT NULL,
+    created_at          TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS extracted_pricing (
@@ -160,6 +193,7 @@ CREATE TABLE IF NOT EXISTS extracted_pricing (
     year            INTEGER,
     amount_gbp      NUMERIC,
     total_gbp       NUMERIC,
+    currency        TEXT DEFAULT 'GBP',
     includes        TEXT[],
     confidence      FLOAT,
     grounding_quote TEXT NOT NULL,
@@ -167,31 +201,44 @@ CREATE TABLE IF NOT EXISTS extracted_pricing (
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
+-- ── extracted_facts — PRIMARY store for customer-defined criteria ─────
+-- This is where ALL department-specific and custom criteria land.
+-- A logistics evaluation stores fleet_size here.
+-- An HR evaluation stores payroll_volume here.
+-- A legal evaluation stores qualified_lawyer_headcount here.
+-- Links to ExtractionTarget.target_id and EvaluationSetup.setup_id.
+-- Supports SQL comparisons via numeric_value and boolean_value.
+
 CREATE TABLE IF NOT EXISTS extracted_facts (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     doc_id          UUID REFERENCES vendor_documents(doc_id),
     org_id          UUID NOT NULL,
     vendor_id       TEXT NOT NULL,
-    criterion_id    TEXT,
-    fact_key        TEXT,
-    fact_value      TEXT,
-    fact_unit       TEXT,
+    setup_id        TEXT REFERENCES evaluation_setups(setup_id),
+    target_id       TEXT NOT NULL,     -- ExtractionTarget.target_id
+    fact_type       TEXT NOT NULL,     -- mirrors ExtractionTarget.fact_type
+    fact_name       TEXT NOT NULL,     -- human readable: "UK delivery locations"
+    text_value      TEXT,              -- raw extracted text
+    numeric_value   NUMERIC,           -- for SQL comparison: fleet_size >= 100
+    boolean_value   BOOLEAN,           -- for yes/no: has_uk_presence = true
+    unit            TEXT,              -- "vehicles" | "percent" | "GBP" | "months"
     confidence      FLOAT,
-    grounding_quote TEXT NOT NULL,
-    source_chunk_id TEXT NOT NULL,
+    grounding_quote TEXT NOT NULL,     -- REQUIRED — verbatim from source
+    source_chunk_id TEXT NOT NULL,     -- links to Qdrant point
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- ── Audit tables ──────────────────────────────────────────────────────
+-- ── Audit and decision tables ─────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS decisions (
     decision_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id          UUID REFERENCES evaluation_runs(run_id),
     org_id          UUID NOT NULL,
     vendor_id       TEXT,
-    decision_type   TEXT,
-    check_id        TEXT,
-    decision        TEXT,
+    decision_type   TEXT,              -- "compliance" | "score" | "ranking" | "final"
+    check_id        TEXT,              -- links to MandatoryCheck.check_id
+    criterion_id    TEXT,              -- links to ScoringCriterion.criterion_id
+    decision        TEXT,              -- "pass" | "fail" | "insufficient_evidence"
     score_value     NUMERIC,
     confidence      FLOAT,
     reasoning       TEXT,
@@ -201,54 +248,116 @@ CREATE TABLE IF NOT EXISTS decisions (
 );
 
 CREATE TABLE IF NOT EXISTS audit_overrides (
-    override_id         UUID PRIMARY KEY,
-    org_id              UUID NOT NULL,
-    run_id              UUID,
-    overridden_by       TEXT NOT NULL,
-    original_decision   JSONB NOT NULL,
-    new_decision        JSONB NOT NULL,
-    reason              TEXT NOT NULL CHECK (length(reason) >= 20),
-    timestamp           TIMESTAMPTZ NOT NULL,
-    approved_by         TEXT
+    override_id       UUID PRIMARY KEY,
+    org_id            UUID NOT NULL,
+    run_id            UUID,
+    overridden_by     TEXT NOT NULL,
+    original_decision JSONB NOT NULL,
+    new_decision      JSONB NOT NULL,
+    reason            TEXT NOT NULL CHECK (length(reason) >= 20),
+    timestamp         TIMESTAMPTZ NOT NULL,
+    approved_by       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS approvals (
-    approval_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id          UUID REFERENCES evaluation_runs(run_id),
-    org_id          UUID NOT NULL,
-    approval_tier   INTEGER NOT NULL,
-    approver_role   TEXT NOT NULL,
-    status          TEXT DEFAULT 'pending',
-    comments        TEXT,
-    requested_at    TIMESTAMPTZ DEFAULT now(),
-    responded_at    TIMESTAMPTZ,
-    sla_deadline    TIMESTAMPTZ
+    approval_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id         UUID REFERENCES evaluation_runs(run_id),
+    org_id         UUID NOT NULL,
+    approval_tier  INTEGER NOT NULL,
+    approver_role  TEXT NOT NULL,
+    status         TEXT DEFAULT 'pending',  -- pending | approved | rejected | expired
+    comments       TEXT,
+    requested_at   TIMESTAMPTZ DEFAULT now(),
+    responded_at   TIMESTAMPTZ,
+    sla_deadline   TIMESTAMPTZ
 );
 
 -- ── Row level security ────────────────────────────────────────────────
+-- Policies enforce org isolation at the database level.
+-- Even if application code has a bug, the database rejects cross-org queries.
+-- app.current_org_id is set per request in FastAPI middleware.
 
-ALTER TABLE vendor_documents     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evaluation_setups        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evaluation_runs          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vendor_documents         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE extracted_certifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE extracted_insurance  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE extracted_slas       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE extracted_projects   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE extracted_pricing    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE extracted_facts      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE decisions            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_overrides      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE extracted_insurance      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE extracted_slas           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE extracted_projects       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE extracted_pricing        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE extracted_facts          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE decisions                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_overrides          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approvals                ENABLE ROW LEVEL SECURITY;
 
--- Policies enforce org isolation at database level
-CREATE POLICY IF NOT EXISTS org_iso_vendor_docs
+-- org isolation policy — same pattern for every table
+CREATE POLICY IF NOT EXISTS rls_evaluation_setups
+    ON evaluation_setups USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_evaluation_runs
+    ON evaluation_runs USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_vendor_docs
     ON vendor_documents USING (
         org_id::text = current_setting('app.current_org_id', true)
     );
 
-CREATE POLICY IF NOT EXISTS org_iso_decisions
+CREATE POLICY IF NOT EXISTS rls_certifications
+    ON extracted_certifications USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_insurance
+    ON extracted_insurance USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_slas
+    ON extracted_slas USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_projects
+    ON extracted_projects USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_pricing
+    ON extracted_pricing USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_extracted_facts
+    ON extracted_facts USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_decisions
     ON decisions USING (
         org_id::text = current_setting('app.current_org_id', true)
     );
 
+CREATE POLICY IF NOT EXISTS rls_audit_overrides
+    ON audit_overrides USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
+CREATE POLICY IF NOT EXISTS rls_approvals
+    ON approvals USING (
+        org_id::text = current_setting('app.current_org_id', true)
+    );
+
 -- ── Indexes ───────────────────────────────────────────────────────────
+
+CREATE INDEX IF NOT EXISTS idx_setups_org_rfp
+    ON evaluation_setups(org_id, rfp_id);
+
+CREATE INDEX IF NOT EXISTS idx_runs_org_rfp
+    ON evaluation_runs(org_id, rfp_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_vendor_docs_org_vendor
     ON vendor_documents(org_id, vendor_id, rfp_id);
@@ -267,19 +376,38 @@ CREATE INDEX IF NOT EXISTS idx_projects_org_vendor
 
 CREATE INDEX IF NOT EXISTS idx_pricing_org_vendor
     ON extracted_pricing(org_id, vendor_id);
+
+-- extracted_facts needs three indexes — queried by setup, target, and vendor
+CREATE INDEX IF NOT EXISTS idx_facts_org_vendor
+    ON extracted_facts(org_id, vendor_id);
+
+CREATE INDEX IF NOT EXISTS idx_facts_setup_target
+    ON extracted_facts(setup_id, target_id);
+
+CREATE INDEX IF NOT EXISTS idx_facts_numeric
+    ON extracted_facts(org_id, vendor_id, target_id, numeric_value)
+    WHERE numeric_value IS NOT NULL;
 ```
 
 Run it:
+
 ```bash
 psql -U platformuser -d agenticplatform -h localhost -f app/db/schema.sql
 echo "Schema created"
 ```
 
 <!-- CHECKPOINT -->
+
 ```bash
 python checkpoint_runner.py SK03-CP01
 # Must show all tables exist
 ```
+
+> **NOTE — User and authorisation tables are in Skill 01b (separate skill).**
+> Users, roles, sessions, group memberships, and department-level RLS policies
+> are NOT in this schema. They will be added in a dedicated skill after the
+> core evaluation pipeline is working. For now, org-level RLS is sufficient
+> to protect tenant isolation during development.
 
 ---
 
@@ -458,16 +586,51 @@ def save_extraction_output(
                 "source_chunk_id": price.source_chunk_id,
             })
 
+        # Generic extracted_facts — customer-defined criteria
+        # These come from ExtractionTarget with any fact_type
+        for fact in output.extracted_facts:
+            conn.execute(sa.text("""
+                INSERT INTO extracted_facts (
+                    doc_id, org_id, vendor_id, setup_id,
+                    target_id, fact_type, fact_name,
+                    text_value, numeric_value, boolean_value, unit,
+                    confidence, grounding_quote, source_chunk_id
+                ) VALUES (
+                    :doc_id, :org_id, :vendor_id, :setup_id,
+                    :target_id, :fact_type, :fact_name,
+                    :text_value, :numeric_value, :boolean_value, :unit,
+                    :confidence, :grounding_quote, :source_chunk_id
+                ) ON CONFLICT DO NOTHING
+            """), {
+                "doc_id": doc_id,
+                "org_id": output.org_id,
+                "vendor_id": output.vendor_id,
+                "setup_id": getattr(output, "setup_id", None),
+                "target_id": fact.target_id,
+                "fact_type": fact.fact_type,
+                "fact_name": fact.fact_name,
+                "text_value": fact.text_value,
+                "numeric_value": fact.numeric_value,
+                "boolean_value": fact.boolean_value,
+                "unit": getattr(fact, "unit", None),
+                "confidence": fact.confidence,
+                "grounding_quote": fact.grounding_quote,
+                "source_chunk_id": fact.source_chunk_id,
+            })
+
         conn.commit()
 
 
 def get_vendor_facts(
     org_id: str,
-    vendor_id: str
+    vendor_id: str,
+    setup_id: str = None
 ) -> dict:
     """
     Retrieves all structured facts for a vendor.
     Used by the Evaluation Agent instead of Qdrant search.
+    Pass setup_id to also retrieve customer-defined facts
+    for that specific evaluation setup.
     """
     engine = get_engine()
 
@@ -502,16 +665,66 @@ def get_vendor_facts(
             ORDER BY year ASC
         """), {"org_id": org_id, "vendor_id": vendor_id}).fetchall()
 
+        # Customer-defined facts — filtered by setup_id if provided
+        facts_query = """
+            SELECT * FROM extracted_facts
+            WHERE org_id = :org_id AND vendor_id = :vendor_id
+        """
+        facts_params = {"org_id": org_id, "vendor_id": vendor_id}
+        if setup_id:
+            facts_query += " AND setup_id = :setup_id"
+            facts_params["setup_id"] = setup_id
+        facts_query += " ORDER BY target_id, confidence DESC"
+
+        facts = conn.execute(
+            sa.text(facts_query), facts_params
+        ).fetchall()
+
     return {
         "certifications": [dict(r._mapping) for r in certs],
         "insurance": [dict(r._mapping) for r in insurance],
         "slas": [dict(r._mapping) for r in slas],
         "projects": [dict(r._mapping) for r in projects],
         "pricing": [dict(r._mapping) for r in pricing],
+        "extracted_facts": [dict(r._mapping) for r in facts],
     }
+
+
+def save_evaluation_setup(setup_dict: dict, org_id: str) -> None:
+    """
+    Persists an EvaluationSetup to the database as a JSONB blob.
+    Called from the API when the customer confirms their criteria on Page 4b.
+    The setup_id in the dict is the primary key.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        conn.execute(sa.text("""
+            INSERT INTO evaluation_setups (
+                setup_id, org_id, department, rfp_id,
+                setup_json, confirmed_by, confirmed_at, source
+            ) VALUES (
+                :setup_id, :org_id, :department, :rfp_id,
+                :setup_json, :confirmed_by, :confirmed_at, :source
+            ) ON CONFLICT (setup_id) DO UPDATE SET
+                setup_json = EXCLUDED.setup_json,
+                confirmed_at = EXCLUDED.confirmed_at
+        """), {
+            "setup_id": setup_dict["setup_id"],
+            "org_id": org_id,
+            "department": setup_dict.get("department", "unknown"),
+            "rfp_id": setup_dict["rfp_id"],
+            "setup_json": sa.text(
+                f"'{__import__('json').dumps(setup_dict)}'::jsonb"
+            ),
+            "confirmed_by": setup_dict.get("confirmed_by", "system"),
+            "confirmed_at": setup_dict.get("confirmed_at"),
+            "source": setup_dict.get("source", "manually_defined"),
+        })
+        conn.commit()
 ```
 
 <!-- CHECKPOINT -->
+
 ```bash
 python checkpoint_runner.py SK03-CP02
 ```
@@ -597,15 +810,15 @@ def get_sparse_embedding(text: str) -> tuple[list[int], list[float]]:
 def classify_section(
     section_text: str,
     section_title: str,
-    config: dict
+    evaluation_setup: "EvaluationSetup"
 ) -> str:
     """
     Classifies a section as requirement_response, supporting_evidence,
     background, or boilerplate.
 
-    Uses the evaluation config to identify requirement-response sections.
-    Sections that match mandatory check or scoring criterion keywords
-    are classified as requirement_response.
+    Uses the customer-confirmed EvaluationSetup to identify which sections
+    are relevant — not a hardcoded config dict. This means classification
+    adapts to whatever criteria the customer defined on Page 4b.
     """
     title_lower = section_title.lower()
     text_lower = section_text.lower()
@@ -627,28 +840,35 @@ def classify_section(
     if any(m in text_lower for m in background_markers):
         return "background"
 
-    # Check against evaluation config for requirement_response
-    all_search_queries = []
-    for check in config.get(
-        "evaluation_rules", {}
-    ).get("mandatory_checks", []):
-        all_search_queries.append(
-            check.get("search_query", "").lower()
-        )
-    for crit in config.get(
-        "evaluation_rules", {}
-    ).get("scoring_criteria", []):
-        all_search_queries.append(
-            crit.get("search_query", "").lower()
-        )
+    # Build keyword list from customer-defined criteria
+    # This is the key change — keywords come from EvaluationSetup,
+    # not from a hardcoded config dict. A logistics evaluation will
+    # match "fleet" and "delivery". An HR evaluation will match
+    # "payroll" and "onboarding". Same code, different config.
+    all_keywords = []
 
-    # If section title or text contains requirement-related keywords
-    for query in all_search_queries:
-        keywords = query.split()[:3]  # Use first 3 words of query
-        if any(kw in title_lower or kw in text_lower for kw in keywords):
+    for check in evaluation_setup.mandatory_checks:
+        # Use check name and description as keyword sources
+        words = (check.name + " " + check.description).lower().split()
+        all_keywords.extend(w for w in words if len(w) > 3)
+
+    for criterion in evaluation_setup.scoring_criteria:
+        words = criterion.name.lower().split()
+        all_keywords.extend(w for w in words if len(w) > 3)
+
+    for target in evaluation_setup.extraction_targets:
+        words = (target.name + " " + target.description).lower().split()
+        all_keywords.extend(w for w in words if len(w) > 3)
+
+    # Deduplicate
+    all_keywords = list(set(all_keywords))
+
+    # If section title or text contains any customer-defined keyword
+    for kw in all_keywords:
+        if kw in title_lower or kw in text_lower:
             return "requirement_response"
 
-    # Certifications, insurance, SLAs are always supporting_evidence
+    # Standard evidence markers — always supporting_evidence
     evidence_markers = [
         "certificate", "certification", "insurance", "sla",
         "service level", "case study", "project reference",
@@ -665,7 +885,7 @@ def process_document(
     filename: str,
     vendor_id: str,
     org_id: str,
-    config: dict
+    evaluation_setup: "EvaluationSetup"
 ) -> list[dict]:
     """
     Full LlamaIndex processing pipeline.
@@ -739,7 +959,7 @@ def process_document(
             "section_id",
             _generate_section_id(section_title)
         )
-        section_type = classify_section(text, section_title, config)
+        section_type = classify_section(text, section_title, evaluation_setup)
 
         # Priority: requirement_response = 1, supporting = 2, rest = 3
         priority_map = {
@@ -809,6 +1029,7 @@ def _generate_section_id(title: str) -> str:
 ```
 
 <!-- CHECKPOINT -->
+
 ```bash
 python checkpoint_runner.py SK03-CP03
 ```
@@ -908,7 +1129,7 @@ def validate_zip_contents(
 
 ## STEP 5 — Create the Ingestion Agent
 
-```python
+````python
 # app/agents/ingestion.py
 """
 Ingestion Agent — the entry point for all documents.
@@ -931,16 +1152,16 @@ from app.config import settings
 
 MODAL_THRESHOLD_PAGES = 50  # PDFs above this go to Modal
 
-async def dispatch_extraction(file_bytes: bytes, filename: str, 
+async def dispatch_extraction(file_bytes: bytes, filename: str,
                                org_id: str, vendor_id: str, run_id: str):
     """Routes to local or Modal extraction based on document size."""
     from app.core.ingestion_validator import estimate_page_count, is_scanned_pdf
-    
+
     page_count = estimate_page_count(file_bytes, filename)
     is_scanned = is_scanned_pdf(file_bytes) if filename.endswith('.pdf') else False
-    
+
     use_modal = page_count > MODAL_THRESHOLD_PAGES or is_scanned
-    
+
     if use_modal:
         # Import Modal function — runs serverless, no timeout limits
         import modal
@@ -964,79 +1185,80 @@ async def dispatch_extraction(file_bytes: bytes, filename: str,
             run_id=run_id,
         )
         return result.model_dump()
-```
+````
+
 - Duplicate detection
 - Quality validation
 - LlamaIndex processing → Qdrant storage
 - Immediate Extraction Agent trigger on req_response sections
 - Critic Agent check after ingestion
-"""
-import io
-import uuid
-import zipfile
-import hashlib
-from app.core.output_models import IngestionOutput, SectionType
-from app.core.llamaindex_pipeline import process_document
-from app.core.ingestion_validator import (
-    compute_content_hash,
-    validate_extracted_text,
-    validate_zip_contents
-)
-from app.core.qdrant_client import (
-    get_qdrant_client,
-    collection_name,
-    create_collection,
-    upsert_chunk
-)
-from app.agents.critic import critic_after_ingestion
-from app.config import settings
-
+  """
+  import io
+  import uuid
+  import zipfile
+  import hashlib
+  from app.core.output_models import IngestionOutput, SectionType, EvaluationSetup
+  from app.core.llamaindex_pipeline import process_document
+  from app.core.ingestion_validator import (
+  compute_content_hash,
+  validate_extracted_text,
+  validate_zip_contents
+  )
+  from app.core.qdrant_client import (
+  get_qdrant_client,
+  collection_name,
+  create_collection,
+  upsert_chunk
+  )
+  from app.agents.critic import critic_after_ingestion
+  from app.config import settings
 
 async def run_ingestion_agent(
-    content: bytes,
-    filename: str,
-    vendor_id: str,
-    org_id: str,
-    rfp_id: str,
-    agent_config: dict
+content: bytes,
+filename: str,
+vendor_id: str,
+org_id: str,
+rfp_id: str,
+evaluation_setup: "EvaluationSetup"
 ) -> tuple[IngestionOutput, list]:
-    """
-    Main ingestion entry point.
-    Returns (IngestionOutput, critic_output_list).
+"""
+Main ingestion entry point.
+Returns (IngestionOutput, critic_output_list).
 
     Handles both single files and ZIP archives.
+    Accepts EvaluationSetup so section classification uses
+    the customer-confirmed criteria, not a generic config dict.
     """
     # Handle ZIP files
     if filename.lower().endswith(".zip"):
         return await _ingest_zip(
             content, filename, vendor_id,
-            org_id, rfp_id, agent_config
+            org_id, rfp_id, evaluation_setup
         )
 
     return await _ingest_single_file(
         content, filename, vendor_id,
-        org_id, rfp_id, agent_config
+        org_id, rfp_id, evaluation_setup
     )
 
-
-async def _ingest_zip(
-    content: bytes,
-    zip_filename: str,
-    vendor_id: str,
-    org_id: str,
-    rfp_id: str,
-    agent_config: dict
+async def \_ingest_zip(
+content: bytes,
+zip_filename: str,
+vendor_id: str,
+org_id: str,
+rfp_id: str,
+evaluation_setup: "EvaluationSetup"
 ) -> tuple[IngestionOutput, list]:
-    """
-    Unpacks ZIP and processes each file as part of the same vendor.
-    """
-    try:
-        with zipfile.ZipFile(io.BytesIO(content)) as zf:
-            file_list = [
-                f for f in zf.namelist()
-                if not f.startswith("__MACOSX")
-                and not f.endswith("/")
-            ]
+"""
+Unpacks ZIP and processes each file as part of the same vendor.
+"""
+try:
+with zipfile.ZipFile(io.BytesIO(content)) as zf:
+file_list = [
+f for f in zf.namelist()
+if not f.startswith("__MACOSX")
+and not f.endswith("/")
+]
 
             is_valid, accepted, warning = validate_zip_contents(file_list)
 
@@ -1063,7 +1285,7 @@ async def _ingest_zip(
                 file_bytes = zf.read(fname)
                 output, critics = await _ingest_single_file(
                     file_bytes, fname, vendor_id,
-                    org_id, rfp_id, agent_config
+                    org_id, rfp_id, evaluation_setup
                 )
                 all_outputs.append(output)
                 all_critics.extend(critics)
@@ -1118,23 +1340,24 @@ async def _ingest_zip(
             status="failed"
         ), []
 
-
-async def _ingest_single_file(
-    content: bytes,
-    filename: str,
-    vendor_id: str,
-    org_id: str,
-    rfp_id: str,
-    agent_config: dict
+async def \_ingest_single_file(
+content: bytes,
+filename: str,
+vendor_id: str,
+org_id: str,
+rfp_id: str,
+evaluation_setup: "EvaluationSetup"
 ) -> tuple[IngestionOutput, list]:
-    """Processes a single document file."""
-    doc_id = str(uuid.uuid4())
-    content_hash = compute_content_hash(content)
-    warnings = []
+"""Processes a single document file."""
+doc_id = str(uuid.uuid4())
+content_hash = compute_content_hash(content)
+warnings = []
 
     # Process with LlamaIndex
+    # Pass evaluation_setup so section classification uses
+    # customer-confirmed criteria not a generic config dict
     chunks = process_document(
-        content, filename, vendor_id, org_id, agent_config
+        content, filename, vendor_id, org_id, evaluation_setup
     )
 
     if not chunks:
@@ -1229,13 +1452,14 @@ async def _ingest_single_file(
     critic = critic_after_ingestion(output)
 
     return output, [critic]
-```
+
+````
 
 <!-- CHECKPOINT -->
 ```bash
 python checkpoint_runner.py SK03-CP04
 python checkpoint_runner.py SK03-CP05
-```
+````
 
 ---
 

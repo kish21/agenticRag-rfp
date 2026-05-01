@@ -327,9 +327,13 @@ url = f'postgresql://{settings.postgres_user}:{settings.postgres_password}@{sett
 engine = sa.create_engine(url)
 inspector = sa.inspect(engine)
 tables = set(inspector.get_table_names())
-required = {'vendor_documents','extracted_certifications','extracted_insurance',
-            'extracted_slas','extracted_projects','extracted_pricing',
-            'extracted_facts','decisions','audit_overrides','approvals'}
+required = {'organisations','agent_registry',
+            'evaluation_setups','evaluation_runs',
+            'vendor_documents','extracted_certifications',
+            'extracted_insurance','extracted_slas',
+            'extracted_projects','extracted_pricing',
+            'extracted_facts','decisions',
+            'audit_overrides','approvals'}
 missing = required - tables
 if missing:
     print('MISSING:', missing)
@@ -351,9 +355,50 @@ print('fact store ok')
 
 def SK03_CP03():
     c, o = _run("""python -c "
+import os; os.environ['SKIP_EMBEDDINGS'] = 'true'
 from app.core.llamaindex_pipeline import process_document
-content = b'''1. Security Requirements\\nThe vendor must hold ISO 27001 certification.\\n\\n2. Commercial Terms\\nTotal contract value not to exceed 1 million pounds annually.'''
-chunks = process_document(content, 'test.txt', 'vendor-test', 'org-test', {})
+from app.core.output_models import (
+    EvaluationSetup, MandatoryCheck, ScoringCriterion, ExtractionTarget
+)
+from datetime import datetime
+setup = EvaluationSetup(
+    setup_id='test-setup-cp03',
+    org_id='test-org',
+    department='procurement',
+    rfp_id='test-rfp',
+    rfp_confirmed=True,
+    mandatory_checks=[MandatoryCheck(
+        check_id='MC-001',
+        name='ISO 27001 certification',
+        description='Vendor must hold current ISO 27001',
+        what_passes='Current certificate from accredited body',
+        extraction_target_id='target-001'
+    )],
+    scoring_criteria=[ScoringCriterion(
+        criterion_id='SC-001',
+        name='Technical capability',
+        weight=1.0,
+        rubric_9_10='Outstanding',
+        rubric_6_8='Good',
+        rubric_3_5='Adequate',
+        rubric_0_2='Insufficient',
+        extraction_target_ids=['target-001']
+    )],
+    extraction_targets=[ExtractionTarget(
+        target_id='target-001',
+        name='ISO certification',
+        description='ISO 27001 certification status',
+        fact_type='certification',
+        is_mandatory=True,
+        feeds_check_id='MC-001'
+    )],
+    total_weight=1.0,
+    confirmed_by='test-user',
+    confirmed_at=datetime.utcnow(),
+    source='manually_defined'
+)
+content = b'2.1 Security Requirements\\nThe vendor must hold ISO 27001 certification.\\n\\n2.2 Insurance\\nProfessional indemnity insurance of 5 million pounds.'
+chunks = process_document(content, 'test.txt', 'vendor-test', 'org-test', setup)
 assert len(chunks) > 0, f'Expected chunks, got 0'
 print('llamaindex pipeline ok, chunks:', len(chunks))
 " """)
@@ -374,26 +419,60 @@ print('validator ok')
 
 def SK03_CP05():
     c, o = _run("""python -c "
+import os; os.environ['SKIP_EMBEDDINGS'] = 'true'
 from app.agents.ingestion import run_ingestion_agent
+from app.core.output_models import (
+    EvaluationSetup, MandatoryCheck, ScoringCriterion, ExtractionTarget
+)
+from datetime import datetime
 import asyncio
-content = b'Section 2.1 ISO 27001 Certification\\nWe hold current ISO 27001:2022 certification issued by BSI Group. Certificate number ISO27001-TEST-001.\\n\\nSection 2.2 Insurance\\nWe hold professional indemnity insurance of 5 million pounds.'
+setup = EvaluationSetup(
+    setup_id='test-setup-cp05',
+    org_id='test-org',
+    department='procurement',
+    rfp_id='test-rfp',
+    rfp_confirmed=True,
+    mandatory_checks=[MandatoryCheck(
+        check_id='MC-001',
+        name='ISO 27001 certification',
+        description='Vendor must hold current ISO 27001',
+        what_passes='Current certificate from accredited body',
+        extraction_target_id='target-001'
+    )],
+    scoring_criteria=[ScoringCriterion(
+        criterion_id='SC-001',
+        name='Technical capability',
+        weight=1.0,
+        rubric_9_10='Outstanding',
+        rubric_6_8='Good',
+        rubric_3_5='Adequate',
+        rubric_0_2='Insufficient',
+        extraction_target_ids=['target-001']
+    )],
+    extraction_targets=[ExtractionTarget(
+        target_id='target-001',
+        name='ISO certification',
+        description='ISO 27001 certification status',
+        fact_type='certification',
+        is_mandatory=True,
+        feeds_check_id='MC-001'
+    )],
+    total_weight=1.0,
+    confirmed_by='test-user',
+    confirmed_at=datetime.utcnow(),
+    source='manually_defined'
+)
+content = b'Section 2.1 ISO 27001\\nWe hold current ISO 27001:2022 certification issued by BSI Group.\\n\\nSection 2.2 Insurance\\nWe hold professional indemnity insurance of 5 million pounds.'
 output, critics = asyncio.run(run_ingestion_agent(
     content=content,
     filename='test_vendor.txt',
     vendor_id='test-vendor',
     org_id='test-org',
     rfp_id='test-rfp',
-    agent_config={
-        'evaluation_rules': {
-            'mandatory_checks': [
-                {'check_id':'MC-001','search_query':'ISO 27001 certification'}
-            ],
-            'scoring_criteria': []
-        }
-    }
+    evaluation_setup=setup
 ))
 assert output.total_chunks > 0, f'Expected chunks: {output.total_chunks}'
-assert output.status in ['success','partial']
+assert output.status in ['success', 'partial']
 print('ingestion ok, chunks:', output.total_chunks, 'quality:', output.quality_score)
 " """)
     return (c == 0 and "ingestion ok" in o, o[:300])
