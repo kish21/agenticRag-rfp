@@ -1,0 +1,77 @@
+# Secrets — never commit
+.env
+*.env.local
+*.env.*.local
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data (can be large / sensitive)
+data/documents/
+data/qdrant/
+data/seed/
+
+# Test results & coverage
+test_results/
+*.xml
+*.html
+.coverage
+htmlcov/
+coverage.xml
+
+# Logs
+*.log
+logs/
+langsmith_logs/
+langfuse_logs/
+traces/
+evals/
+*.jsonl
+
+# Build state & checkpoint artifacts (regenerate automatically)
+build_state.json
+daily_build_log.md
+
+# Platform runtime outputs (contain real RFP/vendor data)
+output/
+app/output/*.pdf
+*.db
+
+# Temp / scratch
+tmp/
+scratch/
+*.tmp
+*.bak
+
+# Node / Frontend
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Modal
+.modal/
+
+# Claude Code session files
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

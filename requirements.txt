@@ -1,0 +1,70 @@
+# ═══════════════════════════════════════════════════════
+# requirements.txt — updated to latest compatible versions May 2026
+# ═══════════════════════════════════════════════════════
+# Install: pip install -r requirements.txt
+# Verify:  pip check  (must return no errors)
+
+# ── LLM and agent orchestration ──────────────────────────
+openai==2.33.0              # used by OpenAI + OpenRouter providers
+anthropic==0.97.0           # updated: langchain-anthropic 1.4.2 requires >=0.96.0
+langchain==1.2.16           # langchain 1.x — new import paths vs 0.x
+langchain-openai==1.2.1     # updated: 1.x required for langchain-core 1.x
+langchain-anthropic==1.4.2  # updated: 1.x required for langchain-core 1.x
+langchain-community==0.4.1  # updated: 0.4.x compatible with langchain-core 1.x
+langgraph==1.1.10           # updated: langchain 1.2.16 requires >=1.1.10,<1.2.0
+langsmith==0.8.0            # updated: langchain-community 0.4.1 requires 0.8.0
+langfuse==4.5.1             # SDK REWRITTEN in v4 March 2026 — NOT backwards compatible with v2.x
+
+# ── LlamaIndex for document processing ───────────────────
+llama-index-core==0.14.21           # updated: latest stable
+llama-index-vector-stores-qdrant==0.10.0  # updated: latest
+llama-index-embeddings-openai==0.6.0      # updated: latest
+llama-index-retrievers-bm25==0.7.1        # updated: latest
+# NOTE: in llama-index 0.12.x, install core + integrations separately
+
+# ── Vector database ───────────────────────────────────────
+qdrant-client==1.17.1       # updated: llama-index-vector-stores-qdrant 0.10.0 requires >=1.16.0
+
+# ── Reranking ─────────────────────────────────────────────
+cohere==5.21.1              # use cohere.ClientV2() not cohere.Client()
+sentence-transformers==4.1.0  # CrossEncoder API updated in 4.x
+# ColBERT reranking: from sentence_transformers import CrossEncoder
+
+# ── BM25 keyword search ───────────────────────────────────
+rank-bm25==0.2.2
+
+# ── Web framework ─────────────────────────────────────────
+fastapi==0.136.1
+uvicorn[standard]==0.34.3
+python-multipart==0.0.18    # required by fastapi for file uploads
+
+# ── Document parsing ──────────────────────────────────────
+pypdf==5.4.0
+python-docx==1.1.2
+pandas==2.2.3
+openpyxl==3.1.5
+python-magic==0.4.27
+
+# ── Database ──────────────────────────────────────────────
+psycopg2-binary==2.9.10
+sqlalchemy==2.0.40
+alembic==1.14.1
+
+# ── HTTP and utilities ────────────────────────────────────
+httpx==0.28.1
+python-dotenv==1.1.0
+pydantic-settings==2.14.0   # updated: langchain-community 0.4.1 requires >=2.10.1
+pydantic==2.13.3            # updated: latest; use @field_validator in all new code (v2 style)
+tenacity==9.0.0
+
+# ── Output generation ─────────────────────────────────────
+reportlab==4.2.5
+weasyprint==63.1
+
+# ── Deployment ────────────────────────────────────────────
+modal>=0.64.0               # floor constraint — always installs latest stable
+
+# ── Testing and dev ───────────────────────────────────────
+pytest==8.3.5
+pytest-asyncio==0.25.3
+faker==37.0.0
