@@ -27,10 +27,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:72b"
 
-    # LangSmith
-    langchain_tracing_v2: bool = True
-    langchain_api_key: str = ""
-    langchain_project: str = "agentic-platform-dev"
+    # LangSmith (new SDK uses LANGSMITH_* prefix — v0.2+)
+    langsmith_tracing: bool = True
+    langsmith_api_key: str = ""
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "agentic-platform-dev"
 
     # LangFuse
     langfuse_public_key: str = ""
