@@ -50,6 +50,7 @@ platform_secrets = Secret.from_name("agentic-platform-secrets")
     timeout=600,
     memory=2048,
     cpu=2,
+    min_containers=0,  # cold start only — no idle billing
 )
 async def extract_pdf_on_modal(
     file_bytes: bytes,
@@ -75,27 +76,39 @@ async def extract_pdf_on_modal(
     return result.model_dump()
 
 
-@app.function(
-    image=pdf_image,
-    secrets=[platform_secrets],
-    schedule=modal.Period(hours=24),
-)
-async def daily_cleanup():
-    """Daily cleanup: removes orphaned evaluation runs, failed ingestion chunks, expired sessions."""
-    from app.jobs.cleanup import run_cleanup
-    result = await run_cleanup()
-    print(f"Cleanup complete: {result}")
+# ── PRODUCTION TODO ───────────────────────────────────────────────────────────
+# daily_cleanup and rate_monitor are disabled until PostgreSQL moves to cloud.
+# Both functions connect directly to the database and cannot reach localhost.
+# To re-enable for production:
+#   1. Provision a cloud PostgreSQL (Neon / Supabase / Railway)
+#   2. Update POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER / POSTGRES_PASSWORD
+#      in the Modal secret: modal secret create agentic-platform-secrets ... --env rag
+#   3. Uncomment the two functions below and redeploy: modal deploy app_modal.py --env rag
+# ─────────────────────────────────────────────────────────────────────────────
+
+# @app.function(
+#     image=pdf_image,
+#     secrets=[platform_secrets],
+#     schedule=modal.Period(hours=24),
+#     min_containers=0,
+# )
+# async def daily_cleanup():
+#     """Daily cleanup: removes orphaned runs, expired chunks. Needs cloud PostgreSQL."""
+#     from app.jobs.cleanup import run_cleanup
+#     result = await run_cleanup()
+#     print(f"Cleanup complete: {result}")
 
 
-@app.function(
-    image=pdf_image,
-    secrets=[platform_secrets],
-    schedule=modal.Period(minutes=30),
-)
-async def rate_monitor():
-    """Every 30 minutes: check LangFuse for hard flag rate spikes. Alerts via Slack if >5%."""
-    from app.jobs.rate_monitor import check_flag_rates
-    await check_flag_rates()
+# @app.function(
+#     image=pdf_image,
+#     secrets=[platform_secrets],
+#     schedule=modal.Period(minutes=30),
+#     min_containers=0,
+# )
+# async def rate_monitor():
+#     """Every 30 minutes: check LangFuse for hard flag rate spikes. Needs cloud PostgreSQL."""
+#     from app.jobs.rate_monitor import check_flag_rates
+#     await check_flag_rates()
 
 
 if __name__ == "__main__":

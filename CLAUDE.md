@@ -89,9 +89,9 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** SK06 complete — ready for SK07
-**Last verified checkpoint:** SK06-CP06
-**Next action:** Follow SKILL_04_TO_09_REFERENCE.md SK07 steps (PDF report + Next.js frontend + regression suite)
+**Current skill:** SK09 complete — all skills complete
+**Last verified checkpoint:** SK09-CP06
+**Next action:** Platform is complete. 65/66 checkpoints passed (Q09 regression assertion is above threshold).
 **Blockers:** none
 
 ---

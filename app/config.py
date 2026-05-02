@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     postgres_user: str = "platformuser"
     postgres_password: str = ""
 
+    # Auth
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_minutes: int = 480  # 8 hours
+
+    # Default dev user (never use in production)
+    dev_user_email: str = "dev@platform.local"
+    dev_user_password: str = "devpassword2026"
+    dev_org_id: str = "test-org"
+    dev_user_role: str = "company_admin"
+
     # Slack
     slack_bot_token: str = ""
     slack_channel_id: str = ""

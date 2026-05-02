@@ -772,6 +772,153 @@ def SK06_CP06():
     )
 
 
+# ── SKILL 01b ─────────────────────────────────────────────────────────
+
+def SK01b_CP01():
+    code, out = _run("""python -c "
+from app.core.auth import create_access_token, decode_token
+token = create_access_token(
+    email='test@test.com',
+    org_id='org-001',
+    role='department_user'
+)
+assert token.access_token
+assert token.org_id == 'org-001'
+assert token.role == 'department_user'
+decoded = decode_token(token.access_token)
+assert decoded.email == 'test@test.com'
+assert decoded.org_id == 'org-001'
+assert decoded.role == 'department_user'
+print('JWT creation and decoding ok')
+" """)
+    return (code == 0 and "ok" in out, out[:200])
+
+
+def SK01b_CP02():
+    code, out = _run("""python -c "
+from app.api.auth_routes import router
+routes = [r.path for r in router.routes]
+assert '/api/v1/auth/token' in routes, f'Token route missing. Found: {routes}'
+assert '/api/v1/auth/me' in routes, f'Me route missing. Found: {routes}'
+print('Auth routes ok:', routes)
+" """)
+    return (code == 0 and "Auth routes ok" in out, out[:200])
+
+
+def SK01b_CP03():
+    import subprocess, time, httpx
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "app.main:create_app",
+         "--factory", "--port", "18001", "--log-level", "error"],
+        cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "PYTHONUTF8": "1"}
+    )
+    time.sleep(4)
+    try:
+        r = httpx.get("http://localhost:18001/health", timeout=5)
+        passed = r.status_code == 200 and "healthy" in r.text
+        return passed, f"FastAPI with auth: {r.text[:80]}"
+    except Exception as e:
+        return False, f"Server not reachable: {e}"
+    finally:
+        proc.terminate()
+        proc.wait()
+
+
+def SK01b_CP04():
+    import subprocess, time, httpx
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "app.main:create_app",
+         "--factory", "--port", "18002", "--log-level", "error"],
+        cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "PYTHONUTF8": "1"}
+    )
+    time.sleep(4)
+    try:
+        r = httpx.post(
+            "http://localhost:18002/api/v1/auth/token",
+            json={"email": "dev@platform.local",
+                  "password": "devpassword2026",
+                  "org_id": "test-org"},
+            timeout=5
+        )
+        passed = r.status_code == 200 and "access_token" in r.text
+        return passed, f"Token endpoint: {r.text[:150]}"
+    except Exception as e:
+        return False, f"Server not reachable: {e}"
+    finally:
+        proc.terminate()
+        proc.wait()
+
+
+def SK01b_CP05():
+    code, out = _run("""python -c "
+from app.core.auth import create_access_token, decode_token, require_role, TokenData
+token = create_access_token(
+    email='user@test.com',
+    org_id='org-001',
+    role='department_user'
+)
+decoded = decode_token(token.access_token)
+checker = require_role('company_admin', 'platform_admin')
+try:
+    checker(decoded)
+    print('FAIL: should have raised')
+except Exception as e:
+    print('role enforcement ok:', str(e)[:60])
+" """)
+    return (code == 0 and "role enforcement ok" in out, out[:200])
+
+
+def SK01b_CP06():
+    import subprocess, time, httpx
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "app.main:create_app",
+         "--factory", "--port", "18003", "--log-level", "error"],
+        cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "PYTHONUTF8": "1"}
+    )
+    time.sleep(4)
+    try:
+        r = httpx.get(
+            "http://localhost:18003/api/v1/auth/me",
+            headers={"Authorization": "Bearer invalidtoken123"},
+            timeout=5
+        )
+        passed = r.status_code == 401
+        return passed, f"Invalid token returns {r.status_code}: {r.text[:80]}"
+    except Exception as e:
+        return False, f"Server not reachable: {e}"
+    finally:
+        proc.terminate()
+        proc.wait()
+
+
+def SK01b_CP07():
+    code, out = _run("""python -c "
+import os, re
+agent_dir = 'app/agents'
+violations = []
+for fname in os.listdir(agent_dir):
+    if not fname.endswith('.py'):
+        continue
+    fpath = os.path.join(agent_dir, fname)
+    content = open(fpath).read()
+    lines = content.split('\\\\n')
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if 'test-org' in line and not stripped.startswith('#'):
+            violations.append(f'{fname}:{i}: {stripped[:60]}')
+if violations:
+    print('HARDCODED org_id found:')
+    for v in violations:
+        print(' ', v)
+else:
+    print('no hardcoded org_id in agent files ok')
+" """)
+    return (code == 0 and "ok" in out, out[:300])
+
+
 # ── SKILL 07 ──────────────────────────────────────────────────────────
 
 def SK07_CP01():
@@ -800,20 +947,46 @@ print('PDF generated:', len(pdf), 'bytes')
     return (c == 0 and "PDF generated" in o, o[:200])
 
 def SK07_CP03():
-    c, o = _run("cd frontend && npm run build 2>&1 | tail -3")
-    return (c == 0 and ("built" in o.lower() or "export" in o.lower()), o[:200])
+    import subprocess, shutil
+    npm = shutil.which("npm") or "npm"
+    r = subprocess.run(
+        [npm, "run", "build"],
+        cwd=str(ROOT / "frontend"),
+        capture_output=True, text=True, shell=(sys.platform == "win32"),
+        env={**os.environ, "PYTHONUTF8": "1"}
+    )
+    out = (r.stdout + r.stderr)[-600:]
+    passed = r.returncode == 0 and any(
+        kw in out.lower() for kw in ("built", "export", "route", "compiled", "static")
+    )
+    return passed, out[-200:]
 
 def SK07_CP04():
-    c, o = _run("ls frontend/pages/confirm* 2>/dev/null || ls frontend/app/confirm* 2>/dev/null")
-    return (c == 0, "RFP confirmation page exists" if c == 0 else "RFP confirmation page not found")
+    import glob as _glob
+    patterns = [
+        str(ROOT / "frontend" / "pages" / "confirm*"),
+        str(ROOT / "frontend" / "app" / "confirm*"),
+        str(ROOT / "frontend" / "app" / "*" / "confirm" / "page*"),
+    ]
+    found = []
+    for p in patterns:
+        found.extend(_glob.glob(p))
+    passed = len(found) > 0
+    return passed, f"RFP confirmation page: {found[0] if found else 'not found'}"
 
 def SK07_CP05():
-    c, o = _run("python tests/regression/run_regression.py 2>&1 | tail -5")
+    import subprocess
+    r = subprocess.run(
+        [sys.executable, "tests/regression/run_regression.py"],
+        capture_output=True, text=True, cwd=str(ROOT),
+        env={**os.environ, "PYTHONUTF8": "1"}
+    )
+    out = (r.stdout + r.stderr)
     import re
-    m = re.search(r'(\d+)/20', o)
+    m = re.search(r'(\d+)/20', out)
     if m and int(m.group(1)) >= 18:
         return True, f"Regression: {m.group(1)}/20"
-    return False, f"Regression below threshold: {o[:200]}"
+    return False, f"Regression below threshold: {out[-300:]}"
 
 
 # ── SKILL 08 ──────────────────────────────────────────────────────────
@@ -879,8 +1052,13 @@ print('same engine serves HR agent: confirmed')
     return (c == 0 and "confirmed" in o, o[:200])
 
 def SK09_CP04():
-    c, o = _run("python tests/test_hr_agent.py 2>&1 | tail -5")
-    return ("confirmed" in o.lower() or "passed" in o.lower(), o[:300])
+    r = subprocess.run(
+        [sys.executable, "tests/test_hr_agent.py"],
+        capture_output=True, text=True, cwd=str(ROOT),
+        env={**os.environ, "PYTHONUTF8": "1"}
+    )
+    o = (r.stdout + r.stderr).strip()
+    return ("confirmed" in o.lower() or "passed" in o.lower(), o[-300:])
 
 def SK09_CP05():
     return SK07_CP05()  # Regression must still pass
@@ -938,6 +1116,13 @@ CHECKPOINTS = {
     "SK06-CP04": (SK06_CP04, "Grounding verification catches fabricated quotes"),
     "SK06-CP05": (SK06_CP05, "Override mechanism importable"),
     "SK06-CP06": (SK06_CP06, "RFP confirmation importable"),
+    "SK01b-CP01": (SK01b_CP01, "JWT token creation and decoding"),
+    "SK01b-CP02": (SK01b_CP02, "Auth routes importable"),
+    "SK01b-CP03": (SK01b_CP03, "FastAPI starts with auth middleware"),
+    "SK01b-CP04": (SK01b_CP04, "Token endpoint returns JWT for dev user"),
+    "SK01b-CP05": (SK01b_CP05, "Invalid role rejected by require_role"),
+    "SK01b-CP06": (SK01b_CP06, "Invalid token returns 401"),
+    "SK01b-CP07": (SK01b_CP07, "No hardcoded org_id in agent files"),
     "SK07-CP01": (SK07_CP01, "PDF report generator importable"),
     "SK07-CP02": (SK07_CP02, "PDF generates with correct content"),
     "SK07-CP03": (SK07_CP03, "Next.js frontend builds"),
@@ -1034,7 +1219,10 @@ def main():
         show_status(state)
         return
 
-    arg = sys.argv[1].upper()
+    raw_arg = sys.argv[1]
+    # Case-insensitive match against CHECKPOINTS keys
+    _cp_lower = {k.lower(): k for k in CHECKPOINTS}
+    arg = _cp_lower.get(raw_arg.lower(), raw_arg.upper())
 
     if arg == "ALL":
         to_run = list(state.get("passed_checkpoints", []))
@@ -1050,8 +1238,8 @@ def main():
             print(f"REGRESSED: {failed}")
         return
 
-    if "-CP" not in arg and arg.startswith("SK"):
-        to_run = sorted([cp for cp in CHECKPOINTS if cp.startswith(arg + "-CP")])
+    if "-CP" not in arg and arg.upper().startswith("SK"):
+        to_run = sorted([cp for cp in CHECKPOINTS if cp.lower().startswith(arg.lower() + "-cp")])
         if not to_run:
             print(f"No checkpoints for: {arg}")
             return

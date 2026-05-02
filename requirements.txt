@@ -33,6 +33,11 @@ sentence-transformers==4.1.0  # CrossEncoder API updated in 4.x
 # ── BM25 keyword search ───────────────────────────────────
 rank-bm25==0.2.2
 
+# ── Authentication ────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+bcrypt==4.1.3
+passlib[bcrypt]==1.7.4
+
 # ── Web framework ─────────────────────────────────────────
 fastapi==0.136.1
 uvicorn[standard]==0.34.3
