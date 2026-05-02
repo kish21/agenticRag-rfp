@@ -492,13 +492,13 @@ print('query rewriting ok:', rewritten[:60])
 
 def SK03b_CP02():
     c, o = _run("""python -c "
-from app.agents.retrieval import cohere_rerank
+from app.core.reranker_provider import rerank
 candidates = [
     {'text': 'The vendor holds ISO 27001 certification issued by BSI.', 'score': 0.7},
     {'text': 'Our team has 20 professionals with IT experience.', 'score': 0.8},
     {'text': 'ISO 27001 certified across all UK data centres.', 'score': 0.65},
 ]
-reranked = cohere_rerank('Does vendor hold ISO 27001 certification?', candidates, top_n=2)
+reranked = rerank('Does vendor hold ISO 27001 certification?', candidates, top_n=2)
 assert len(reranked) == 2
 assert 'rerank_score' in reranked[0]
 print('reranking ok')
@@ -700,8 +700,8 @@ def SK05_CP06():
     )
 
 def SK05_CP07():
-    c, o = _run("python tests/test_procurement_agent.py 2>&1 | tail -5")
-    return ("PASSED" in o or "passed" in o.lower(), o[:300])
+    c, o = _run("python tests/test_procurement_agent.py")
+    return ("PASSED" in o or "passed" in o.lower(), o[-300:])
 
 
 # ── SKILL 06 ──────────────────────────────────────────────────────────

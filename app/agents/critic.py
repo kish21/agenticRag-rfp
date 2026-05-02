@@ -3,6 +3,7 @@ The Critic Agent runs after every other agent.
 It is the only agent whose job is to be skeptical.
 It does NOT retrieve, generate, or fix — it only validates and flags.
 """
+import re
 import uuid
 from app.core.output_models import (
     CriticOutput, CriticFlag, CriticSeverity, CriticVerdict,
@@ -174,10 +175,13 @@ def critic_after_extraction(
         + output.extracted_facts
     )
 
+    def _ws(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
+
     for item in all_items:
         source_text = source_chunks.get(item.source_chunk_id, "")
         if source_text and item.grounding_quote:
-            if item.grounding_quote.strip() not in source_text:
+            if _ws(item.grounding_quote) not in _ws(source_text):
                 flags.append(_make_flag(
                     CriticSeverity.HARD,
                     "extraction_agent",
@@ -266,6 +270,49 @@ def critic_after_evaluation(
         soft_flag_count=sum(1 for f in flags if f.severity == CriticSeverity.SOFT),
         overall_verdict=_verdict(flags),
         requires_human_review=any(f.severity == CriticSeverity.HARD for f in flags)
+    )
+
+
+def critic_after_comparator(output: ComparatorOutput) -> CriticOutput:
+    flags = []
+
+    if not output.overall_ranking:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "comparator_agent",
+            "empty_ranking",
+            "Comparator produced no overall ranking",
+            f"vendor_ids={output.vendor_ids}",
+            "Cannot proceed to Decision Agent without a ranking."
+        ))
+
+    if output.ranking_confidence < 0.5:
+        flags.append(_make_flag(
+            CriticSeverity.SOFT, "comparator_agent",
+            "low_ranking_confidence",
+            f"Ranking confidence is low ({output.ranking_confidence:.2f})",
+            f"confidence={output.ranking_confidence}",
+            "Note in report — ranking may not be reliable."
+        ))
+
+    unstable = [cc for cc in output.criteria_comparisons if not cc.rank_stable]
+    if unstable:
+        flags.append(_make_flag(
+            CriticSeverity.SOFT, "comparator_agent",
+            "unstable_criterion_rankings",
+            f"Rankings unstable for {len(unstable)} criteria due to narrow margins",
+            f"unstable_criteria={[cc.criterion_id for cc in unstable]}",
+            "Flag in report — score margins too close for reliable ranking."
+        ))
+
+    return CriticOutput(
+        critic_run_id=str(uuid.uuid4()),
+        evaluated_agent="comparator_agent",
+        evaluated_output_id=output.comparison_id,
+        flags=flags,
+        hard_flag_count=sum(1 for f in flags if f.severity == CriticSeverity.HARD),
+        soft_flag_count=sum(1 for f in flags if f.severity == CriticSeverity.SOFT),
+        overall_verdict=_verdict(flags),
+        requires_human_review=any(f.severity == CriticSeverity.HARD for f in flags),
     )
 
 

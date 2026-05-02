@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
 
+    # Reranker provider
+    # Options: cohere | bge | colbert | none
+    # cohere  — Cohere Rerank API (paid, best quality)
+    # bge     — BAAI/bge-reranker-v2-m3 (local, no API key)
+    # colbert — colbert-ir/colbertv2.0 via ragatouille (local)
+    # none    — fall back to vector score order (no reranking)
+    reranker_provider: str = "cohere"
+
     # Cohere
     cohere_api_key: str = ""
     cohere_rerank_model: str = "rerank-english-v3.0"

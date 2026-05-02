@@ -1,7 +1,7 @@
 # CLAUDE.md
 # Read this completely at the start of every session.
 # These are constraints, not suggestions.
-# Last updated: [UPDATE AFTER EVERY SESSION]
+# Last updated: 2026-05-02
 
 ---
 
@@ -89,9 +89,9 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** SKILL_01
-**Last verified checkpoint:** none — not started
-**Next action:** Follow SKILL_01_FOUNDATION.md Step 1
+**Current skill:** SK06 complete — ready for SK07
+**Last verified checkpoint:** SK06-CP06
+**Next action:** Follow SKILL_04_TO_09_REFERENCE.md SK07 steps (PDF report + Next.js frontend + regression suite)
 **Blockers:** none
 
 ---
@@ -198,3 +198,24 @@ Do not use deprecated 0.x import paths.
 - `qdrant-client`: `client.search()` deprecated → use `client.query_points()`
 - `pydantic`: `@validator` deprecated → use `@field_validator` (all skill code uses v2 style)
 - `ragatouille`: removed from requirements — unmaintained, use sentence-transformers CrossEncoder
+
+---
+
+## KNOWN FIXES — DO NOT REVERT
+
+### PDF whitespace normalisation fix (May 2026)
+
+PDF table parsing produces cells on separate lines.
+The LLM joins them with single spaces when quoting.
+The verbatim grounding check must normalise whitespace
+before comparing.
+
+Fix applied in:
+  app/agents/extraction.py — _hallucination_risk()
+  app/agents/critic.py — critic_after_extraction()
+
+Pattern: re.sub(r'\s+', ' ', text).strip() before
+string containment check.
+
+This fix applies to all fact types. Do not revert.
+Do not add raw \n matching to grounding checks.

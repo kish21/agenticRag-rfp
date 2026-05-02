@@ -4,7 +4,7 @@ Called immediately after Extraction Agent runs.
 """
 import json
 import sqlalchemy as sa
-from app.core.output_models import ExtractionOutput
+from app.core.output_models import EvaluationSetup, ExtractionOutput, IngestionOutput
 from app.config import settings
 
 _engine = None
@@ -271,6 +271,7 @@ def save_evaluation_setup(setup_dict: dict, org_id: str) -> None:
     Called from the API when the customer confirms their criteria on Page 4b.
     """
     engine = get_engine()
+    setup_json_str = json.dumps(setup_dict, default=str)
     with engine.connect() as conn:
         conn.execute(sa.text("""
             INSERT INTO evaluation_setups (
@@ -278,18 +279,74 @@ def save_evaluation_setup(setup_dict: dict, org_id: str) -> None:
                 setup_json, confirmed_by, confirmed_at, source
             ) VALUES (
                 :setup_id, :org_id, :department, :rfp_id,
-                :setup_json::jsonb, :confirmed_by, :confirmed_at, :source
+                CAST(:setup_json AS jsonb), :confirmed_by, :confirmed_at, :source
             ) ON CONFLICT (setup_id) DO UPDATE SET
                 setup_json = EXCLUDED.setup_json,
                 confirmed_at = EXCLUDED.confirmed_at
         """), {
             "setup_id": setup_dict["setup_id"],
             "org_id": org_id,
-            "department": setup_dict.get("department", "unknown"),
-            "rfp_id": setup_dict["rfp_id"],
-            "setup_json": json.dumps(setup_dict, default=str),
+            "department": setup_dict.get("department", "procurement"),
+            "rfp_id": setup_dict.get("rfp_id", ""),
+            "setup_json": setup_json_str,
             "confirmed_by": setup_dict.get("confirmed_by", "system"),
-            "confirmed_at": setup_dict.get("confirmed_at"),
+            "confirmed_at": setup_dict.get("confirmed_at", ""),
             "source": setup_dict.get("source", "manually_defined"),
         })
         conn.commit()
+
+
+def save_vendor_document(
+    output: IngestionOutput,
+    org_id: str,
+    rfp_id: str,
+    setup_id: str,
+) -> None:
+    """
+    Persists the ingestion result to vendor_documents.
+    Called immediately after run_ingestion_agent succeeds.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        conn.execute(sa.text("""
+            INSERT INTO vendor_documents (
+                doc_id, org_id, vendor_id, rfp_id, setup_id,
+                filename, content_hash, quality_score, total_chunks
+            ) VALUES (
+                :doc_id, CAST(:org_id AS uuid), :vendor_id, :rfp_id, :setup_id,
+                :filename, :content_hash, :quality_score, :total_chunks
+            ) ON CONFLICT (org_id, vendor_id, rfp_id, content_hash) DO NOTHING
+        """), {
+            "doc_id": output.doc_id,
+            "org_id": org_id,
+            "vendor_id": output.vendor_id,
+            "rfp_id": rfp_id,
+            "setup_id": setup_id,
+            "filename": output.filename,
+            "content_hash": output.content_hash,
+            "quality_score": output.quality_score,
+            "total_chunks": output.total_chunks,
+        })
+        conn.commit()
+
+
+def get_evaluation_setup(setup_id: str) -> EvaluationSetup:
+    """
+    Reads an EvaluationSetup back from the evaluation_setups table.
+    Called by test scripts and agents that need the full setup object.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(sa.text("""
+            SELECT setup_json
+            FROM evaluation_setups
+            WHERE setup_id = :setup_id
+        """), {"setup_id": setup_id}).fetchone()
+
+    if not row:
+        raise ValueError(
+            f"EvaluationSetup not found for setup_id={setup_id}. "
+            f"Run test_e2e.py first to ingest a document and create the setup."
+        )
+
+    return EvaluationSetup(**row._mapping["setup_json"])

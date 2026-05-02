@@ -63,12 +63,13 @@ If it does not appear: hard flag, hallucination confirmed.
 
 ```python
 # app/agents/extraction.py — core pattern
+from app.core.output_models import EvaluationSetup
 
 async def run_extraction_agent(
     retrieval_output: RetrievalOutput,
     vendor_id: str,
     org_id: str,
-    agent_config: dict
+    evaluation_setup: EvaluationSetup
 ) -> tuple[ExtractionOutput, object]:
 
     # Build context from retrieved chunks
@@ -149,7 +150,7 @@ Not raw prose: "we maintain professional indemnity insurance of five million pou
 async def run_evaluation_agent(
     vendor_id: str,
     org_id: str,
-    agent_config: dict
+    evaluation_setup: EvaluationSetup
 ) -> tuple[EvaluationOutput, object]:
 
     # Get pre-extracted structured facts from PostgreSQL
@@ -162,7 +163,7 @@ async def run_evaluation_agent(
         decision = await _evaluate_mandatory_check(
             check=check,
             facts=facts,     # Typed dict from PostgreSQL
-            config=agent_config
+            evaluation_setup=evaluation_setup
         )
         compliance_decisions.append(decision)
 
@@ -172,7 +173,7 @@ async def run_evaluation_agent(
         score = await _score_criterion(
             criterion=criterion,
             facts=facts,
-            config=agent_config
+            evaluation_setup=evaluation_setup
         )
         criterion_scores.append(score)
 
@@ -219,8 +220,8 @@ async def run_comparator_agent(
 ## Checkpoints
 
 - SK05-CP01: Evaluation reads PostgreSQL not Qdrant
-- SK05-CP02: Vendor Beta fails ISO 27001 check from extracted facts
-- SK05-CP03: Vendor Alpha passes compliance from extracted facts
+- SK05-CP02: Vendor with missing mandatory criterion fails compliance check deterministically from extracted facts
+- SK05-CP03: Vendor with all mandatory criteria present passes compliance check from extracted facts
 - SK05-CP04: Scoring agent returns CriterionScore with variance_estimate
 - SK05-CP05: Config-driven — empty mandatory_checks = all pass
 - SK05-CP06: Comparator produces stable ranking on test vendors
@@ -246,9 +247,9 @@ Hard block if all vendors rejected — escalates for human review.
 
 def route_to_approval_tier(
     contract_value: float,
-    agent_config: dict
+    evaluation_setup: EvaluationSetup
 ) -> ApprovalRouting:
-    tiers = agent_config["governance"]["approval_tiers"]
+    tiers = settings.approval_tiers
     tiers_sorted = sorted(tiers, key=lambda t: t["max_value"] or float("inf"))
 
     for tier in tiers_sorted:
@@ -516,7 +517,9 @@ HR_AGENT_CONFIG = {
         }
     },
     "agent_behaviour": {
-        "llm": {"model": "gpt-4o", "temperature": 0.0},
+        # Model comes from LLM_PROVIDER in .env via call_llm()
+        # Same provider serves HR and procurement automatically
+        "llm": {"temperature": 0.0},
         "tone": "conversational"
     },
     "output": {
