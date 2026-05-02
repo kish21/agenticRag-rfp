@@ -177,6 +177,6 @@ Expected: 66/66 checkpoints, 14/14 contracts, 18+/20 regression, no drift.
 | 4d. CORS locked to domain | | ☐ |
 | 4e. HTTPS / TLS | | ☐ |
 | 5. Frontend production build | | ☐ |
-| 6. evaluation_routes.py built | | ☐ |
+| 6. evaluation_routes.py built | | ✅ done |
 | 7. Modal production deploy | | ☐ |
 | 8. Smoke tests pass | | ☐ |

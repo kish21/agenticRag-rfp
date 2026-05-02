@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api.auth_routes import router as auth_router
 from app.api.admin_routes import router as admin_router
+from app.api.evaluation_routes import router as eval_router
 from app.api.middleware import AuthMiddleware
 
 
@@ -24,6 +25,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(eval_router)
 
     @app.get("/health")
     async def health():
