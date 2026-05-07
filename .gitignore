@@ -75,3 +75,11 @@ frontend/.env.local
 # OS
 .DS_Store
 Thumbs.db
+
+# Design reference archives (large binary files)
+*.rar
+*.zip
+frontend.rar
+
+# Design reference docs (downloaded wireframe assets)
+docs/Agentic rag-handoff/

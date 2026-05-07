@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-large"
     openai_temperature: float = 0.1
 
+    # Azure OpenAI
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_deployment: str = "gpt-4o"
+    azure_openai_embedding_deployment: str = "text-embedding-3-large"
+    azure_openai_api_version: str = "2024-12-01-preview"
+
     # Anthropic
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"

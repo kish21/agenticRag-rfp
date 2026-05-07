@@ -17,7 +17,7 @@ from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     get_leaf_nodes,
 )
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
 from app.config import settings
 
 if TYPE_CHECKING:
@@ -26,22 +26,35 @@ if TYPE_CHECKING:
 _embed_client = None
 
 
-def get_embed_client() -> OpenAI:
+def get_embed_client():
     global _embed_client
     if _embed_client is None:
-        _embed_client = OpenAI(api_key=settings.openai_api_key)
+        if settings.llm_provider == "azure":
+            _embed_client = AzureOpenAI(
+                azure_endpoint=settings.azure_openai_endpoint,
+                api_key=settings.azure_openai_api_key,
+                api_version=settings.azure_openai_api_version,
+            )
+        else:
+            _embed_client = OpenAI(api_key=settings.openai_api_key)
     return _embed_client
 
 
 def get_dense_embedding(text: str) -> list[float]:
-    """OpenAI text-embedding-3-large — 3072 dimensions.
+    """Dense embedding — 3072 dimensions.
+    Uses Azure OpenAI when LLM_PROVIDER=azure, otherwise OpenAI directly.
     Returns zero vector when skip_embeddings=True (dev/test mode)."""
     if settings.skip_embeddings:
         return [0.0] * 3072
     client = get_embed_client()
+    model = (
+        settings.azure_openai_embedding_deployment
+        if settings.llm_provider == "azure"
+        else settings.openai_embedding_model
+    )
     response = client.embeddings.create(
-        model=settings.openai_embedding_model,
-        input=text[:8000]
+        model=model,
+        input=text[:8000],
     )
     return response.data[0].embedding
 
