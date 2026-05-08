@@ -11,6 +11,13 @@ import {
 
 type AgentType = keyof typeof AGENT_COLOUR;
 
+interface EvalRun {
+  run_id: string; rfp_title: string; department: string;
+  status: "running" | "pending_approval" | "complete" | "blocked" | "interrupted";
+  vendor_count: number; shortlisted_count: number;
+  started_at: string;
+}
+
 type P = typeof PALETTE | typeof PALETTE_LIGHT;
 
 interface StatusItem {
@@ -204,10 +211,11 @@ function Sparkline({ values, colour, height = 28 }: { values: number[]; colour: 
 
 // ─── Agent Switcher Rail (always dark) ───────────────────────────────────────
 
-function AgentSwitcherRail({ agents, activeId, onSelect }: {
-  agents:   AgentDef[];
-  activeId: string | null;
-  onSelect: (a: AgentDef) => void;
+function AgentSwitcherRail({ agents, activeId, onSelect, userName }: {
+  agents:    AgentDef[];
+  activeId:  string | null;
+  onSelect:  (a: AgentDef) => void;
+  userName?: string;
 }) {
   const [expanded, setExpanded]   = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -302,7 +310,7 @@ function AgentSwitcherRail({ agents, activeId, onSelect }: {
         </div>
         <div style={{ height: 44, width: "100%", display: "flex", alignItems: "center", justifyContent: expanded ? "flex-start" : "center", padding: expanded ? "0 14px" : 0, gap: 12, cursor: "pointer" }}>
           <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #1E3A5F 0%, #2D4B7E 100%)", border: "1.5px solid #3A4D6E", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#93C5FD", flexShrink: 0, fontFamily: FONT }}>SJ</div>
-          {expanded && <span style={{ fontSize: 12, color: "#6B7280", fontFamily: FONT, whiteSpace: "nowrap" }}>Sarah J.</span>}
+          {expanded && <span style={{ fontSize: 12, color: "#6B7280", fontFamily: FONT, whiteSpace: "nowrap" }}>{userName}</span>}
         </div>
       </div>
     </div>
@@ -408,6 +416,7 @@ function Composer({ agents, isDark, onNavigate }: {
             onChange={e => setText(e.target.value)}
             onKeyDown={handleKey}
             placeholder={`Ask ${activeAgent.name} anything…`}
+            suppressHydrationWarning
             style={{
               flex:            1,
               background:      "transparent",
@@ -716,10 +725,30 @@ export default function Home() {
   const [clickingId, setClickingId] = useState<string | null>(null);
 
   // Load theme preference from localStorage
+  const [runs,    setRuns]    = useState<EvalRun[]>([]);
+  const [userName, setUserName] = useState("You");
+
   useEffect(() => {
     const saved = localStorage.getItem("meridian-theme");
     if (saved === "light") setIsDark(false);
     const t = setTimeout(() => setPageOpacity(1), 40);
+
+    // Load real evaluation runs
+    const token = localStorage.getItem("access_token");
+    if (!token) { router.replace("/login"); return; }
+    if (token) {
+      // Get user name from token
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        const email: string = payload.sub ?? "";
+        setUserName(email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, c => c.toUpperCase()));
+      } catch { /* ignore */ }
+
+      fetch("/api/v1/evaluate/list", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => setRuns(d.runs ?? []))
+        .catch(() => {});
+    }
     return () => clearTimeout(t);
   }, []);
 
@@ -729,9 +758,27 @@ export default function Home() {
     localStorage.setItem("meridian-theme", next ? "dark" : "light");
   }
 
-  const agents         = MOCK_AGENTS;
-  const totalAttn      = agents.reduce((s, a) => s + a.statuses.filter(x => x.count > 0).length, 0);
-  const urgentCount    = agents.filter(a => a.statuses.some(s => s.kind === "red")).length;
+  // Build live procurement agent stats from real runs
+  const runningRuns  = runs.filter(r => r.status === "running");
+  const pendingRuns  = runs.filter(r => r.status === "pending_approval");
+  const completeRuns = runs.filter(r => r.status === "complete");
+  const lastRun      = runs[0];
+
+  const procAgent: AgentDef = {
+    ...MOCK_AGENTS[0],
+    lastActivity: lastRun
+      ? `${lastRun.rfp_title || lastRun.run_id.slice(0, 16)} — ${lastRun.status}`
+      : MOCK_AGENTS[0].lastActivity,
+    statuses: [
+      { label: "evaluations running",     count: runningRuns.length,  dotColour: "#F59E0B", kind: "amber" },
+      { label: "results ready to review", count: completeRuns.length, dotColour: "#00D4AA", kind: "teal"  },
+      { label: "awaiting your approval",  count: pendingRuns.length,  dotColour: pendingRuns.length > 0 ? "#EF4444" : "#374151", kind: pendingRuns.length > 0 ? "red" : "grey" },
+    ],
+  };
+
+  const agents      = [procAgent, ...MOCK_AGENTS.slice(1)];
+  const totalAttn   = agents.reduce((s, a) => s + a.statuses.filter(x => x.count > 0).length, 0);
+  const urgentCount = agents.filter(a => a.statuses.some(s => s.kind === "red")).length;
 
   const bgGrad   = isDark ? BG_GRADIENT       : BG_GRADIENT_LIGHT;
   const topbarBg = isDark ? TOPBAR_BG         : TOPBAR_BG_LIGHT;
@@ -745,7 +792,10 @@ export default function Home() {
     if (clickingId) return;
     setClickingId(agent.id);
     setTimeout(() => setPageOpacity(0), 200);
-    const url = query ? `${agent.href}?q=${encodeURIComponent(query)}` : agent.href;
+    const deptParam = `department=${encodeURIComponent(agent.name)}`;
+    const url = query
+      ? `${agent.href}?${deptParam}&q=${encodeURIComponent(query)}`
+      : `${agent.href}?${deptParam}`;
     setTimeout(() => router.push(url), 400);
   }
 
@@ -757,7 +807,7 @@ export default function Home() {
       opacity:     pageOpacity,
       transition:  "opacity 220ms ease",
     }}>
-      <AgentSwitcherRail agents={agents} activeId={null} onSelect={handleOpenAgent} />
+      <AgentSwitcherRail agents={agents} activeId={null} onSelect={handleOpenAgent} userName={userName} />
 
       <div style={{ marginLeft: 48, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
 
@@ -804,7 +854,7 @@ export default function Home() {
             <div style={{ width: 1, height: 20, backgroundColor: borderB }} />
 
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 13, color: ink3, fontWeight: 600, lineHeight: 1.3 }}>Sarah J.</div>
+              <div style={{ fontSize: 13, color: ink3, fontWeight: 600, lineHeight: 1.3 }}>{userName}</div>
               <div style={{ fontSize: 11, color: ink2, lineHeight: 1.3 }}>{COMPANY.name}</div>
             </div>
             <div style={{ width: 34, height: 34, borderRadius: "50%", background: isDark ? "linear-gradient(135deg, #1E3A5F 0%, #2D4B7E 100%)" : "linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)", border: `1.5px solid ${isDark ? "#2A3F5E" : "#93c5fd"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: isDark ? "#7DD3FC" : "#1d4ed8", flexShrink: 0, fontFamily: FONT }}>
@@ -822,14 +872,15 @@ export default function Home() {
               Good morning
             </p>
             <h1 style={{ fontSize: 44, fontWeight: 400, color: ink, fontFamily: SERIF, margin: "0 0 18px", letterSpacing: "-0.02em", lineHeight: 1 }}>
-              Sarah.
+              {userName}.
             </h1>
 
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <span style={{ fontSize: 14, color: ink2, fontFamily: FONT }}>
                 You have access to{" "}
                 <span style={{ color: ink3, fontWeight: 600 }}>{agents.length} agents</span>
-                {" "}· last sync 2 min ago
+                {" "}·{" "}
+                <span style={{ color: ink3, fontWeight: 600 }}>{runs.length} evaluations</span>
               </span>
               {urgentCount > 0 && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: FONT, backgroundColor: isDark ? "#2D1D0A" : "#fef3c7", border: `1px solid ${isDark ? "#78350F" : "#fcd34d"}`, color: isDark ? "#FCD34D" : "#92400e", borderRadius: 20, padding: "4px 12px", fontWeight: 500 }}>
@@ -886,6 +937,56 @@ export default function Home() {
                   isClicking={clickingId === agent.id}
                 />
               ))}
+            </div>
+          )}
+
+          {/* ── Recent evaluations ── */}
+          {runs.length > 0 && (
+            <div style={{ marginTop: 40 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: labelCol, letterSpacing: "0.14em", textTransform: "uppercase", margin: "0 0 14px", fontFamily: FONT }}>
+                Recent evaluations
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {runs.slice(0, 8).map(run => {
+                  const statusColour =
+                    run.status === "complete"         ? "#10B981" :
+                    run.status === "running"          ? "#3B82F6" :
+                    run.status === "pending_approval" ? "#F59E0B" :
+                    run.status === "interrupted"      ? "#6B7280" : "#EF4444";
+                  const statusLabel =
+                    run.status === "interrupted" ? "interrupted" : run.status.replace(/_/g, " ");
+                  const href = run.status === "running"
+                    ? `/${run.run_id}/progress`
+                    : run.status === "interrupted"
+                    ? "#"   // no destination — run is dead
+                    : `/${run.run_id}/results`;
+                  return (
+                    <div
+                      key={run.run_id}
+                      onClick={() => href !== "#" && router.push(href)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 14,
+                        padding: "11px 16px", borderRadius: 10,
+                        cursor: href === "#" ? "default" : "pointer",
+                        opacity: run.status === "interrupted" ? 0.55 : 1,
+                        background: isDark ? "#0D1018" : "#f5f2ec",
+                        border: `1px solid ${isDark ? "#181C28" : "#e8e4dc"}`,
+                        transition: "background 120ms",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = isDark ? "#111828" : "#ede9e0")}
+                      onMouseLeave={e => (e.currentTarget.style.background = isDark ? "#0D1018" : "#f5f2ec")}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusColour, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 13, color: ink3, fontFamily: FONT, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {run.rfp_title || run.run_id.slice(0, 20)}
+                      </span>
+                      <span style={{ fontSize: 11, color: ink2, fontFamily: FONT }}>{run.department}</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: statusColour, fontFamily: FONT, flexShrink: 0 }}>{statusLabel}</span>
+                      <span style={{ fontSize: 11, color: ink2, fontFamily: FONT, flexShrink: 0 }}>→</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </main>

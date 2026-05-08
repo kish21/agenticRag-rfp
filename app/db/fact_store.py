@@ -278,7 +278,7 @@ def save_evaluation_setup(setup_dict: dict, org_id: str) -> None:
                 setup_id, org_id, department, rfp_id,
                 setup_json, confirmed_by, confirmed_at, source
             ) VALUES (
-                :setup_id, :org_id, :department, :rfp_id,
+                :setup_id, CAST(:org_id AS uuid), :department, :rfp_id,
                 CAST(:setup_json AS jsonb), :confirmed_by, :confirmed_at, :source
             ) ON CONFLICT (setup_id) DO UPDATE SET
                 setup_json = EXCLUDED.setup_json,

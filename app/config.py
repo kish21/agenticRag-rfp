@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     # Default dev user (never use in production)
     dev_user_email: str = "dev@platform.local"
     dev_user_password: str = "devpassword2026"
-    dev_org_id: str = "test-org"
+    dev_org_id: str = "00000000-0000-0000-0000-000000000001"
     dev_user_role: str = "company_admin"
 
     # Slack

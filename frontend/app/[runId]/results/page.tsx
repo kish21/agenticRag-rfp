@@ -2,236 +2,499 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { TopBar, useTheme } from "@/components/TopBar";
+import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS } from "@/lib/theme";
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "";
+function getToken() { return typeof window !== "undefined" ? (localStorage.getItem("access_token") ?? "") : ""; }
+
+// ── Types (unchanged from original) ───────────────────────────────────────────
 
 interface CriterionScore {
-  criterion_id: string;
-  criterion_name?: string;
-  raw_score: number;
-  weighted_contribution: number;
-  score_rationale?: string;
+  criterion_id: string; criterion_name?: string;
+  raw_score: number; weighted_contribution: number; score_rationale?: string;
 }
-
 interface ShortlistedVendor {
-  rank: number;
-  vendor_id: string;
-  vendor_name: string;
-  total_score: number;
-  score_confidence: number;
-  recommendation: string;
+  rank: number; vendor_id: string; vendor_name: string;
+  total_score: number; score_confidence: number; recommendation: string;
   criterion_breakdown: CriterionScore[];
 }
-
 interface RejectedVendor {
-  vendor_id: string;
-  vendor_name: string;
-  failed_checks: string[];
-  rejection_reasons: string[];
-  evidence_citations: string[];
+  vendor_id: string; vendor_name: string;
+  failed_checks: string[]; rejection_reasons: string[]; evidence_citations: string[];
 }
-
 interface ApprovalRouting {
-  approval_tier: number;
-  approver_role: string;
-  sla_hours: number;
-  sla_deadline: string;
+  approval_tier: number; approver_role: string; sla_hours: number; sla_deadline: string;
 }
-
 interface Results {
-  shortlisted_vendors: ShortlistedVendor[];
-  rejected_vendors: RejectedVendor[];
-  approval_routing: ApprovalRouting;
-  requires_human_review: boolean;
-  review_reasons: string[];
+  shortlisted_vendors: ShortlistedVendor[]; rejected_vendors: RejectedVendor[];
+  approval_routing: ApprovalRouting; requires_human_review: boolean; review_reasons: string[];
 }
 
-const REC_BADGE: Record<string, string> = {
-  strongly_recommended: "bg-green-100 text-green-800",
-  recommended:          "bg-blue-100 text-blue-800",
-  acceptable:           "bg-slate-100 text-slate-700",
-  marginal:             "bg-amber-100 text-amber-700",
+// ── Score bar ──────────────────────────────────────────────────────────────────
+
+function ScoreBar({ score, isDark }: { score: number; isDark: boolean }) {
+  const P      = isDark ? PALETTE : PALETTE_LIGHT;
+  const colour = score >= 8 ? "#10B981" : score >= 6 ? "#00D4AA" : score >= 4 ? "#F59E0B" : "#EF4444";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ flex: 1, height: 5, borderRadius: 3, background: P.border.dim, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${score * 10}%`, background: colour, borderRadius: 3, transition: "width 600ms ease" }} />
+      </div>
+      <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 600, color: colour, flexShrink: 0 }}>{score.toFixed(1)}</span>
+    </div>
+  );
+}
+
+// ── Recommendation badge ───────────────────────────────────────────────────────
+
+const REC_COLOUR: Record<string, string> = {
+  strongly_recommended: "#10B981",
+  recommended:          "#00D4AA",
+  acceptable:           "#F59E0B",
+  marginal:             "#EF4444",
 };
 
+function RecBadge({ rec }: { rec: string }) {
+  const colour = REC_COLOUR[rec] ?? "#6B7280";
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 600, color: colour,
+      background: colour + "18", padding: "3px 9px",
+      borderRadius: 12, border: `1px solid ${colour}40`, fontFamily: FONT,
+    }}>
+      {rec.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+// ── Tab button ─────────────────────────────────────────────────────────────────
+
+function Tab({ label, active, count, onClick, isDark }: { label: string; active: boolean; count?: number; onClick: () => void; isDark: boolean }) {
+  const P      = isDark ? PALETTE : PALETTE_LIGHT;
+  const TEAL   = "#00D4AA";
+  return (
+    <button onClick={onClick} style={{
+      background: "none", border: "none", cursor: "pointer", fontFamily: FONT,
+      fontSize: 13, fontWeight: active ? 600 : 400,
+      color: active ? TEAL : P.text.muted,
+      borderBottom: `2px solid ${active ? TEAL : "transparent"}`,
+      padding: "10px 16px", transition: "color 140ms",
+    }}>
+      {label}
+      {count !== undefined && (
+        <span style={{ marginLeft: 6, fontSize: 11, background: active ? TEAL + "20" : P.border.dim, color: active ? TEAL : P.text.muted, padding: "1px 6px", borderRadius: 10 }}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
+
 export default function ResultsPage() {
-  const { runId } = useParams<{ runId: string }>();
-  const router = useRouter();
-  const [results, setResults] = useState<Results | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { runId }          = useParams<{ runId: string }>();
+  const router             = useRouter();
+  const { isDark, toggle } = useTheme();
+  const P                  = isDark ? PALETTE : PALETTE_LIGHT;
+
+  const [results,     setResults]     = useState<Results | null>(null);
+  const [agentLog,    setAgentLog]    = useState<{ts: string; agent: string; status: string; message: string}[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [auditTrail,  setAuditTrail]  = useState<any[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState("");
   const [downloading, setDownloading] = useState<"pdf" | "excel" | null>(null);
+  const [tab,         setTab]         = useState<"shortlisted" | "rejected" | "routing">("shortlisted");
+  const [expanded,    setExpanded]    = useState<string | null>(null);
+  const [logOpen,     setLogOpen]     = useState(false);
+  const [auditOpen,   setAuditOpen]   = useState(false);
+
+  const BG = isDark
+    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
+    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    fetch(`/api/v1/evaluate/${runId}/results`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((r) => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
-      .then((d) => { setResults(d); setLoading(false); })
-      .catch((e) => { setError(`Failed to load results: ${e.message}`); setLoading(false); });
+    const token = getToken();
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      fetch(`${API}/api/v1/evaluate/${runId}/results`, { headers })
+        .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); }),
+      fetch(`${API}/api/v1/evaluate/${runId}/audit`, { headers })
+        .then(r => r.ok ? r.json() : { events: [] })
+        .catch(() => ({ events: [] })),
+    ])
+      .then(([d, a]) => {
+        setResults(d.decision ?? d);
+        setAgentLog(d.agent_log ?? []);
+        setAuditTrail(a.events ?? []);
+        setLoading(false);
+      })
+      .catch(e => { setError(`Failed to load results: ${e.message}`); setLoading(false); });
   }, [runId]);
 
   async function download(format: "pdf" | "excel") {
     setDownloading(format);
-    const token = localStorage.getItem("access_token");
-    const ext = format === "pdf" ? "pdf" : "xlsx";
-    const res = await fetch(`/api/v1/evaluate/${runId}/report?format=${format}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (res.ok) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `evaluation-${runId}.${ext}`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-    setDownloading(null);
+    try {
+      const ext = format === "pdf" ? "pdf" : "xlsx";
+      const res = await fetch(`${API}/api/v1/evaluate/${runId}/report?format=${format}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = Object.assign(document.createElement("a"), { href: url, download: `evaluation-${runId}.${ext}` });
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } finally { setDownloading(null); }
   }
 
+  const CARD = { background: P.bg.surface, borderRadius: TOKENS.radius.card, border: `1px solid ${P.border.mid}` };
+
   if (loading) return (
-    <main className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <p className="text-slate-500">Loading results...</p>
-    </main>
+    <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
+      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Procurement", href: "/" }, { label: "Results" }]} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
+        <span style={{ color: P.text.muted, fontSize: 13 }}>Loading results…</span>
+      </div>
+    </div>
   );
 
   if (!results) return (
-    <main className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <p className="text-red-600">{error}</p>
-    </main>
+    <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
+      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Procurement", href: "/" }, { label: "Results" }]} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
+        <span style={{ color: "#EF4444", fontSize: 13 }}>{error}</span>
+      </div>
+    </div>
   );
 
-  return (
-    <main className="min-h-screen bg-slate-50 p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const shortlisted: any[] = results?.shortlisted_vendors ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rejected:    any[] = results?.rejected_vendors    ?? [];
+  const ar          = results.approval_routing;
 
-        {/* Header */}
-        <div className="bg-white rounded-xl shadow p-6 flex items-start justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">Evaluation Results</h1>
-            <p className="text-slate-500 text-sm mt-1">Run: {runId}</p>
-            <div className="flex gap-3 mt-2 text-sm text-slate-600">
-              <span className="text-green-700 font-medium">{results.shortlisted_vendors.length} shortlisted</span>
-              <span className="text-red-600 font-medium">{results.rejected_vendors.length} rejected</span>
-            </div>
+  return (
+    <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
+      <TopBar isDark={isDark} onToggle={toggle}
+        crumbs={[
+          { label: "Procurement", href: "/" },
+          { label: runId.slice(0, 8) + "…" },
+          { label: "Results" },
+        ]}
+        right={
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => download("pdf")} disabled={!!downloading} style={{
+              background: "transparent", border: "1px solid #3B82F6",
+              borderRadius: 7, padding: "5px 12px", fontSize: 11,
+              color: "#3B82F6", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
+            }}>
+              {downloading === "pdf" ? "…" : "↓ PDF"}
+            </button>
+            <button onClick={() => download("excel")} disabled={!!downloading} style={{
+              background: "transparent", border: "1px solid #10B981",
+              borderRadius: 7, padding: "5px 12px", fontSize: 11,
+              color: "#10B981", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
+            }}>
+              {downloading === "excel" ? "…" : "↓ Excel"}
+            </button>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => download("pdf")}
-              disabled={downloading !== null}
-              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {downloading === "pdf" ? "Downloading..." : "↓ PDF"}
-            </button>
-            <button
-              onClick={() => download("excel")}
-              disabled={downloading !== null}
-              className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-            >
-              {downloading === "excel" ? "Downloading..." : "↓ Excel"}
-            </button>
+        }
+      />
+
+      <main style={{ maxWidth: 900, margin: "0 auto", padding: "36px 28px 80px", display: "flex", flexDirection: "column", gap: 18 }}>
+
+        {/* Summary header */}
+        <div style={{ ...CARD, padding: "20px 22px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: P.text.primary, margin: 0, fontFamily: FONT }}>
+              Evaluation results
+            </h1>
+            <div style={{ fontFamily: MONO, fontSize: 11, color: P.text.muted }}>{runId}</div>
+          </div>
+          <div style={{ display: "flex", gap: 24 }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Shortlisted</div>
+              <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "#10B981", marginTop: 3 }}>{(shortlisted ?? []).length}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Rejected</div>
+              <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "#EF4444", marginTop: 3 }}>{(rejected ?? []).length}</div>
+            </div>
+            {ar && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Approval tier</div>
+                <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "#F59E0B", marginTop: 3 }}>{ar.approval_tier}</div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Approval routing notice */}
-        {results.approval_routing && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm">
-            <p className="font-semibold text-amber-800">
-              Approval required — Tier {results.approval_routing.approval_tier}
-            </p>
-            <p className="text-amber-700 mt-1">
-              Routed to: <b>{results.approval_routing.approver_role.replace(/_/g, " ")}</b>
-              {" · "}SLA: {results.approval_routing.sla_hours}h
-              {" · "}Deadline: {new Date(results.approval_routing.sla_deadline).toLocaleString()}
-            </p>
+        {ar && (
+          <div style={{
+            background: "#F59E0B12", border: "1px solid #F59E0B50",
+            borderRadius: TOKENS.radius.card, padding: "14px 18px",
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#F59E0B", marginBottom: 5, fontFamily: FONT }}>
+              Approval required — Tier {ar.approval_tier}
+            </div>
+            <div style={{ fontSize: 12, color: P.text.secondary, fontFamily: FONT }}>
+              Routed to: <strong>{ar.approver_role.replace(/_/g, " ")}</strong>
+              {" · "}SLA: {ar.sla_hours}h
+              {" · "}Deadline: {new Date(ar.sla_deadline).toLocaleString()}
+            </div>
             {results.requires_human_review && (
-              <p className="text-red-700 mt-1 font-medium">
-                ⚠ Human review required: {results.review_reasons.join("; ")}
-              </p>
+              <div style={{ fontSize: 12, color: "#EF4444", fontFamily: FONT, marginTop: 6 }}>
+                ⚠ Human review required: {(results.review_reasons ?? []).join("; ")}
+              </div>
+            )}
+            <button onClick={() => router.push(`/${runId}/approve`)} style={{
+              marginTop: 10, background: "#F59E0B", color: "#1A0D00", border: "none",
+              borderRadius: 7, padding: "7px 16px", fontSize: 12,
+              fontFamily: FONT, fontWeight: 600, cursor: "pointer",
+            }}>
+              Open approval screen →
+            </button>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div style={{ ...CARD, overflow: "hidden" }}>
+          <div style={{ display: "flex", borderBottom: `1px solid ${P.border.dim}`, padding: "0 8px" }}>
+            <Tab label="Shortlisted" active={tab === "shortlisted"} count={shortlisted.length} onClick={() => setTab("shortlisted")} isDark={isDark} />
+            <Tab label="Rejected"    active={tab === "rejected"}    count={rejected.length}    onClick={() => setTab("rejected")}    isDark={isDark} />
+          </div>
+
+          <div style={{ padding: "18px 20px" }}>
+            {/* Shortlisted tab */}
+            {tab === "shortlisted" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {shortlisted.length === 0 && (
+                  <p style={{ fontSize: 13, color: P.text.muted, fontFamily: FONT }}>No vendors shortlisted.</p>
+                )}
+                {shortlisted.map(v => {
+                  const open = expanded === v.vendor_id;
+                  return (
+                    <div key={v.vendor_id} style={{ background: P.bg.elevated, borderRadius: 10, border: `1px solid ${P.border.dim}`, overflow: "hidden" }}>
+                      {/* Vendor header */}
+                      <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14 }}>
+                        <div style={{
+                          width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                          background: "#00D4AA", display: "flex", alignItems: "center", justifyContent: "center",
+                          fontFamily: MONO, fontSize: 13, fontWeight: 700, color: "#071510",
+                        }}>#{v.rank}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: P.text.primary, fontFamily: FONT, marginBottom: 4 }}>
+                            {v.vendor_name || v.vendor_id}
+                          </div>
+                          <ScoreBar score={v.total_score} isDark={isDark} />
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                          <RecBadge rec={v.recommendation} />
+                          <span style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT }}>
+                            {Math.round(v.score_confidence * 100)}% confidence
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Expand/collapse criteria */}
+                      <button onClick={() => setExpanded(open ? null : v.vendor_id)} style={{
+                        width: "100%", background: "none", border: "none", borderTop: `1px solid ${P.border.dim}`,
+                        padding: "8px 16px", textAlign: "left", cursor: "pointer",
+                        fontSize: 11, color: P.text.muted, fontFamily: FONT, display: "flex", justifyContent: "space-between",
+                      }}>
+                        <span>{open ? "Hide" : "Show"} criterion breakdown</span>
+                        <span>{open ? "▲" : "▼"}</span>
+                      </button>
+
+                      {open && (
+                        <div style={{ borderTop: `1px solid ${P.border.dim}`, padding: "12px 16px" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                            <thead>
+                              <tr>
+                                {["Criterion", "Score /10", "Contribution", "Rationale"].map(h => (
+                                  <th key={h} style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, textAlign: "left", padding: "4px 8px", fontFamily: FONT, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                              {v.criterion_breakdown.map((c: any) => (
+                                <tr key={c.criterion_id} style={{ borderTop: `1px solid ${P.border.dim}` }}>
+                                  <td style={{ fontSize: 12, color: P.text.primary, padding: "7px 8px", fontFamily: FONT }}>{c.criterion_name ?? c.criterion_id}</td>
+                                  <td style={{ fontFamily: MONO, fontSize: 12, color: P.text.secondary, padding: "7px 8px" }}>{c.raw_score}/10</td>
+                                  <td style={{ fontFamily: MONO, fontSize: 12, color: "#00D4AA", padding: "7px 8px" }}>{c.weighted_contribution.toFixed(2)}</td>
+                                  <td style={{ fontSize: 11, color: P.text.muted, padding: "7px 8px", fontFamily: FONT, fontStyle: "italic" }}>{c.score_rationale ?? "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <button onClick={() => router.push(`/${runId}/override?vendor=${v.vendor_id}`)} style={{
+                            marginTop: 10, background: "transparent", border: `1px solid #F59E0B`,
+                            borderRadius: 6, padding: "5px 12px", fontSize: 11,
+                            color: "#F59E0B", cursor: "pointer", fontFamily: FONT,
+                          }}>
+                            Override this decision
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Rejected tab */}
+            {tab === "rejected" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {rejected.length === 0 && (
+                  <p style={{ fontSize: 13, color: P.text.muted, fontFamily: FONT }}>No vendors rejected.</p>
+                )}
+                {rejected.map(v => (
+                  <div key={v.vendor_id} style={{ background: "#EF444410", border: "1px solid #EF444430", borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#EF4444", fontFamily: FONT, marginBottom: 6 }}>
+                      {v.vendor_name || v.vendor_id}
+                    </div>
+                    <div style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT, marginBottom: 8 }}>
+                      Failed checks: {v.failed_checks.join(", ")}
+                    </div>
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {v.evidence_citations.map((cite: any, i: number) => (
+                      <div key={i} style={{
+                        background: P.bg.surface, border: `1px solid ${P.border.dim}`,
+                        borderRadius: 6, padding: "7px 10px", marginBottom: 5,
+                        fontSize: 12, color: P.text.secondary, fontFamily: FONT, fontStyle: "italic",
+                      }}>
+                        &ldquo;{cite}&rdquo;
+                      </div>
+                    ))}
+                    <button onClick={() => router.push(`/${runId}/override?vendor=${v.vendor_id}`)} style={{
+                      marginTop: 4, background: "transparent", border: `1px solid #F59E0B`,
+                      borderRadius: 6, padding: "5px 12px", fontSize: 11,
+                      color: "#F59E0B", cursor: "pointer", fontFamily: FONT,
+                    }}>
+                      Override rejection
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── What happened — activity log ──────────────────────────────── */}
+        {agentLog.length > 0 && (
+          <div style={{ background: P.bg.surface, borderRadius: TOKENS.radius.card, border: `1px solid ${P.border.mid}`, overflow: "hidden" }}>
+            <button
+              onClick={() => setLogOpen(o => !o)}
+              style={{
+                width: "100%", background: "none", border: "none", cursor: "pointer",
+                padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600, color: P.text.primary, fontFamily: FONT }}>
+                What happened during this evaluation
+              </span>
+              <span style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT }}>{logOpen ? "▲ hide" : "▼ show"}</span>
+            </button>
+
+            {logOpen && (
+              <div style={{ borderTop: `1px solid ${P.border.dim}`, padding: "8px 0" }}>
+                {agentLog.map((entry, i) => {
+                  const dotColour = entry.status === "done" ? "#10B981" : entry.status === "blocked" ? "#EF4444" : "#3B82F6";
+                  const isLast    = i === agentLog.length - 1;
+                  const time      = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                  return (
+                    <div key={i} style={{ display: "flex", gap: 0, padding: "0 20px" }}>
+                      {/* Timeline spine */}
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginRight: 14, paddingTop: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: dotColour, flexShrink: 0 }} />
+                        {!isLast && <div style={{ width: 1, flex: 1, background: P.border.dim, minHeight: 20 }} />}
+                      </div>
+                      {/* Content */}
+                      <div style={{ paddingBottom: isLast ? 16 : 10, paddingTop: 4, flex: 1 }}>
+                        <div style={{ fontSize: 13, color: P.text.primary, fontFamily: FONT, lineHeight: 1.5 }}>{entry.message}</div>
+                        <div style={{ fontSize: 10, color: P.text.muted, fontFamily: MONO, marginTop: 2 }}>{time}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
+        {/* ── Audit trail ──────────────────────────────────────────────── */}
+        {auditTrail.length > 0 && (
+          <div style={{ background: P.bg.surface, borderRadius: TOKENS.radius.card, border: `1px solid ${P.border.mid}`, overflow: "hidden" }}>
+            <button
+              onClick={() => setAuditOpen(o => !o)}
+              style={{
+                width: "100%", background: "none", border: "none", cursor: "pointer",
+                padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600, color: P.text.primary, fontFamily: FONT }}>
+                Audit trail ({auditTrail.length} events)
+              </span>
+              <span style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT }}>{auditOpen ? "▲ hide" : "▼ show"}</span>
+            </button>
 
-        {/* Shortlisted */}
-        {results.shortlisted_vendors.length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6">
-            <h2 className="text-base font-semibold text-slate-700 mb-4">Shortlisted Vendors</h2>
-            <div className="space-y-4">
-              {results.shortlisted_vendors.map((v) => (
-                <div key={v.vendor_id} className="border border-slate-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <span className="w-7 h-7 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">
-                        {v.rank}
-                      </span>
-                      <div>
-                        <p className="font-semibold text-slate-800">{v.vendor_name || v.vendor_id}</p>
-                        <p className="text-xs text-slate-500">Confidence: {Math.round(v.score_confidence * 100)}%</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xl font-bold text-slate-800">{v.total_score.toFixed(1)}<span className="text-sm text-slate-400">/10</span></p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${REC_BADGE[v.recommendation] ?? "bg-slate-100 text-slate-600"}`}>
-                        {v.recommendation.replace(/_/g, " ")}
-                      </span>
-                    </div>
-                  </div>
-                  {v.criterion_breakdown.length > 0 && (
-                    <table className="w-full text-xs text-slate-600">
-                      <thead>
-                        <tr className="border-b border-slate-100">
-                          <th className="text-left pb-1 font-medium">Criterion</th>
-                          <th className="text-center pb-1 font-medium">Score</th>
-                          <th className="text-right pb-1 font-medium">Contribution</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {v.criterion_breakdown.map((c) => (
-                          <tr key={c.criterion_id} className="border-b border-slate-50">
-                            <td className="py-1">{c.criterion_name ?? c.criterion_id}</td>
-                            <td className="text-center py-1">{c.raw_score}/10</td>
-                            <td className="text-right py-1">{c.weighted_contribution.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                  <button
-                    onClick={() => router.push(`/${runId}/override?vendor=${v.vendor_id}`)}
-                    className="mt-3 text-xs text-slate-500 hover:text-slate-700 underline"
-                  >
-                    Override decision
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Rejected */}
-        {results.rejected_vendors.length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6">
-            <h2 className="text-base font-semibold text-slate-700 mb-4">Rejected Vendors</h2>
-            <div className="space-y-4">
-              {results.rejected_vendors.map((v) => (
-                <div key={v.vendor_id} className="border border-red-100 rounded-lg p-4 bg-red-50">
-                  <p className="font-semibold text-red-800">{v.vendor_name || v.vendor_id}</p>
-                  <p className="text-xs text-red-600 mt-1">Failed: {v.failed_checks.join(", ")}</p>
-                  {v.evidence_citations.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {v.evidence_citations.map((cite, i) => (
-                        <p key={i} className="text-xs text-slate-600 bg-white border border-slate-200 rounded px-2 py-1 italic">
-                          &ldquo;{cite}&rdquo;
-                        </p>
+            {auditOpen && (
+              <div style={{ borderTop: `1px solid ${P.border.dim}` }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: P.bg.elevated }}>
+                      {["When", "Event", "Actor", "Agent", "Detail"].map(h => (
+                        <th key={h} style={{
+                          fontSize: 10, fontWeight: 600, color: P.text.muted, textAlign: "left",
+                          padding: "8px 14px", fontFamily: FONT, textTransform: "uppercase", letterSpacing: "0.06em",
+                        }}>{h}</th>
                       ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditTrail.map((ev, i) => {
+                      const isRun      = ev.event_type.startsWith("run.");
+                      const isOverride = ev.event_type.startsWith("override.");
+                      const dotColour  = isOverride ? "#F59E0B" : ev.event_type.endsWith(".blocked") ? "#EF4444" : ev.event_type.endsWith(".completed") ? "#10B981" : "#3B82F6";
+                      const time       = new Date(ev.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                      const date       = new Date(ev.ts).toLocaleDateString();
+                      return (
+                        <tr key={i} style={{ borderTop: `1px solid ${P.border.dim}`, background: i % 2 === 0 ? "transparent" : P.bg.elevated + "60" }}>
+                          <td style={{ padding: "7px 14px", fontFamily: MONO, fontSize: 11, color: P.text.muted, whiteSpace: "nowrap" }}>
+                            {date}<br />{time}
+                          </td>
+                          <td style={{ padding: "7px 14px" }}>
+                            <span style={{
+                              fontSize: 11, fontWeight: 600,
+                              color: dotColour, background: dotColour + "18",
+                              padding: "2px 8px", borderRadius: 10,
+                              fontFamily: MONO, border: `1px solid ${dotColour}40`,
+                            }}>{ev.event_type}</span>
+                          </td>
+                          <td style={{ padding: "7px 14px", fontSize: 12, color: isRun || isOverride ? P.text.primary : P.text.muted, fontFamily: FONT }}>
+                            {ev.actor}
+                          </td>
+                          <td style={{ padding: "7px 14px", fontSize: 11, color: P.text.muted, fontFamily: MONO }}>
+                            {ev.agent ?? "—"}
+                          </td>
+                          <td style={{ padding: "7px 14px", fontSize: 11, color: P.text.muted, fontFamily: FONT, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {Object.entries(ev.detail || {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
-
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

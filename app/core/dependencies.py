@@ -10,10 +10,12 @@ Usage in route:
         # current_user.role is verified from JWT
         ...
 """
+from typing import Generator
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from app.core.auth import decode_token, TokenData
+from app.db.fact_store import get_engine
 
 security = HTTPBearer()
 
@@ -36,6 +38,13 @@ async def get_current_user(
         return token_data
     except JWTError:
         raise credentials_exception
+
+
+def get_db() -> Generator:
+    """Yields a SQLAlchemy connection; commits on exit, rolls back on error."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        yield conn
 
 
 async def get_current_user_optional(

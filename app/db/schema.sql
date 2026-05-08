@@ -51,18 +51,25 @@ CREATE TABLE IF NOT EXISTS evaluation_setups (
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_runs (
-    run_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id          UUID NOT NULL,
-    setup_id        TEXT REFERENCES evaluation_setups(setup_id),
-    rfp_id          TEXT NOT NULL,
-    agent_id        UUID REFERENCES agent_registry(agent_id),
-    status          TEXT DEFAULT 'running',    -- running | complete | failed | blocked
-    vendor_ids      TEXT[],
-    contract_value  NUMERIC,
-    approval_tier   INTEGER,
-    langsmith_trace TEXT,
-    created_at      TIMESTAMPTZ DEFAULT now(),
-    completed_at    TIMESTAMPTZ
+    run_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id           UUID NOT NULL,
+    setup_id         TEXT REFERENCES evaluation_setups(setup_id),
+    rfp_id           TEXT NOT NULL,
+    rfp_title        TEXT,
+    department       TEXT,
+    rfp_filename     TEXT,
+    rfp_bytes        BYTEA,
+    agent_id         UUID REFERENCES agent_registry(agent_id),
+    status           TEXT DEFAULT 'running',
+    vendor_ids       TEXT[],
+    contract_value   NUMERIC,
+    approval_tier    INTEGER,
+    langsmith_trace  TEXT,
+    agent_events     JSONB NOT NULL DEFAULT '[]',
+    agent_log        JSONB NOT NULL DEFAULT '[]',
+    decision_output  JSONB,
+    created_at       TIMESTAMPTZ DEFAULT now(),
+    completed_at     TIMESTAMPTZ
 );
 
 -- ── Vendor documents ──────────────────────────────────────────────────
@@ -74,6 +81,8 @@ CREATE TABLE IF NOT EXISTS vendor_documents (
     rfp_id        TEXT NOT NULL,
     setup_id      TEXT REFERENCES evaluation_setups(setup_id),
     filename      TEXT NOT NULL,
+    file_name     TEXT,
+    file_bytes    BYTEA,
     content_hash  TEXT NOT NULL,
     quality_score FLOAT,
     total_chunks  INTEGER,
@@ -346,3 +355,66 @@ CREATE INDEX IF NOT EXISTS idx_facts_setup_target
 CREATE INDEX IF NOT EXISTS idx_facts_numeric
     ON extracted_facts(org_id, vendor_id, target_id, numeric_value)
     WHERE numeric_value IS NOT NULL;
+
+-- ── Audit log ─────────────────────────────────────────────────────────────────
+-- Append-only. Never UPDATE or DELETE rows. One row per significant event.
+-- event_type values:
+--   run.created | run.confirmed | run.completed | run.interrupted | run.blocked
+--   agent.started | agent.completed | agent.blocked
+--   override.submitted | approval.requested | approval.responded
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    log_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id      UUID NOT NULL,
+    run_id      UUID REFERENCES evaluation_runs(run_id) ON DELETE SET NULL,
+    event_type  TEXT NOT NULL,
+    actor       TEXT NOT NULL DEFAULT 'system',
+    agent       TEXT,
+    detail      JSONB,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_run ON audit_log(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_log_org ON audit_log(org_id, created_at);
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+
+-- ── SaaS shell tables ──────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id     UUID NOT NULL REFERENCES organisations(org_id) ON DELETE CASCADE,
+    email      TEXT NOT NULL,
+    hashed_pw  TEXT NOT NULL,
+    role       TEXT NOT NULL DEFAULT 'department_user'
+                   CHECK (role IN ('platform_admin','company_admin','department_admin','department_user')),
+    dept_id    UUID,
+    is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY users_org_isolation ON users
+    USING (org_id::text = current_setting('app.current_org_id', true));
+
+CREATE TABLE IF NOT EXISTS tenant_modules (
+    org_id       UUID NOT NULL REFERENCES organisations(org_id) ON DELETE CASCADE,
+    module_key   TEXT NOT NULL,
+    enabled      BOOLEAN NOT NULL DEFAULT FALSE,
+    config       JSONB NOT NULL DEFAULT '{}',
+    activated_at TIMESTAMPTZ,
+    PRIMARY KEY (org_id, module_key)
+);
+
+CREATE TABLE IF NOT EXISTS tenant_billing (
+    org_id                 UUID PRIMARY KEY REFERENCES organisations(org_id) ON DELETE CASCADE,
+    stripe_customer_id     TEXT,
+    stripe_subscription_id TEXT,
+    plan                   TEXT NOT NULL DEFAULT 'trial'
+                               CHECK (plan IN ('trial','starter','professional','enterprise')),
+    modules_active         TEXT[] NOT NULL DEFAULT '{}',
+    next_billing           TIMESTAMPTZ
+);
