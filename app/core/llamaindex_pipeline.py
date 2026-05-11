@@ -17,6 +17,7 @@ from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     get_leaf_nodes,
 )
+import httpx
 from openai import OpenAI, AzureOpenAI
 from app.config import settings
 
@@ -29,14 +30,19 @@ _embed_client = None
 def get_embed_client():
     global _embed_client
     if _embed_client is None:
+        http_client = httpx.Client(verify=settings.ssl_verify) if not settings.ssl_verify else None
         if settings.llm_provider == "azure":
             _embed_client = AzureOpenAI(
                 azure_endpoint=settings.azure_openai_endpoint,
                 api_key=settings.azure_openai_api_key,
                 api_version=settings.azure_openai_api_version,
+                **({"http_client": http_client} if http_client else {}),
             )
         else:
-            _embed_client = OpenAI(api_key=settings.openai_api_key)
+            _embed_client = OpenAI(
+                api_key=settings.openai_api_key,
+                **({"http_client": http_client} if http_client else {}),
+            )
     return _embed_client
 
 

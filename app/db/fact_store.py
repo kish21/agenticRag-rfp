@@ -3,6 +3,7 @@ Writes extracted facts to PostgreSQL.
 Called immediately after Extraction Agent runs.
 """
 import json
+import uuid as _uuid
 import sqlalchemy as sa
 from app.core.output_models import EvaluationSetup, ExtractionOutput, IngestionOutput
 from app.config import settings
@@ -24,6 +25,16 @@ def get_engine() -> sa.Engine:
     return _engine
 
 
+def _safe_uuid(value) -> str | None:
+    """Return value as UUID string if valid, else None (avoids FK cast errors)."""
+    if value is None:
+        return None
+    try:
+        return str(_uuid.UUID(str(value)))
+    except (ValueError, AttributeError):
+        return None
+
+
 def save_extraction_output(
     output: ExtractionOutput,
     doc_id: str
@@ -31,10 +42,19 @@ def save_extraction_output(
     """
     Persists all extracted facts to PostgreSQL.
     Each table call is idempotent — safe to call multiple times.
+
+    Uses engine.begin() for auto-commit and sets app.current_org_id so
+    background-task calls pass the RLS policy on all fact tables.
     """
     engine = get_engine()
+    org_id = str(output.org_id)
+    safe_doc_id = _safe_uuid(doc_id)  # None if caller passed rfp_id-vendor string
 
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        # RLS: background tasks have no request context, so set the session var
+        # that every fact table's USING policy checks before allowing writes.
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": org_id})
+
         for cert in output.certifications:
             conn.execute(sa.text("""
                 INSERT INTO extracted_certifications (
@@ -43,14 +63,14 @@ def save_extraction_output(
                     issuing_body, scope, valid_until, status,
                     confidence, grounding_quote, source_chunk_id
                 ) VALUES (
-                    :doc_id, :org_id, :vendor_id,
+                    CAST(:doc_id AS uuid), CAST(:org_id AS uuid), :vendor_id,
                     :standard_name, :version, :cert_number,
                     :issuing_body, :scope, :valid_until, :status,
                     :confidence, :grounding_quote, :source_chunk_id
                 ) ON CONFLICT DO NOTHING
             """), {
-                "doc_id": doc_id,
-                "org_id": output.org_id,
+                "doc_id": safe_doc_id,
+                "org_id": org_id,
                 "vendor_id": output.vendor_id,
                 "standard_name": cert.standard_name,
                 "version": cert.version,
@@ -71,13 +91,13 @@ def save_extraction_output(
                     insurance_type, amount_gbp, provider,
                     confidence, grounding_quote, source_chunk_id
                 ) VALUES (
-                    :doc_id, :org_id, :vendor_id,
+                    CAST(:doc_id AS uuid), CAST(:org_id AS uuid), :vendor_id,
                     :insurance_type, :amount_gbp, :provider,
                     :confidence, :grounding_quote, :source_chunk_id
                 ) ON CONFLICT DO NOTHING
             """), {
-                "doc_id": doc_id,
-                "org_id": output.org_id,
+                "doc_id": safe_doc_id,
+                "org_id": org_id,
                 "vendor_id": output.vendor_id,
                 "insurance_type": ins.insurance_type,
                 "amount_gbp": ins.amount_gbp,
@@ -95,14 +115,14 @@ def save_extraction_output(
                     resolution_hours, uptime_percentage,
                     confidence, grounding_quote, source_chunk_id
                 ) VALUES (
-                    :doc_id, :org_id, :vendor_id,
+                    CAST(:doc_id AS uuid), CAST(:org_id AS uuid), :vendor_id,
                     :priority_level, :response_minutes,
                     :resolution_hours, :uptime_percentage,
                     :confidence, :grounding_quote, :source_chunk_id
                 ) ON CONFLICT DO NOTHING
             """), {
-                "doc_id": doc_id,
-                "org_id": output.org_id,
+                "doc_id": safe_doc_id,
+                "org_id": org_id,
                 "vendor_id": output.vendor_id,
                 "priority_level": sla.priority_level,
                 "response_minutes": sla.response_minutes,
@@ -121,14 +141,14 @@ def save_extraction_output(
                     outcomes, reference_available,
                     confidence, grounding_quote, source_chunk_id
                 ) VALUES (
-                    :doc_id, :org_id, :vendor_id,
+                    CAST(:doc_id AS uuid), CAST(:org_id AS uuid), :vendor_id,
                     :client_name, :client_sector, :user_count,
                     :outcomes, :reference_available,
                     :confidence, :grounding_quote, :source_chunk_id
                 ) ON CONFLICT DO NOTHING
             """), {
-                "doc_id": doc_id,
-                "org_id": output.org_id,
+                "doc_id": safe_doc_id,
+                "org_id": org_id,
                 "vendor_id": output.vendor_id,
                 "client_name": proj.client_name,
                 "client_sector": proj.client_sector,
@@ -147,13 +167,13 @@ def save_extraction_output(
                     year, amount_gbp, total_gbp, includes,
                     confidence, grounding_quote, source_chunk_id
                 ) VALUES (
-                    :doc_id, :org_id, :vendor_id,
+                    CAST(:doc_id AS uuid), CAST(:org_id AS uuid), :vendor_id,
                     :year, :amount_gbp, :total_gbp, :includes,
                     :confidence, :grounding_quote, :source_chunk_id
                 ) ON CONFLICT DO NOTHING
             """), {
-                "doc_id": doc_id,
-                "org_id": output.org_id,
+                "doc_id": safe_doc_id,
+                "org_id": org_id,
                 "vendor_id": output.vendor_id,
                 "year": price.year,
                 "amount_gbp": price.amount_gbp,
@@ -172,14 +192,14 @@ def save_extraction_output(
                     text_value, numeric_value, boolean_value, unit,
                     confidence, grounding_quote, source_chunk_id
                 ) VALUES (
-                    :doc_id, :org_id, :vendor_id, :setup_id,
+                    CAST(:doc_id AS uuid), CAST(:org_id AS uuid), :vendor_id, :setup_id,
                     :target_id, :fact_type, :fact_name,
                     :text_value, :numeric_value, :boolean_value, :unit,
                     :confidence, :grounding_quote, :source_chunk_id
                 ) ON CONFLICT DO NOTHING
             """), {
-                "doc_id": doc_id,
-                "org_id": output.org_id,
+                "doc_id": safe_doc_id,
+                "org_id": org_id,
                 "vendor_id": output.vendor_id,
                 "setup_id": getattr(output, "setup_id", None),
                 "target_id": fact.target_id,
@@ -193,8 +213,6 @@ def save_extraction_output(
                 "grounding_quote": fact.grounding_quote,
                 "source_chunk_id": fact.source_chunk_id,
             })
-
-        conn.commit()
 
 
 def get_vendor_facts(
@@ -211,41 +229,44 @@ def get_vendor_facts(
     engine = get_engine()
 
     with engine.connect() as conn:
+        # Set RLS context so background-task reads pass the org isolation policy
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
+
         certs = conn.execute(sa.text("""
             SELECT * FROM extracted_certifications
             WHERE org_id::text = :org_id AND vendor_id = :vendor_id
             ORDER BY confidence DESC
-        """), {"org_id": org_id, "vendor_id": vendor_id}).fetchall()
+        """), {"org_id": str(org_id), "vendor_id": vendor_id}).fetchall()
 
         insurance = conn.execute(sa.text("""
             SELECT * FROM extracted_insurance
             WHERE org_id::text = :org_id AND vendor_id = :vendor_id
             ORDER BY confidence DESC
-        """), {"org_id": org_id, "vendor_id": vendor_id}).fetchall()
+        """), {"org_id": str(org_id), "vendor_id": vendor_id}).fetchall()
 
         slas = conn.execute(sa.text("""
             SELECT * FROM extracted_slas
             WHERE org_id::text = :org_id AND vendor_id = :vendor_id
             ORDER BY confidence DESC
-        """), {"org_id": org_id, "vendor_id": vendor_id}).fetchall()
+        """), {"org_id": str(org_id), "vendor_id": vendor_id}).fetchall()
 
         projects = conn.execute(sa.text("""
             SELECT * FROM extracted_projects
             WHERE org_id::text = :org_id AND vendor_id = :vendor_id
             ORDER BY confidence DESC
-        """), {"org_id": org_id, "vendor_id": vendor_id}).fetchall()
+        """), {"org_id": str(org_id), "vendor_id": vendor_id}).fetchall()
 
         pricing = conn.execute(sa.text("""
             SELECT * FROM extracted_pricing
             WHERE org_id::text = :org_id AND vendor_id = :vendor_id
             ORDER BY year ASC
-        """), {"org_id": org_id, "vendor_id": vendor_id}).fetchall()
+        """), {"org_id": str(org_id), "vendor_id": vendor_id}).fetchall()
 
         facts_query = """
             SELECT * FROM extracted_facts
             WHERE org_id::text = :org_id AND vendor_id = :vendor_id
         """
-        facts_params: dict = {"org_id": org_id, "vendor_id": vendor_id}
+        facts_params: dict = {"org_id": str(org_id), "vendor_id": vendor_id}
         if setup_id:
             facts_query += " AND setup_id = :setup_id"
             facts_params["setup_id"] = setup_id
@@ -272,7 +293,8 @@ def save_evaluation_setup(setup_dict: dict, org_id: str) -> None:
     """
     engine = get_engine()
     setup_json_str = json.dumps(setup_dict, default=str)
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
         conn.execute(sa.text("""
             INSERT INTO evaluation_setups (
                 setup_id, org_id, department, rfp_id,
@@ -293,7 +315,6 @@ def save_evaluation_setup(setup_dict: dict, org_id: str) -> None:
             "confirmed_at": setup_dict.get("confirmed_at", ""),
             "source": setup_dict.get("source", "manually_defined"),
         })
-        conn.commit()
 
 
 def save_vendor_document(
@@ -307,18 +328,19 @@ def save_vendor_document(
     Called immediately after run_ingestion_agent succeeds.
     """
     engine = get_engine()
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
         conn.execute(sa.text("""
             INSERT INTO vendor_documents (
                 doc_id, org_id, vendor_id, rfp_id, setup_id,
                 filename, content_hash, quality_score, total_chunks
             ) VALUES (
-                :doc_id, CAST(:org_id AS uuid), :vendor_id, :rfp_id, :setup_id,
+                CAST(:doc_id AS uuid), CAST(:org_id AS uuid), :vendor_id, :rfp_id, :setup_id,
                 :filename, :content_hash, :quality_score, :total_chunks
             ) ON CONFLICT (org_id, vendor_id, rfp_id, content_hash) DO NOTHING
         """), {
-            "doc_id": output.doc_id,
-            "org_id": org_id,
+            "doc_id": str(output.doc_id),
+            "org_id": str(org_id),
             "vendor_id": output.vendor_id,
             "rfp_id": rfp_id,
             "setup_id": setup_id,
@@ -327,16 +349,18 @@ def save_vendor_document(
             "quality_score": output.quality_score,
             "total_chunks": output.total_chunks,
         })
-        conn.commit()
 
 
-def get_evaluation_setup(setup_id: str) -> EvaluationSetup:
+def get_evaluation_setup(setup_id: str, org_id: str = None) -> EvaluationSetup:
     """
     Reads an EvaluationSetup back from the evaluation_setups table.
     Called by test scripts and agents that need the full setup object.
+    Pass org_id when calling from a background task (sets RLS context).
     """
     engine = get_engine()
     with engine.connect() as conn:
+        if org_id:
+            conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
         row = conn.execute(sa.text("""
             SELECT setup_json
             FROM evaluation_setups

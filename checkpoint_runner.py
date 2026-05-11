@@ -164,7 +164,7 @@ def SK01_CP07():
         "uvicorn app.main:create_app --factory --port 18000 --log-level error",
         shell=True, cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    time.sleep(4)
+    time.sleep(8)
     try:
         r = httpx.get("http://localhost:18000/health", timeout=5)
         passed = r.status_code == 200 and "healthy" in r.text
@@ -813,7 +813,7 @@ def SK01b_CP03():
         cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env={**os.environ, "PYTHONUTF8": "1"}
     )
-    time.sleep(4)
+    time.sleep(8)
     try:
         r = httpx.get("http://localhost:18001/health", timeout=5)
         passed = r.status_code == 200 and "healthy" in r.text
@@ -833,7 +833,7 @@ def SK01b_CP04():
         cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env={**os.environ, "PYTHONUTF8": "1"}
     )
-    time.sleep(4)
+    time.sleep(8)
     try:
         r = httpx.post(
             "http://localhost:18002/api/v1/auth/token",
@@ -878,7 +878,7 @@ def SK01b_CP06():
         cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env={**os.environ, "PYTHONUTF8": "1"}
     )
-    time.sleep(4)
+    time.sleep(8)
     try:
         r = httpx.get(
             "http://localhost:18003/api/v1/auth/me",

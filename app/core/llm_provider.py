@@ -13,38 +13,62 @@ from typing import Optional
 from app.config import settings
 
 
+def _http_client():
+    """Return an httpx.AsyncClient with SSL verification disabled when SSL_VERIFY=false."""
+    if not settings.ssl_verify:
+        import httpx
+        return httpx.AsyncClient(verify=False)
+    return None
+
+
 def get_llm_client():
     provider = settings.llm_provider.lower()
+    http_client = _http_client()
 
     if provider == "openai":
         from openai import AsyncOpenAI
-        return AsyncOpenAI(api_key=settings.openai_api_key)
+        kwargs = {"api_key": settings.openai_api_key}
+        if http_client:
+            kwargs["http_client"] = http_client
+        return AsyncOpenAI(**kwargs)
 
     elif provider == "anthropic":
         from anthropic import AsyncAnthropic
-        return AsyncAnthropic(api_key=settings.anthropic_api_key)
+        kwargs = {"api_key": settings.anthropic_api_key}
+        if http_client:
+            kwargs["http_client"] = http_client
+        return AsyncAnthropic(**kwargs)
 
     elif provider == "openrouter":
         from openai import AsyncOpenAI
-        return AsyncOpenAI(
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
-        )
+        kwargs = {
+            "api_key": settings.openrouter_api_key,
+            "base_url": settings.openrouter_base_url,
+        }
+        if http_client:
+            kwargs["http_client"] = http_client
+        return AsyncOpenAI(**kwargs)
 
     elif provider == "ollama":
         from openai import AsyncOpenAI
-        return AsyncOpenAI(
-            api_key="ollama",
-            base_url=f"{settings.ollama_base_url}/v1",
-        )
+        kwargs = {
+            "api_key": "ollama",
+            "base_url": f"{settings.ollama_base_url}/v1",
+        }
+        if http_client:
+            kwargs["http_client"] = http_client
+        return AsyncOpenAI(**kwargs)
 
     elif provider == "azure":
         from openai import AsyncAzureOpenAI
-        return AsyncAzureOpenAI(
-            api_key=settings.azure_openai_api_key,
-            azure_endpoint=settings.azure_openai_endpoint,
-            api_version=settings.azure_openai_api_version,
-        )
+        kwargs = {
+            "api_key": settings.azure_openai_api_key,
+            "azure_endpoint": settings.azure_openai_endpoint,
+            "api_version": settings.azure_openai_api_version,
+        }
+        if http_client:
+            kwargs["http_client"] = http_client
+        return AsyncAzureOpenAI(**kwargs)
 
     else:
         raise ValueError(

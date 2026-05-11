@@ -109,10 +109,11 @@ async def _score_criterion(
     relevant_facts: list[dict],
     vendor_id: str,
 ) -> CriterionScore:
+    has_facts = bool(relevant_facts)
     facts_text = (
         json.dumps(relevant_facts, indent=2, default=str)
-        if relevant_facts
-        else "No facts extracted for this criterion."
+        if has_facts
+        else "No specific facts extracted for this criterion — score based on the broader evidence below if present, otherwise score 0."
     )
     messages = [
         {
@@ -120,7 +121,7 @@ async def _score_criterion(
             "content": (
                 "You are a scoring engine. Score based only on the extracted facts. "
                 "Apply the rubric strictly. Do not award credit for facts not present.\n"
-                "Return only valid JSON."
+                "Return only valid JSON with numeric values (not null) for all fields."
             ),
         },
         {
@@ -133,21 +134,23 @@ async def _score_criterion(
                 f"3-5:  {criterion.rubric_3_5}\n"
                 f"0-2:  {criterion.rubric_0_2}\n\n"
                 f"Extracted facts:\n{facts_text}\n\n"
-                "Score this vendor 0-10.\n"
-                "Return JSON:\n"
-                '{"raw_score": 0, '
-                '"confidence": 0.0, '
-                '"rubric_band_applied": "9-10|6-8|3-5|0-2", '
-                '"evidence_used": ["verbatim quote"], '
-                '"score_rationale": "one sentence", '
-                '"variance_estimate": 0.0}'
+                "Score this vendor 0-10. "
+                "Set confidence to how certain you are of the score (0.0=uncertain, 1.0=certain). "
+                "Even a score of 0 should have high confidence if evidence is clearly absent.\n"
+                "Return JSON with these exact keys and numeric (not null) values:\n"
+                '{"raw_score": <integer 0-10>, '
+                '"confidence": <float 0.0-1.0>, '
+                '"rubric_band_applied": "<one of: 9-10, 6-8, 3-5, 0-2>", '
+                '"evidence_used": ["<verbatim quote or empty string>"], '
+                '"score_rationale": "<one sentence>", '
+                '"variance_estimate": <float 0.0-3.0>}'
             ),
         },
     ]
     raw = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
     parsed = json.loads(raw)
 
-    raw_score = max(0, min(10, int(parsed.get("raw_score", 0))))
+    raw_score = max(0, min(10, int(parsed.get("raw_score") or 0)))
 
     return CriterionScore(
         criterion_id=criterion.criterion_id,
@@ -190,6 +193,16 @@ async def run_evaluation_agent(
         except Exception as e:
             warnings.append(f"Check {check.check_id} failed: {e}")
 
+    # All standard facts as fallback context when custom targets return nothing
+    all_standard_facts = (
+        facts.get("certifications", []) +
+        facts.get("insurance", []) +
+        facts.get("slas", []) +
+        facts.get("projects", []) +
+        facts.get("pricing", []) +
+        facts.get("extracted_facts", [])
+    )
+
     # Score every criterion
     criterion_scores: list[CriterionScore] = []
     for criterion in evaluation_setup.scoring_criteria:
@@ -198,6 +211,9 @@ async def run_evaluation_agent(
             target = target_by_id.get(tid)
             if target:
                 relevant.extend(_get_facts_for_target(facts, target))
+        # Fall back to all extracted facts so the LLM always has context to score from
+        if not relevant:
+            relevant = all_standard_facts
         try:
             score = await _score_criterion(criterion, relevant, vendor_id)
             criterion_scores.append(score)

@@ -62,6 +62,9 @@ class MandatoryCheck(BaseModel):
     description: str
     what_passes: str
     extraction_target_id: str
+    source: Optional[str] = None
+    is_locked: Optional[bool] = None
+    page_reference: Optional[str] = None
 
 
 class ScoringCriterion(BaseModel):
@@ -74,6 +77,9 @@ class ScoringCriterion(BaseModel):
     rubric_3_5: str
     rubric_0_2: str
     extraction_target_ids: List[str]
+    source: Optional[str] = None
+    is_locked: Optional[bool] = None
+    page_reference: Optional[str] = None
 
 
 class EvaluationSetup(BaseModel):
@@ -91,7 +97,7 @@ class EvaluationSetup(BaseModel):
     extraction_targets: List[ExtractionTarget]
     total_weight: float = Field(ge=0.99, le=1.01)
     confirmed_by: str
-    confirmed_at: datetime
+    confirmed_at: Optional[datetime] = None
     source: str  # "department_template" | "rfp_extracted" | "manually_defined" | "mixed"
 
     @model_validator(mode="after")

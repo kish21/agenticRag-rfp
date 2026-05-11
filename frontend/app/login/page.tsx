@@ -100,13 +100,14 @@ export default function LoginPage() {
           </p>
 
           <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div>
+            <div suppressHydrationWarning>
               <label style={labelStyle}>EMAIL</label>
               <input
                 type="email" required autoFocus
                 value={email} onChange={e => setEmail(e.target.value)}
                 placeholder="you@company.com"
                 style={inputStyle}
+                suppressHydrationWarning
               />
             </div>
 

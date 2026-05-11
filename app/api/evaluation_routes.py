@@ -30,7 +30,7 @@ from app.core.auth import TokenData, decode_token
 from app.core.audit import audit
 from app.core.output_models import (
     AuditOverride, EvaluationSetup, MandatoryCheck,
-    ScoringCriterion, ExtractionTarget,
+    ScoringCriterion, ExtractionTarget, RetrievalOutput,
 )
 from app.db.fact_store import get_engine, save_evaluation_setup
 from app.agents.planner import run_planner
@@ -207,92 +207,93 @@ async def start_evaluation(
     if vendor_file_map and not any(vendor_list):
         vendor_list = list(vendor_file_map.keys())
 
-    # Build EvaluationSetup
+    # ── Build EvaluationSetup via criteria merger ──────────
+    from app.core.criteria_merger import (
+        get_org_criteria, get_dept_criteria,
+        extract_rfp_text, extract_criteria_from_rfp,
+        merge_criteria,
+    )
+
+    # Extract text from RFP for LLM analysis
+    rfp_text = extract_rfp_text(rfp_bytes)
+
+    # Load org and department criteria templates
+    org_criteria  = get_org_criteria(user.org_id)
+    dept_criteria = get_dept_criteria(user.org_id, department)
+
+    # Extract criteria from RFP using LLM
+    rfp_criteria = await extract_criteria_from_rfp(rfp_text)
+
+    # Merge all three sources
+    merged = merge_criteria(
+        org_criteria=org_criteria,
+        dept_criteria=dept_criteria,
+        rfp_criteria=rfp_criteria,
+        department=department,
+        rfp_id=rfp_id,
+        org_id=user.org_id,
+    )
+
+    # Build final EvaluationSetup
+    # Fall back to sensible defaults only if merge produced nothing
+    mandatory_checks = merged["mandatory_checks"] or [
+        MandatoryCheck(
+            check_id="chk-default-001",
+            name="Legal entity registration",
+            description="Vendor must be a registered legal entity.",
+            what_passes="Registration number provided.",
+            extraction_target_id="ext-legal-default",
+        )
+    ]
+    scoring_criteria_list = merged["scoring_criteria"] or [
+        ScoringCriterion(
+            criterion_id="crit-default-tech",
+            name="Technical capability",
+            weight=0.50,
+            rubric_9_10="Fully meets requirements.",
+            rubric_6_8="Meets most requirements.",
+            rubric_3_5="Partially meets requirements.",
+            rubric_0_2="Does not meet requirements.",
+            extraction_target_ids=["ext-sla-default"],
+        ),
+        ScoringCriterion(
+            criterion_id="crit-default-commercial",
+            name="Commercial value",
+            weight=0.50,
+            rubric_9_10="Best value, transparent pricing.",
+            rubric_6_8="Competitive pricing.",
+            rubric_3_5="Above-market pricing.",
+            rubric_0_2="Pricing absent.",
+            extraction_target_ids=["ext-pricing-default"],
+        ),
+    ]
+    extraction_targets_list = merged["extraction_targets"] or [
+        ExtractionTarget(
+            target_id="ext-legal-default",
+            name="Legal registration",
+            description="Company registration number.",
+            fact_type="certification",
+            is_mandatory=True,
+            feeds_check_id="chk-default-001",
+        ),
+    ]
+
     evaluation_setup = EvaluationSetup(
         setup_id=setup_id,
         org_id=user.org_id,
         department=department,
         rfp_id=rfp_id,
-        rfp_confirmed=True,
-        confirmed_by=user.email,
-        confirmed_at=datetime.now(timezone.utc),
-        source="department_template",
-        mandatory_checks=[
-            MandatoryCheck(
-                check_id="chk-001",
-                name="Legal entity registration",
-                description="Vendor must be a registered legal entity.",
-                what_passes="Companies House or equivalent registration number provided.",
-                extraction_target_id="ext-legal",
-            ),
-            MandatoryCheck(
-                check_id="chk-002",
-                name="Insurance certificate",
-                description="Vendor must hold valid professional indemnity insurance.",
-                what_passes="Certificate dated within last 12 months with minimum £1M cover.",
-                extraction_target_id="ext-insurance",
-            ),
-        ],
-        scoring_criteria=[
-            ScoringCriterion(
-                criterion_id="crit-tech",
-                name="Technical capability",
-                weight=0.40,
-                rubric_9_10="Fully meets all technical requirements with clear innovation and differentiators.",
-                rubric_6_8="Meets most technical requirements with minor gaps addressed.",
-                rubric_3_5="Partially meets requirements; significant gaps or vague responses.",
-                rubric_0_2="Fails to meet core technical requirements or response is absent.",
-                extraction_target_ids=["ext-sla"],
-            ),
-            ScoringCriterion(
-                criterion_id="crit-commercial",
-                name="Commercial value",
-                weight=0.30,
-                rubric_9_10="Best value, fully transparent pricing, favourable payment terms.",
-                rubric_6_8="Competitive pricing with minor opacities or unfavourable terms.",
-                rubric_3_5="Above-market pricing or significant pricing gaps in proposal.",
-                rubric_0_2="Pricing absent, extreme cost, or completely non-competitive.",
-                extraction_target_ids=["ext-pricing"],
-            ),
-            ScoringCriterion(
-                criterion_id="crit-experience",
-                name="Relevant experience",
-                weight=0.20,
-                rubric_9_10="Extensive directly comparable contracts in same sector, well evidenced.",
-                rubric_6_8="Good track record in similar sectors with some directly comparable work.",
-                rubric_3_5="Limited or tangentially relevant experience; few references provided.",
-                rubric_0_2="No relevant experience demonstrated or references absent.",
-                extraction_target_ids=["ext-project"],
-            ),
-            ScoringCriterion(
-                criterion_id="crit-risk",
-                name="Risk profile",
-                weight=0.10,
-                rubric_9_10="Zero risk flags; strong SLAs, proven financial stability, full compliance.",
-                rubric_6_8="Minor risk flags; adequate SLAs and stable financial position.",
-                rubric_3_5="Several risk flags; weak SLAs or unclear financial position.",
-                rubric_0_2="Major risk flags; SLAs absent, financial instability, or compliance failures.",
-                extraction_target_ids=["ext-insurance", "ext-sla"],
-            ),
-        ],
-        extraction_targets=[
-            ExtractionTarget(target_id="ext-legal", name="Legal registration",
-                description="Company registration number and jurisdiction.", fact_type="certification",
-                is_mandatory=True, feeds_check_id="chk-001"),
-            ExtractionTarget(target_id="ext-insurance", name="Insurance certificate",
-                description="Professional indemnity insurance details.", fact_type="insurance",
-                is_mandatory=True, feeds_check_id="chk-002"),
-            ExtractionTarget(target_id="ext-sla", name="Service Level Agreements",
-                description="Uptime, response, and resolution time commitments.", fact_type="sla",
-                is_mandatory=False, feeds_criterion_id="crit-tech"),
-            ExtractionTarget(target_id="ext-project", name="Past projects",
-                description="Prior contracts comparable in scope and sector.", fact_type="project",
-                is_mandatory=False, feeds_criterion_id="crit-experience"),
-            ExtractionTarget(target_id="ext-pricing", name="Pricing breakdown",
-                description="Total contract cost, unit rates, payment terms.", fact_type="pricing",
-                is_mandatory=False, feeds_criterion_id="crit-commercial"),
-        ],
-        total_weight=1.0,
+        rfp_confirmed=False,
+        confirmed_by="pending",
+        confirmed_at=None,
+        source=merged.get("source", "merged"),
+        mandatory_checks=mandatory_checks,
+        scoring_criteria=scoring_criteria_list,
+        extraction_targets=extraction_targets_list,
+        total_weight=round(
+            sum(float(c.get("weight", 0)) if hasattr(c, "get") else float(c.weight)
+                for c in scoring_criteria_list), 3
+        ),
     )
 
     setup_dict = evaluation_setup.model_dump(mode="json")
@@ -417,6 +418,76 @@ async def get_setup(run_id: str, user: TokenData = Depends(get_current_user)):
     return setup
 
 
+# ── PUT /{runId}/setup ────────────────────────────────────────────────────────
+
+class UpdateSetupRequest(BaseModel):
+    scoring_criteria: list[dict]
+    mandatory_checks: list[dict]
+    extraction_targets: list[dict] | None = None
+
+
+@router.put("/{run_id}/setup")
+async def update_setup(
+    run_id: str,
+    body: UpdateSetupRequest,
+    user: TokenData = Depends(get_current_user),
+):
+    """Customer edits criteria on confirm page before pipeline starts."""
+    run = _db_get_run(run_id, user.org_id)
+    if run["status"] not in ("pending", "pending_confirm"):
+        raise HTTPException(
+            409,
+            "Cannot edit setup after pipeline has started"
+        )
+    existing = _db_get_setup(run["setup_id"])
+
+    # Start from the existing extraction_targets so we don't lose them
+    extraction_targets: list[dict] = list(
+        body.extraction_targets if body.extraction_targets
+        else existing.get("extraction_targets") or []
+    )
+    existing_target_ids = {t["target_id"] for t in extraction_targets}
+
+    # For any user-added mandatory check that has no extraction_target_id,
+    # auto-generate a placeholder extraction target so the model validator passes.
+    checks_out = []
+    for chk in body.mandatory_checks:
+        if not chk.get("extraction_target_id"):
+            auto_tid = f"ext-user-{chk['check_id'].lower()}"
+            chk = dict(chk)
+            chk["extraction_target_id"] = auto_tid
+            if auto_tid not in existing_target_ids:
+                extraction_targets.append({
+                    "target_id":   auto_tid,
+                    "name":        chk.get("name", "User check"),
+                    "description": chk.get("description", ""),
+                    "fact_type":   "custom",
+                    "is_mandatory": True,
+                    "feeds_check_id": chk["check_id"],
+                })
+                existing_target_ids.add(auto_tid)
+        checks_out.append(chk)
+
+    existing["mandatory_checks"]   = checks_out
+    existing["scoring_criteria"]   = body.scoring_criteria
+    existing["extraction_targets"] = extraction_targets
+    existing["source"] = "manually_edited"
+
+    # Recompute total_weight so the ge=0.99 validator doesn't fire on edited weights
+    criteria = existing["scoring_criteria"]
+    if criteria:
+        existing["total_weight"] = round(
+            sum(float(c.get("weight", 0)) for c in criteria), 3
+        )
+
+    try:
+        EvaluationSetup(**existing)
+    except Exception as e:
+        raise HTTPException(422, f"Invalid setup: {e}")
+    save_evaluation_setup(existing, org_id=user.org_id)
+    return {"status": "updated"}
+
+
 # ── POST /{runId}/confirm ──────────────────────────────────────────────────────
 
 @router.post("/{run_id}/confirm")
@@ -528,15 +599,52 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
               log_msg=f"All documents processed and indexed — {len(vendor_file_map)} vendor proposal{'s' if len(vendor_file_map) != 1 else ''} ready for analysis.")
 
         # ── 3. Retrieval ──────────────────────────────────────────────────────
+        # Run one targeted query per scoring criterion + one per mandatory check,
+        # then merge and deduplicate chunks so extraction sees full coverage.
         _emit("retrieval", "running", f"Retrieving chunks for {n_vendors} vendors",
               log_msg="Searching each vendor proposal for relevant sections on pricing, compliance, SLAs, and technical capability.")
         retrieval_outputs: dict = {}
         for vid in vendor_ids:
-            query = f"technical capability SLA pricing compliance for {vid}"
-            ret_out, _ = await run_retrieval_agent(query=query, vendor_id=vid,
-                                                    org_id=org_id, rfp_id=rfp_id,
-                                                    use_hyde=True, use_rewriting=True)
-            retrieval_outputs[vid] = ret_out
+            # Build targeted queries from the confirmed criteria
+            queries: list[str] = []
+            for criterion in evaluation_setup.scoring_criteria:
+                queries.append(criterion.name)
+            for check in evaluation_setup.mandatory_checks:
+                queries.append(check.name)
+            # Fallback if setup has no criteria yet
+            if not queries:
+                queries = ["technical capability SLA pricing compliance certifications experience"]
+
+            seen_chunk_ids: set[str] = set()
+            merged_chunks: list = []
+
+            for query in queries:
+                ret_out, _ = await run_retrieval_agent(
+                    query=query, vendor_id=vid, org_id=org_id, rfp_id=rfp_id,
+                    use_hyde=False, use_rewriting=True, n_candidates=10, n_final=3,
+                )
+                for chunk in ret_out.chunks:
+                    if chunk.chunk_id not in seen_chunk_ids:
+                        seen_chunk_ids.add(chunk.chunk_id)
+                        merged_chunks.append(chunk)
+
+            # Build a synthetic RetrievalOutput from all merged chunks
+            combined = RetrievalOutput(
+                query_id=str(uuid.uuid4()),
+                original_query="; ".join(queries[:3]) + ("..." if len(queries) > 3 else ""),
+                rewritten_query="multi-query",
+                hyde_query_used=False,
+                retrieval_strategy="multi-query-merge",
+                chunks=merged_chunks,
+                total_candidates_before_rerank=len(merged_chunks),
+                confidence=round(
+                    sum(c.final_score for c in merged_chunks) / len(merged_chunks), 3
+                ) if merged_chunks else 0.0,
+                empty_retrieval=len(merged_chunks) == 0,
+                warnings=[],
+            )
+            retrieval_outputs[vid] = combined
+            print(f"[DEBUG retrieval] vendor={vid} queries={len(queries)} unique_chunks={len(merged_chunks)}")
         _emit("retrieval", "done", f"Retrieved chunks for {n_vendors} vendors",
               log_msg=f"Found the most relevant passages from all {n_vendors} vendor proposals.")
 
@@ -546,13 +654,14 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         extraction_outputs: dict = {}
         source_chunks: dict = {}
         for vid in vendor_ids:
-            ext_out, _ = await run_extraction_agent(
+            ext_out, critic_ext = await run_extraction_agent(
                 retrieval_output=retrieval_outputs[vid], vendor_id=vid, org_id=org_id,
                 doc_id=f"{rfp_id}-{vid}", setup_id=setup_id, evaluation_setup=evaluation_setup)
             extraction_outputs[vid] = ext_out
             source_chunks[vid] = "\n".join(
                 c.text for c in retrieval_outputs[vid].chunks
             ) if hasattr(retrieval_outputs[vid], "chunks") else ""
+            print(f"[DEBUG extraction] vendor={vid} slas={len(ext_out.slas)} pricing={len(ext_out.pricing)} facts={len(ext_out.extracted_facts)} completeness={ext_out.extraction_completeness:.2f} hal_risk={ext_out.hallucination_risk:.2f} critic={critic_ext.overall_verdict}")
         total_facts = sum(
             len(getattr(o, "certifications", []) or []) +
             len(getattr(o, "slas", []) or []) +

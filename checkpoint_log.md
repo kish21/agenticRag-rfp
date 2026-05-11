@@ -1864,3 +1864,993 @@
 
 ## SK09-CP06 â€” 2026-05-02 18:55
 **PASS** | Drift detector shows clean | 49.6s
+
+## SK01-CP04 — 2026-05-08 13:44
+**PASS** | app/config.py loads from .env | 5.1s
+
+## SK01-CP02 — 2026-05-08 13:44
+**PASS** | Virtual environment active | 0.3s
+
+## SK01-CP03 — 2026-05-08 13:46
+**PASS** | All packages installed on correct April 2026 versions | 108.2s
+
+## SK01-CP01 — 2026-05-08 13:46
+**PASS** | Python 3.11 installed | 0.2s
+
+## SK01-CP05 — 2026-05-08 13:46
+**PASS** | Docker + PostgreSQL healthy | 1.2s
+
+## SK01-CP08 — 2026-05-08 13:46
+**PASS** | .env not tracked by git | 0.1s
+
+## SK01-CP09 — 2026-05-08 13:46
+**PASS** | Modal authenticated | 7.5s
+
+## SK01-CP06 — 2026-05-08 13:46
+**PASS** | Qdrant healthy | 2.4s
+
+## SK01-CP07 — 2026-05-08 13:47
+**FAIL** | FastAPI /health returns 200 | 8.7s
+
+## SK02-CP01 — 2026-05-08 13:47
+**PASS** | All Pydantic output models import cleanly | 1.3s
+
+## SK02-CP02 — 2026-05-08 13:47
+**PASS** | Rate limiter works and acquires correctly | 4.5s
+
+## SK02-CP03 — 2026-05-08 13:47
+**PASS** | Qdrant client connects | 5.2s
+
+## SK02-CP04 — 2026-05-08 13:47
+**PASS** | Planner Agent has correct signature | 1.0s
+
+## SK02-CP05 — 2026-05-08 13:47
+**PASS** | All Critic Agent functions importable | 1.6s
+
+## SK02-CP06 — 2026-05-08 13:47
+**PASS** | Critic blocks rejection without evidence — HARD | 1.1s
+
+## SK02-CP07 — 2026-05-08 13:47
+**PASS** | RFP confirmation formats correctly | 1.0s
+
+## SK02-CP08 — 2026-05-08 13:47
+**PASS** | Override mechanism rejects short reason | 2.0s
+
+## SK03-CP01 — 2026-05-08 13:47
+**PASS** | All PostgreSQL tables exist | 2.5s
+
+## SK03-CP02 — 2026-05-08 13:47
+**PASS** | Fact store reads and writes correctly | 2.5s
+
+## SK03-CP03 — 2026-05-08 13:47
+**PASS** | LlamaIndex pipeline processes documents | 18.7s
+
+## SK03-CP04 — 2026-05-08 13:47
+**PASS** | Ingestion validator catches empty PDFs | 0.4s
+
+## SK03-CP05 — 2026-05-08 13:48
+**PASS** | Ingestion Agent stores chunks in Qdrant | 17.3s
+
+## SK03b-CP02 — 2026-05-08 13:48
+**PASS** | Cohere reranker orders candidates correctly | 8.1s
+
+## SK03b-CP04 — 2026-05-08 13:49
+**PASS** | Context compression reduces chunk length | 67.8s
+
+## SK03b-CP01 — 2026-05-08 13:49
+**FAIL** | Query rewriter expands to document language | 38.2s
+
+## SK03b-CP03 — 2026-05-08 13:50
+**FAIL** | HyDE generates hypothetical documents | 35.2s
+
+## SK04-CP01 — 2026-05-08 13:50
+**PASS** | Extraction output models valid | 1.5s
+
+## SK04-CP02 — 2026-05-08 13:50
+**PASS** | Empty grounding_quote rejected by validator | 1.1s
+
+## SK04-CP03 — 2026-05-08 13:50
+**PASS** | Critic approves valid extraction with grounding | 1.2s
+
+## SK04-CP04 — 2026-05-08 13:50
+**PASS** | CRITICAL: Critic blocks hallucinated grounding quote | 1.0s
+
+## SK04-CP05 — 2026-05-08 13:50
+**PASS** | Fact store has correct table schema | 3.0s
+
+## SK04-CP06 — 2026-05-08 13:50
+**PASS** | Extraction Agent importable | 2.7s
+
+## SK05-CP01 — 2026-05-08 13:50
+**PASS** | Evaluation Agent importable | 2.5s
+
+## SK05-CP02 — 2026-05-08 13:50
+**PASS** | Comparator Agent importable | 2.3s
+
+## SK05-CP03 — 2026-05-08 13:50
+**PASS** | ComplianceDecision model works correctly | 1.3s
+
+## SK05-CP04 — 2026-05-08 13:50
+**PASS** | CriterionScore model includes variance_estimate | 1.8s
+
+## SK05-CP05 — 2026-05-08 13:50
+**PASS** | Config-driven evaluation confirmed | 0.4s
+
+## SK05-CP06 — 2026-05-08 13:50
+**PASS** | ComparatorOutput model valid | 1.4s
+
+## SK05-CP07 — 2026-05-08 13:50
+**PASS** | Full procurement evaluation test passes | 2.1s
+
+## SK06-CP01 — 2026-05-08 13:50
+**PASS** | Decision Agent importable | 1.4s
+
+## SK06-CP02 — 2026-05-08 13:50
+**PASS** | RejectionNotice requires evidence_citations | 1.1s
+
+## SK06-CP03 — 2026-05-08 13:50
+**PASS** | Explanation Agent importable | 1.6s
+
+## SK06-CP04 — 2026-05-08 13:50
+**PASS** | Grounding verification catches fabricated quotes | 1.5s
+
+## SK06-CP05 — 2026-05-08 13:51
+**PASS** | Override mechanism importable | 2.4s
+
+## SK06-CP06 — 2026-05-08 13:51
+**PASS** | RFP confirmation importable | 1.4s
+
+## SK01b-CP01 — 2026-05-08 13:51
+**PASS** | JWT token creation and decoding | 2.6s
+
+## SK01b-CP02 — 2026-05-08 13:51
+**PASS** | Auth routes importable | 4.1s
+
+## SK01b-CP03 — 2026-05-08 13:51
+**FAIL** | FastAPI starts with auth middleware | 8.7s
+
+## SK01b-CP04 — 2026-05-08 13:51
+**PASS** | Token endpoint returns JWT for dev user | 9.0s
+
+## SK01b-CP05 — 2026-05-08 13:51
+**PASS** | Invalid role rejected by require_role | 3.0s
+
+## SK01b-CP06 — 2026-05-08 13:51
+**FAIL** | Invalid token returns 401 | 8.9s
+
+## SK01b-CP07 — 2026-05-08 13:51
+**PASS** | No hardcoded org_id in agent files | 0.5s
+
+## SK07-CP01 — 2026-05-08 13:51
+**PASS** | PDF report generator importable | 1.9s
+
+## SK07-CP02 — 2026-05-08 13:51
+**PASS** | PDF generates with correct content | 1.0s
+
+## SK07-CP03 — 2026-05-08 13:52
+**PASS** | Next.js frontend builds | 39.5s
+
+## SK07-CP04 — 2026-05-08 13:52
+**PASS** | RFP confirmation page exists | 0.0s
+
+## SK07-CP05 — 2026-05-08 13:52
+**PASS** | Regression suite 18/20+ | 12.0s
+
+## SK08-CP01 — 2026-05-08 13:52
+**PASS** | LangFuse client importable | 3.4s
+
+## SK08-CP02 — 2026-05-08 13:52
+**PASS** | Cleanup job importable | 6.1s
+
+## SK09-CP01 — 2026-05-08 13:52
+**PASS** | Agent registry importable | 2.2s
+
+## SK09-CP02 — 2026-05-08 13:52
+**PASS** | HR agent config valid | 0.3s
+
+## SK09-CP03 — 2026-05-08 13:52
+**PASS** | Same engine serves HR agent | 1.6s
+
+## SK09-CP04 — 2026-05-08 13:52
+**PASS** | HR agent test passes | 5.0s
+
+## SK09-CP05 — 2026-05-08 13:53
+**PASS** | Regression still passes after expansion | 14.3s
+
+## SK09-CP06 — 2026-05-08 13:54
+**PASS** | Drift detector shows clean | 70.9s
+
+## SK08-CP03 — 2026-05-08 13:54
+**PASS** | Rate monitor importable | 3.0s
+
+## SK01-CP04 — 2026-05-08 13:57
+**PASS** | app/config.py loads from .env | 1.4s
+
+## SK01-CP02 — 2026-05-08 13:57
+**PASS** | Virtual environment active | 0.3s
+
+## SK01-CP03 — 2026-05-08 13:58
+**PASS** | All packages installed on correct April 2026 versions | 49.0s
+
+## SK01-CP01 — 2026-05-08 13:58
+**PASS** | Python 3.11 installed | 0.3s
+
+## SK01-CP05 — 2026-05-08 13:58
+**PASS** | Docker + PostgreSQL healthy | 0.8s
+
+## SK01-CP08 — 2026-05-08 13:58
+**PASS** | .env not tracked by git | 0.1s
+
+## SK01-CP09 — 2026-05-08 13:58
+**PASS** | Modal authenticated | 3.1s
+
+## SK01-CP06 — 2026-05-08 13:58
+**PASS** | Qdrant healthy | 1.6s
+
+## SK01-CP07 — 2026-05-08 13:58
+**PASS** | FastAPI /health returns 200 | 6.7s
+
+## SK02-CP01 — 2026-05-08 13:58
+**PASS** | All Pydantic output models import cleanly | 1.3s
+
+## SK02-CP02 — 2026-05-08 13:58
+**PASS** | Rate limiter works and acquires correctly | 3.8s
+
+## SK02-CP03 — 2026-05-08 13:58
+**PASS** | Qdrant client connects | 4.5s
+
+## SK02-CP04 — 2026-05-08 13:58
+**PASS** | Planner Agent has correct signature | 0.9s
+
+## SK02-CP05 — 2026-05-08 13:59
+**PASS** | All Critic Agent functions importable | 1.1s
+
+## SK02-CP06 — 2026-05-08 13:59
+**PASS** | Critic blocks rejection without evidence — HARD | 0.9s
+
+## SK02-CP07 — 2026-05-08 13:59
+**PASS** | RFP confirmation formats correctly | 1.2s
+
+## SK02-CP08 — 2026-05-08 13:59
+**PASS** | Override mechanism rejects short reason | 1.9s
+
+## SK03-CP01 — 2026-05-08 13:59
+**PASS** | All PostgreSQL tables exist | 2.3s
+
+## SK03-CP02 — 2026-05-08 13:59
+**PASS** | Fact store reads and writes correctly | 2.3s
+
+## SK03-CP03 — 2026-05-08 13:59
+**PASS** | LlamaIndex pipeline processes documents | 13.4s
+
+## SK03-CP04 — 2026-05-08 13:59
+**PASS** | Ingestion validator catches empty PDFs | 0.3s
+
+## SK03-CP05 — 2026-05-08 13:59
+**PASS** | Ingestion Agent stores chunks in Qdrant | 13.5s
+
+## SK03b-CP02 — 2026-05-08 13:59
+**PASS** | Cohere reranker orders candidates correctly | 4.0s
+
+## SK03b-CP04 — 2026-05-08 14:00
+**PASS** | Context compression reduces chunk length | 56.9s
+
+## SK03b-CP01 — 2026-05-08 14:01
+**FAIL** | Query rewriter expands to document language | 34.2s
+
+## SK03b-CP03 — 2026-05-08 14:01
+**FAIL** | HyDE generates hypothetical documents | 35.3s
+
+## SK04-CP01 — 2026-05-08 14:01
+**PASS** | Extraction output models valid | 1.0s
+
+## SK04-CP02 — 2026-05-08 14:01
+**PASS** | Empty grounding_quote rejected by validator | 1.0s
+
+## SK04-CP03 — 2026-05-08 14:01
+**PASS** | Critic approves valid extraction with grounding | 1.0s
+
+## SK04-CP04 — 2026-05-08 14:01
+**PASS** | CRITICAL: Critic blocks hallucinated grounding quote | 1.0s
+
+## SK04-CP05 — 2026-05-08 14:01
+**PASS** | Fact store has correct table schema | 2.3s
+
+## SK04-CP06 — 2026-05-08 14:01
+**PASS** | Extraction Agent importable | 1.9s
+
+## SK05-CP01 — 2026-05-08 14:01
+**PASS** | Evaluation Agent importable | 1.7s
+
+## SK05-CP02 — 2026-05-08 14:01
+**PASS** | Comparator Agent importable | 1.9s
+
+## SK05-CP03 — 2026-05-08 14:01
+**PASS** | ComplianceDecision model works correctly | 1.2s
+
+## SK05-CP04 — 2026-05-08 14:02
+**PASS** | CriterionScore model includes variance_estimate | 1.4s
+
+## SK05-CP05 — 2026-05-08 14:02
+**PASS** | Config-driven evaluation confirmed | 0.3s
+
+## SK05-CP06 — 2026-05-08 14:02
+**PASS** | ComparatorOutput model valid | 1.1s
+
+## SK05-CP07 — 2026-05-08 14:02
+**PASS** | Full procurement evaluation test passes | 1.8s
+
+## SK06-CP01 — 2026-05-08 14:02
+**PASS** | Decision Agent importable | 1.3s
+
+## SK06-CP02 — 2026-05-08 14:02
+**PASS** | RejectionNotice requires evidence_citations | 1.1s
+
+## SK06-CP03 — 2026-05-08 14:02
+**PASS** | Explanation Agent importable | 1.3s
+
+## SK06-CP04 — 2026-05-08 14:02
+**PASS** | Grounding verification catches fabricated quotes | 1.4s
+
+## SK06-CP05 — 2026-05-08 14:02
+**PASS** | Override mechanism importable | 2.3s
+
+## SK06-CP06 — 2026-05-08 14:02
+**PASS** | RFP confirmation importable | 1.4s
+
+## SK01b-CP01 — 2026-05-08 14:02
+**PASS** | JWT token creation and decoding | 1.5s
+
+## SK01b-CP02 — 2026-05-08 14:02
+**PASS** | Auth routes importable | 5.4s
+
+## SK01b-CP03 — 2026-05-08 14:02
+**FAIL** | FastAPI starts with auth middleware | 9.0s
+
+## SK01b-CP04 — 2026-05-08 14:02
+**FAIL** | Token endpoint returns JWT for dev user | 8.7s
+
+## SK01b-CP05 — 2026-05-08 14:02
+**PASS** | Invalid role rejected by require_role | 2.4s
+
+## SK01b-CP06 — 2026-05-08 14:02
+**FAIL** | Invalid token returns 401 | 9.0s
+
+## SK01b-CP07 — 2026-05-08 14:02
+**PASS** | No hardcoded org_id in agent files | 0.4s
+
+## SK07-CP01 — 2026-05-08 14:02
+**PASS** | PDF report generator importable | 1.6s
+
+## SK07-CP02 — 2026-05-08 14:02
+**PASS** | PDF generates with correct content | 1.2s
+
+## SK07-CP03 — 2026-05-08 14:03
+**PASS** | Next.js frontend builds | 42.5s
+
+## SK07-CP04 — 2026-05-08 14:03
+**PASS** | RFP confirmation page exists | 0.0s
+
+## SK07-CP05 — 2026-05-08 14:03
+**PASS** | Regression suite 18/20+ | 9.8s
+
+## SK08-CP01 — 2026-05-08 14:03
+**PASS** | LangFuse client importable | 3.4s
+
+## SK08-CP02 — 2026-05-08 14:03
+**PASS** | Cleanup job importable | 5.6s
+
+## SK09-CP01 — 2026-05-08 14:03
+**PASS** | Agent registry importable | 1.9s
+
+## SK09-CP02 — 2026-05-08 14:03
+**PASS** | HR agent config valid | 0.2s
+
+## SK09-CP03 — 2026-05-08 14:03
+**PASS** | Same engine serves HR agent | 1.2s
+
+## SK09-CP04 — 2026-05-08 14:04
+**PASS** | HR agent test passes | 3.1s
+
+## SK09-CP05 — 2026-05-08 14:04
+**PASS** | Regression still passes after expansion | 9.1s
+
+## SK09-CP06 — 2026-05-08 14:05
+**PASS** | Drift detector shows clean | 62.3s
+
+## SK08-CP03 — 2026-05-08 14:05
+**PASS** | Rate monitor importable | 4.1s
+
+## SK01-CP04 — 2026-05-08 14:26
+**PASS** | app/config.py loads from .env | 1.0s
+
+## SK01-CP02 — 2026-05-08 14:26
+**PASS** | Virtual environment active | 0.3s
+
+## SK01-CP03 — 2026-05-08 14:27
+**PASS** | All packages installed on correct April 2026 versions | 33.9s
+
+## SK01-CP01 — 2026-05-08 14:27
+**PASS** | Python 3.11 installed | 0.3s
+
+## SK01-CP05 — 2026-05-08 14:27
+**PASS** | Docker + PostgreSQL healthy | 0.7s
+
+## SK01-CP08 — 2026-05-08 14:27
+**PASS** | .env not tracked by git | 0.1s
+
+## SK01-CP09 — 2026-05-08 14:27
+**PASS** | Modal authenticated | 3.6s
+
+## SK01-CP06 — 2026-05-08 14:27
+**PASS** | Qdrant healthy | 1.6s
+
+## SK01-CP07 — 2026-05-08 14:27
+**PASS** | FastAPI /health returns 200 | 8.6s
+
+## SK02-CP01 — 2026-05-08 14:27
+**PASS** | All Pydantic output models import cleanly | 1.2s
+
+## SK02-CP02 — 2026-05-08 14:27
+**PASS** | Rate limiter works and acquires correctly | 4.1s
+
+## SK02-CP03 — 2026-05-08 14:27
+**PASS** | Qdrant client connects | 4.9s
+
+## SK02-CP04 — 2026-05-08 14:27
+**PASS** | Planner Agent has correct signature | 1.0s
+
+## SK02-CP05 — 2026-05-08 14:27
+**PASS** | All Critic Agent functions importable | 1.2s
+
+## SK02-CP06 — 2026-05-08 14:27
+**PASS** | Critic blocks rejection without evidence — HARD | 1.3s
+
+## SK02-CP07 — 2026-05-08 14:27
+**PASS** | RFP confirmation formats correctly | 2.4s
+
+## SK02-CP08 — 2026-05-08 14:27
+**PASS** | Override mechanism rejects short reason | 2.6s
+
+## SK03-CP01 — 2026-05-08 14:27
+**PASS** | All PostgreSQL tables exist | 2.4s
+
+## SK03-CP02 — 2026-05-08 14:27
+**PASS** | Fact store reads and writes correctly | 2.6s
+
+## SK03-CP03 — 2026-05-08 14:28
+**PASS** | LlamaIndex pipeline processes documents | 12.8s
+
+## SK03-CP04 — 2026-05-08 14:28
+**PASS** | Ingestion validator catches empty PDFs | 0.3s
+
+## SK03-CP05 — 2026-05-08 14:28
+**PASS** | Ingestion Agent stores chunks in Qdrant | 15.5s
+
+## SK03b-CP02 — 2026-05-08 14:28
+**PASS** | Cohere reranker orders candidates correctly | 4.3s
+
+## SK03b-CP04 — 2026-05-08 14:28
+**PASS** | Context compression reduces chunk length | 14.2s
+
+## SK03b-CP01 — 2026-05-08 14:28
+**PASS** | Query rewriter expands to document language | 12.5s
+
+## SK03b-CP03 — 2026-05-08 14:29
+**PASS** | HyDE generates hypothetical documents | 12.0s
+
+## SK04-CP01 — 2026-05-08 14:29
+**PASS** | Extraction output models valid | 1.0s
+
+## SK04-CP02 — 2026-05-08 14:29
+**PASS** | Empty grounding_quote rejected by validator | 1.0s
+
+## SK04-CP03 — 2026-05-08 14:29
+**PASS** | Critic approves valid extraction with grounding | 1.0s
+
+## SK04-CP04 — 2026-05-08 14:29
+**PASS** | CRITICAL: Critic blocks hallucinated grounding quote | 1.6s
+
+## SK04-CP05 — 2026-05-08 14:29
+**PASS** | Fact store has correct table schema | 2.7s
+
+## SK04-CP06 — 2026-05-08 14:29
+**PASS** | Extraction Agent importable | 2.2s
+
+## SK05-CP01 — 2026-05-08 14:29
+**PASS** | Evaluation Agent importable | 1.8s
+
+## SK05-CP02 — 2026-05-08 14:29
+**PASS** | Comparator Agent importable | 1.7s
+
+## SK05-CP03 — 2026-05-08 14:29
+**PASS** | ComplianceDecision model works correctly | 1.3s
+
+## SK05-CP04 — 2026-05-08 14:29
+**PASS** | CriterionScore model includes variance_estimate | 1.3s
+
+## SK05-CP05 — 2026-05-08 14:29
+**PASS** | Config-driven evaluation confirmed | 0.3s
+
+## SK05-CP06 — 2026-05-08 14:29
+**PASS** | ComparatorOutput model valid | 0.9s
+
+## SK05-CP07 — 2026-05-08 14:29
+**PASS** | Full procurement evaluation test passes | 1.6s
+
+## SK06-CP01 — 2026-05-08 14:29
+**PASS** | Decision Agent importable | 1.8s
+
+## SK06-CP02 — 2026-05-08 14:29
+**PASS** | RejectionNotice requires evidence_citations | 1.2s
+
+## SK06-CP03 — 2026-05-08 14:29
+**PASS** | Explanation Agent importable | 1.5s
+
+## SK06-CP04 — 2026-05-08 14:29
+**PASS** | Grounding verification catches fabricated quotes | 1.6s
+
+## SK06-CP05 — 2026-05-08 14:29
+**PASS** | Override mechanism importable | 3.2s
+
+## SK06-CP06 — 2026-05-08 14:29
+**PASS** | RFP confirmation importable | 1.2s
+
+## SK01b-CP01 — 2026-05-08 14:29
+**PASS** | JWT token creation and decoding | 1.6s
+
+## SK01b-CP02 — 2026-05-08 14:29
+**PASS** | Auth routes importable | 2.8s
+
+## SK01b-CP03 — 2026-05-08 14:29
+**FAIL** | FastAPI starts with auth middleware | 8.6s
+
+## SK01b-CP04 — 2026-05-08 14:29
+**FAIL** | Token endpoint returns JWT for dev user | 8.7s
+
+## SK01b-CP05 — 2026-05-08 14:29
+**PASS** | Invalid role rejected by require_role | 2.3s
+
+## SK01b-CP06 — 2026-05-08 14:30
+**FAIL** | Invalid token returns 401 | 8.8s
+
+## SK01b-CP07 — 2026-05-08 14:30
+**PASS** | No hardcoded org_id in agent files | 0.4s
+
+## SK07-CP01 — 2026-05-08 14:30
+**PASS** | PDF report generator importable | 1.3s
+
+## SK07-CP02 — 2026-05-08 14:30
+**PASS** | PDF generates with correct content | 1.3s
+
+## SK07-CP03 — 2026-05-08 14:30
+**PASS** | Next.js frontend builds | 31.7s
+
+## SK07-CP04 — 2026-05-08 14:30
+**PASS** | RFP confirmation page exists | 0.0s
+
+## SK07-CP05 — 2026-05-08 14:30
+**PASS** | Regression suite 18/20+ | 9.8s
+
+## SK08-CP01 — 2026-05-08 14:30
+**PASS** | LangFuse client importable | 3.5s
+
+## SK08-CP02 — 2026-05-08 14:30
+**PASS** | Cleanup job importable | 4.8s
+
+## SK09-CP01 — 2026-05-08 14:30
+**PASS** | Agent registry importable | 1.9s
+
+## SK09-CP02 — 2026-05-08 14:30
+**PASS** | HR agent config valid | 0.3s
+
+## SK09-CP03 — 2026-05-08 14:30
+**PASS** | Same engine serves HR agent | 1.0s
+
+## SK09-CP04 — 2026-05-08 14:31
+**PASS** | HR agent test passes | 2.6s
+
+## SK09-CP05 — 2026-05-08 14:31
+**PASS** | Regression still passes after expansion | 9.1s
+
+## SK09-CP06 — 2026-05-08 14:32
+**PASS** | Drift detector shows clean | 68.4s
+
+## SK08-CP03 — 2026-05-08 14:32
+**PASS** | Rate monitor importable | 3.7s
+
+## SK01-CP04 — 2026-05-08 14:41
+**PASS** | app/config.py loads from .env | 1.3s
+
+## SK01-CP02 — 2026-05-08 14:41
+**PASS** | Virtual environment active | 0.3s
+
+## SK01-CP03 — 2026-05-08 14:42
+**PASS** | All packages installed on correct April 2026 versions | 37.3s
+
+## SK01-CP01 — 2026-05-08 14:42
+**PASS** | Python 3.11 installed | 0.4s
+
+## SK01-CP05 — 2026-05-08 14:42
+**PASS** | Docker + PostgreSQL healthy | 0.9s
+
+## SK01-CP08 — 2026-05-08 14:42
+**PASS** | .env not tracked by git | 0.1s
+
+## SK01-CP09 — 2026-05-08 14:42
+**PASS** | Modal authenticated | 4.4s
+
+## SK01-CP06 — 2026-05-08 14:42
+**PASS** | Qdrant healthy | 1.3s
+
+## SK01-CP07 — 2026-05-08 14:42
+**PASS** | FastAPI /health returns 200 | 10.8s
+
+## SK02-CP01 — 2026-05-08 14:42
+**PASS** | All Pydantic output models import cleanly | 1.5s
+
+## SK02-CP02 — 2026-05-08 14:42
+**PASS** | Rate limiter works and acquires correctly | 5.4s
+
+## SK02-CP03 — 2026-05-08 14:42
+**PASS** | Qdrant client connects | 9.0s
+
+## SK02-CP04 — 2026-05-08 14:42
+**PASS** | Planner Agent has correct signature | 1.6s
+
+## SK02-CP05 — 2026-05-08 14:42
+**PASS** | All Critic Agent functions importable | 1.7s
+
+## SK02-CP06 — 2026-05-08 14:42
+**PASS** | Critic blocks rejection without evidence — HARD | 1.4s
+
+## SK02-CP07 — 2026-05-08 14:42
+**PASS** | RFP confirmation formats correctly | 1.4s
+
+## SK02-CP08 — 2026-05-08 14:42
+**PASS** | Override mechanism rejects short reason | 3.1s
+
+## SK03-CP01 — 2026-05-08 14:42
+**PASS** | All PostgreSQL tables exist | 2.8s
+
+## SK03-CP02 — 2026-05-08 14:43
+**PASS** | Fact store reads and writes correctly | 3.7s
+
+## SK03-CP03 — 2026-05-08 14:43
+**PASS** | LlamaIndex pipeline processes documents | 17.7s
+
+## SK03-CP04 — 2026-05-08 14:43
+**PASS** | Ingestion validator catches empty PDFs | 0.4s
+
+## SK03-CP05 — 2026-05-08 14:43
+**PASS** | Ingestion Agent stores chunks in Qdrant | 18.9s
+
+## SK03b-CP02 — 2026-05-08 14:43
+**PASS** | Cohere reranker orders candidates correctly | 6.4s
+
+## SK03b-CP04 — 2026-05-08 14:44
+**PASS** | Context compression reduces chunk length | 19.8s
+
+## SK03b-CP01 — 2026-05-08 14:44
+**PASS** | Query rewriter expands to document language | 15.2s
+
+## SK03b-CP03 — 2026-05-08 14:44
+**PASS** | HyDE generates hypothetical documents | 13.5s
+
+## SK04-CP01 — 2026-05-08 14:44
+**PASS** | Extraction output models valid | 1.8s
+
+## SK04-CP02 — 2026-05-08 14:44
+**PASS** | Empty grounding_quote rejected by validator | 1.3s
+
+## SK04-CP03 — 2026-05-08 14:44
+**PASS** | Critic approves valid extraction with grounding | 1.1s
+
+## SK04-CP04 — 2026-05-08 14:44
+**PASS** | CRITICAL: Critic blocks hallucinated grounding quote | 0.9s
+
+## SK04-CP05 — 2026-05-08 14:44
+**PASS** | Fact store has correct table schema | 2.7s
+
+## SK04-CP06 — 2026-05-08 14:44
+**PASS** | Extraction Agent importable | 2.2s
+
+## SK05-CP01 — 2026-05-08 14:44
+**PASS** | Evaluation Agent importable | 1.9s
+
+## SK05-CP02 — 2026-05-08 14:44
+**PASS** | Comparator Agent importable | 2.4s
+
+## SK05-CP03 — 2026-05-08 14:44
+**PASS** | ComplianceDecision model works correctly | 1.5s
+
+## SK05-CP04 — 2026-05-08 14:44
+**PASS** | CriterionScore model includes variance_estimate | 1.3s
+
+## SK05-CP05 — 2026-05-08 14:44
+**PASS** | Config-driven evaluation confirmed | 0.3s
+
+## SK05-CP06 — 2026-05-08 14:44
+**PASS** | ComparatorOutput model valid | 2.4s
+
+## SK05-CP07 — 2026-05-08 14:44
+**PASS** | Full procurement evaluation test passes | 2.5s
+
+## SK06-CP01 — 2026-05-08 14:44
+**PASS** | Decision Agent importable | 1.3s
+
+## SK06-CP02 — 2026-05-08 14:44
+**PASS** | RejectionNotice requires evidence_citations | 1.1s
+
+## SK06-CP03 — 2026-05-08 14:44
+**PASS** | Explanation Agent importable | 1.3s
+
+## SK06-CP04 — 2026-05-08 14:45
+**PASS** | Grounding verification catches fabricated quotes | 1.2s
+
+## SK06-CP05 — 2026-05-08 14:45
+**PASS** | Override mechanism importable | 2.0s
+
+## SK06-CP06 — 2026-05-08 14:45
+**PASS** | RFP confirmation importable | 1.1s
+
+## SK01b-CP01 — 2026-05-08 14:45
+**PASS** | JWT token creation and decoding | 1.7s
+
+## SK01b-CP02 — 2026-05-08 14:45
+**PASS** | Auth routes importable | 3.0s
+
+## SK01b-CP03 — 2026-05-08 14:45
+**PASS** | FastAPI starts with auth middleware | 11.4s
+
+## SK01b-CP04 — 2026-05-08 14:45
+**PASS** | Token endpoint returns JWT for dev user | 11.0s
+
+## SK01b-CP05 — 2026-05-08 14:45
+**PASS** | Invalid role rejected by require_role | 2.4s
+
+## SK01b-CP06 — 2026-05-08 14:45
+**PASS** | Invalid token returns 401 | 10.7s
+
+## SK01b-CP07 — 2026-05-08 14:45
+**PASS** | No hardcoded org_id in agent files | 0.3s
+
+## SK07-CP01 — 2026-05-08 14:45
+**PASS** | PDF report generator importable | 0.9s
+
+## SK07-CP02 — 2026-05-08 14:45
+**PASS** | PDF generates with correct content | 1.1s
+
+## SK07-CP03 — 2026-05-08 14:46
+**PASS** | Next.js frontend builds | 33.6s
+
+## SK07-CP04 — 2026-05-08 14:46
+**PASS** | RFP confirmation page exists | 0.0s
+
+## SK07-CP05 — 2026-05-08 14:46
+**PASS** | Regression suite 18/20+ | 10.1s
+
+## SK08-CP01 — 2026-05-08 14:46
+**PASS** | LangFuse client importable | 3.6s
+
+## SK08-CP02 — 2026-05-08 14:46
+**PASS** | Cleanup job importable | 5.4s
+
+## SK09-CP01 — 2026-05-08 14:46
+**PASS** | Agent registry importable | 1.7s
+
+## SK09-CP02 — 2026-05-08 14:46
+**PASS** | HR agent config valid | 0.3s
+
+## SK09-CP03 — 2026-05-08 14:46
+**PASS** | Same engine serves HR agent | 1.2s
+
+## SK09-CP04 — 2026-05-08 14:46
+**PASS** | HR agent test passes | 3.4s
+
+## SK09-CP05 — 2026-05-08 14:46
+**PASS** | Regression still passes after expansion | 10.1s
+
+## SK09-CP06 — 2026-05-08 14:47
+**PASS** | Drift detector shows clean | 56.2s
+
+## SK08-CP03 — 2026-05-08 14:47
+**PASS** | Rate monitor importable | 3.5s
+
+## SK01-CP04 â€” 2026-05-08 16:42
+**PASS** | app/config.py loads from .env | 1.1s
+
+## SK01-CP02 â€” 2026-05-08 16:42
+**PASS** | Virtual environment active | 0.3s
+
+## SK01-CP03 â€” 2026-05-08 16:44
+**PASS** | All packages installed on correct April 2026 versions | 81.1s
+
+## SK01-CP01 â€” 2026-05-08 16:44
+**PASS** | Python 3.11 installed | 0.2s
+
+## SK01-CP05 â€” 2026-05-08 16:44
+**PASS** | Docker + PostgreSQL healthy | 1.2s
+
+## SK01-CP08 â€” 2026-05-08 16:44
+**PASS** | .env not tracked by git | 0.2s
+
+## SK01-CP09 â€” 2026-05-08 16:44
+**PASS** | Modal authenticated | 7.7s
+
+## SK01-CP06 â€” 2026-05-08 16:44
+**PASS** | Qdrant healthy | 1.6s
+
+## SK01-CP07 â€” 2026-05-08 16:44
+**PASS** | FastAPI /health returns 200 | 10.5s
+
+## SK02-CP01 â€” 2026-05-08 16:44
+**PASS** | All Pydantic output models import cleanly | 0.8s
+
+## SK02-CP02 â€” 2026-05-08 16:44
+**PASS** | Rate limiter works and acquires correctly | 3.4s
+
+## SK02-CP03 â€” 2026-05-08 16:44
+**PASS** | Qdrant client connects | 4.3s
+
+## SK02-CP04 â€” 2026-05-08 16:44
+**PASS** | Planner Agent has correct signature | 1.1s
+
+## SK02-CP05 â€” 2026-05-08 16:44
+**PASS** | All Critic Agent functions importable | 1.0s
+
+## SK02-CP06 â€” 2026-05-08 16:44
+**PASS** | Critic blocks rejection without evidence â€” HARD | 1.2s
+
+## SK02-CP07 â€” 2026-05-08 16:44
+**PASS** | RFP confirmation formats correctly | 1.6s
+
+## SK02-CP08 â€” 2026-05-08 16:44
+**PASS** | Override mechanism rejects short reason | 2.5s
+
+## SK03-CP01 â€” 2026-05-08 16:44
+**PASS** | All PostgreSQL tables exist | 3.3s
+
+## SK03-CP02 â€” 2026-05-08 16:44
+**PASS** | Fact store reads and writes correctly | 2.6s
+
+## SK03-CP03 â€” 2026-05-08 16:45
+**PASS** | LlamaIndex pipeline processes documents | 20.8s
+
+## SK03-CP04 â€” 2026-05-08 16:45
+**PASS** | Ingestion validator catches empty PDFs | 0.3s
+
+## SK03-CP05 â€” 2026-05-08 16:45
+**PASS** | Ingestion Agent stores chunks in Qdrant | 14.5s
+
+## SK03b-CP02 â€” 2026-05-08 16:45
+**PASS** | Cohere reranker orders candidates correctly | 7.5s
+
+## SK03b-CP04 â€” 2026-05-08 16:45
+**PASS** | Context compression reduces chunk length | 21.1s
+
+## SK03b-CP01 â€” 2026-05-08 16:46
+**PASS** | Query rewriter expands to document language | 11.1s
+
+## SK03b-CP03 â€” 2026-05-08 16:46
+**PASS** | HyDE generates hypothetical documents | 13.6s
+
+## SK04-CP01 â€” 2026-05-08 16:46
+**PASS** | Extraction output models valid | 1.4s
+
+## SK04-CP02 â€” 2026-05-08 16:46
+**PASS** | Empty grounding_quote rejected by validator | 1.2s
+
+## SK04-CP03 â€” 2026-05-08 16:46
+**PASS** | Critic approves valid extraction with grounding | 1.0s
+
+## SK04-CP04 â€” 2026-05-08 16:46
+**PASS** | CRITICAL: Critic blocks hallucinated grounding quote | 1.0s
+
+## SK04-CP05 â€” 2026-05-08 16:46
+**PASS** | Fact store has correct table schema | 2.3s
+
+## SK04-CP06 â€” 2026-05-08 16:46
+**PASS** | Extraction Agent importable | 2.0s
+
+## SK05-CP01 â€” 2026-05-08 16:46
+**PASS** | Evaluation Agent importable | 1.7s
+
+## SK05-CP02 â€” 2026-05-08 16:46
+**PASS** | Comparator Agent importable | 1.9s
+
+## SK05-CP03 â€” 2026-05-08 16:46
+**PASS** | ComplianceDecision model works correctly | 0.9s
+
+## SK05-CP04 â€” 2026-05-08 16:46
+**PASS** | CriterionScore model includes variance_estimate | 1.0s
+
+## SK05-CP05 â€” 2026-05-08 16:46
+**PASS** | Config-driven evaluation confirmed | 0.2s
+
+## SK05-CP06 â€” 2026-05-08 16:46
+**PASS** | ComparatorOutput model valid | 1.0s
+
+## SK05-CP07 â€” 2026-05-08 16:46
+**PASS** | Full procurement evaluation test passes | 2.0s
+
+## SK06-CP01 â€” 2026-05-08 16:46
+**PASS** | Decision Agent importable | 1.5s
+
+## SK06-CP02 â€” 2026-05-08 16:46
+**PASS** | RejectionNotice requires evidence_citations | 1.3s
+
+## SK06-CP03 â€” 2026-05-08 16:46
+**PASS** | Explanation Agent importable | 1.5s
+
+## SK06-CP04 â€” 2026-05-08 16:46
+**PASS** | Grounding verification catches fabricated quotes | 1.3s
+
+## SK06-CP05 â€” 2026-05-08 16:46
+**PASS** | Override mechanism importable | 1.6s
+
+## SK06-CP06 â€” 2026-05-08 16:46
+**PASS** | RFP confirmation importable | 1.2s
+
+## SK01b-CP01 â€” 2026-05-08 16:46
+**PASS** | JWT token creation and decoding | 1.3s
+
+## SK01b-CP02 â€” 2026-05-08 16:46
+**PASS** | Auth routes importable | 2.8s
+
+## SK01b-CP03 â€” 2026-05-08 16:47
+**PASS** | FastAPI starts with auth middleware | 10.9s
+
+## SK01b-CP04 â€” 2026-05-08 16:47
+**PASS** | Token endpoint returns JWT for dev user | 10.9s
+
+## SK01b-CP05 â€” 2026-05-08 16:47
+**PASS** | Invalid role rejected by require_role | 1.9s
+
+## SK01b-CP06 â€” 2026-05-08 16:47
+**PASS** | Invalid token returns 401 | 10.9s
+
+## SK01b-CP07 â€” 2026-05-08 16:47
+**PASS** | No hardcoded org_id in agent files | 0.3s
+
+## SK07-CP01 â€” 2026-05-08 16:47
+**PASS** | PDF report generator importable | 1.9s
+
+## SK07-CP02 â€” 2026-05-08 16:47
+**PASS** | PDF generates with correct content | 1.0s
+
+## SK07-CP03 â€” 2026-05-08 16:48
+**PASS** | Next.js frontend builds | 34.2s
+
+## SK07-CP04 â€” 2026-05-08 16:48
+**PASS** | RFP confirmation page exists | 0.0s
+
+## SK07-CP05 â€” 2026-05-08 16:48
+**PASS** | Regression suite 18/20+ | 8.9s
+
+## SK08-CP01 â€” 2026-05-08 16:48
+**PASS** | LangFuse client importable | 2.7s
+
+## SK08-CP02 â€” 2026-05-08 16:48
+**PASS** | Cleanup job importable | 4.4s
+
+## SK09-CP01 â€” 2026-05-08 16:48
+**PASS** | Agent registry importable | 2.1s
+
+## SK09-CP02 â€” 2026-05-08 16:48
+**PASS** | HR agent config valid | 0.2s
+
+## SK09-CP03 â€” 2026-05-08 16:48
+**PASS** | Same engine serves HR agent | 1.0s
+
+## SK09-CP04 â€” 2026-05-08 16:48
+**PASS** | HR agent test passes | 2.4s
+
+## SK09-CP05 â€” 2026-05-08 16:48
+**PASS** | Regression still passes after expansion | 8.1s
+
+## SK09-CP06 â€” 2026-05-08 16:49
+**PASS** | Drift detector shows clean | 47.4s
+
+## SK08-CP03 â€” 2026-05-08 16:49
+**PASS** | Rate monitor importable | 3.1s

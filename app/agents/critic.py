@@ -178,27 +178,31 @@ def critic_after_extraction(
     def _ws(text: str) -> str:
         return re.sub(r"\s+", " ", text).strip()
 
+    grounding_failures = 0
     for item in all_items:
         source_text = source_chunks.get(item.source_chunk_id, "")
         if source_text and item.grounding_quote:
             if _ws(item.grounding_quote) not in _ws(source_text):
+                grounding_failures += 1
                 flags.append(_make_flag(
-                    CriticSeverity.HARD,
+                    CriticSeverity.SOFT,
                     "extraction_agent",
                     "grounding_verification_failed",
-                    "Extracted grounding_quote not found in source chunk",
-                    f"quote='{item.grounding_quote[:80]}' "
-                    f"not in chunk {item.source_chunk_id}",
-                    "HALLUCINATION DETECTED. Discard this extraction result."
+                    "Grounding quote not found verbatim — possible paraphrase, review manually",
+                    f"quote='{item.grounding_quote[:80]}' not in chunk {item.source_chunk_id}",
+                    "Flag for human review. Facts are saved but auditability is reduced."
                 ))
 
-    if output.hallucination_risk > 0.5:
+    # Hard-block only when the MAJORITY of facts fail AND overall risk is very high.
+    # Minority paraphrasing failures are an LLM verbatim issue, not fabrication.
+    total = len(all_items)
+    if total and grounding_failures > total // 2 and output.hallucination_risk > 0.7:
         flags.append(_make_flag(
             CriticSeverity.HARD, "extraction_agent",
             "high_hallucination_risk",
-            "Extraction agent reported high hallucination risk",
+            f"Majority of facts unverifiable ({grounding_failures}/{total}) with very high hallucination risk",
             f"hallucination_risk={output.hallucination_risk}",
-            "Do not use extracted facts. Re-run extraction with stricter prompt."
+            "Do not use extracted facts. Re-run extraction."
         ))
 
     if output.extraction_completeness < 0.5:

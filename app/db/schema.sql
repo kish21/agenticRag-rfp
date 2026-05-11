@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS evaluation_setups (
     rfp_id         TEXT NOT NULL,
     setup_json     JSONB NOT NULL,             -- full EvaluationSetup as JSON
     confirmed_by   TEXT NOT NULL,              -- user_id who confirmed
-    confirmed_at   TIMESTAMPTZ NOT NULL,
+    confirmed_at   TIMESTAMPTZ,
     source         TEXT NOT NULL,              -- "department_template" | "rfp_extracted" | "mixed"
     created_at     TIMESTAMPTZ DEFAULT now()
 );
@@ -418,3 +418,65 @@ CREATE TABLE IF NOT EXISTS tenant_billing (
     modules_active         TEXT[] NOT NULL DEFAULT '{}',
     next_billing           TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS org_criteria_templates (
+    template_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id         UUID NOT NULL REFERENCES organisations(org_id)
+                   ON DELETE CASCADE,
+    check_type     TEXT NOT NULL
+                   CHECK (check_type IN ('mandatory','scoring')),
+    name           TEXT NOT NULL,
+    description    TEXT DEFAULT '',
+    what_passes    TEXT DEFAULT '',
+    default_weight DECIMAL(4,3) DEFAULT 0.0,
+    rubric         JSONB DEFAULT '{}',
+    applies_to     TEXT DEFAULT 'all',
+    is_locked      BOOLEAN DEFAULT FALSE,
+    created_by     TEXT DEFAULT 'system',
+    created_at     TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS dept_criteria_templates (
+    template_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id         UUID NOT NULL REFERENCES organisations(org_id)
+                   ON DELETE CASCADE,
+    department     TEXT NOT NULL,
+    check_type     TEXT NOT NULL
+                   CHECK (check_type IN ('mandatory','scoring')),
+    name           TEXT NOT NULL,
+    description    TEXT DEFAULT '',
+    what_passes    TEXT DEFAULT '',
+    default_weight DECIMAL(4,3) DEFAULT 0.0,
+    rubric         JSONB DEFAULT '{}',
+    is_locked      BOOLEAN DEFAULT FALSE,
+    created_by     TEXT DEFAULT 'system',
+    created_at     TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE org_criteria_templates ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename='org_criteria_templates'
+    AND policyname='org_criteria_isolation'
+  ) THEN
+    CREATE POLICY org_criteria_isolation
+    ON org_criteria_templates
+    USING (org_id::text =
+      current_setting('app.current_org_id', true));
+  END IF;
+END $$;
+
+ALTER TABLE dept_criteria_templates ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename='dept_criteria_templates'
+    AND policyname='dept_criteria_isolation'
+  ) THEN
+    CREATE POLICY dept_criteria_isolation
+    ON dept_criteria_templates
+    USING (org_id::text =
+      current_setting('app.current_org_id', true));
+  END IF;
+END $$;

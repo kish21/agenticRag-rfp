@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     hard_flag_blocks_pipeline: bool = True
     rate_limit_requests_per_minute: int = 50
     skip_embeddings: bool = False  # set True in dev/test to skip OpenAI embedding calls
+    ssl_verify: bool = True  # set False on corporate/VPN networks with proxy certs
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 

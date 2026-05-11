@@ -417,6 +417,8 @@ async def run_extraction_agent(
         try:
             save_extraction_output(output, doc_id)
         except Exception as e:
-            warnings.append(f"PostgreSQL save failed: {e}")
+            # Print here because Pydantic copies warnings list at model construction
+            # time, so appending after won't update output.warnings.
+            print(f"[ERROR extraction] PostgreSQL save failed vendor={vendor_id}: {e}")
 
     return output, critic

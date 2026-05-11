@@ -190,12 +190,18 @@ async def run_retrieval_agent(
     ]
     reranked = rerank_candidates(query, candidates, top_n=n_final)
 
-    # Step 4: Context compression
-    compressed = await _compress_context(query, reranked)
+    # Step 4: Lost-in-middle reorder (best first, second-best last)
+    # Context compression is intentionally skipped: compressing chunk text
+    # causes the extraction critic's verbatim grounding check to fail because
+    # the LLM produces quotes from the original text which no longer appear
+    # in the rewritten/paraphrased version, blocking all fact saves.
+    if len(reranked) >= 3:
+        best, second, *middle = reranked
+        reranked = [best] + middle + [second]
 
     # Step 5: Build typed output
     chunks = []
-    for item in compressed:
+    for item in reranked:
         payload = item.get("payload", {})
         chunks.append(
             RetrievedChunk(
