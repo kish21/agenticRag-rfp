@@ -1068,6 +1068,51 @@ def SK09_CP06():
     return ("no drift" in o.lower() or "on track" in o.lower(), o[:300])
 
 
+# ── CONFIG checkpoints ────────────────────────────────────────────────
+
+def CONFIG_CP01():
+    """platform.yaml and product.yaml load correctly via settings."""
+    c, o = _run("""python -c "
+from app.config import settings
+assert settings.platform.llm.primary_model, 'no primary_model'
+assert settings.platform.retrieval.embedding_model, 'no embedding_model'
+assert 'balanced' in settings.product.presets, 'no balanced preset'
+assert settings.product.new_org_defaults, 'no new_org_defaults'
+print('config layers ok')
+" """)
+    return ("config layers ok" in o, o[:300])
+
+
+def CONFIG_CP02():
+    """OrgSettings round-trip: defaults load from product.yaml, preset apply works."""
+    c, o = _run("""python -c "
+import uuid
+from app.core.org_settings import get_org_settings, upsert_org_settings
+from app.config import settings as cfg
+test_org = 'cp-test-' + str(uuid.uuid4())[:8]
+s = get_org_settings(test_org)
+assert s.quality_tier == cfg.product.new_org_defaults['quality_tier']
+s2 = upsert_org_settings(test_org, updated_by='test', quality_tier='fast')
+fast = cfg.product.presets['fast'].config
+assert s2.use_hyde == fast['use_hyde']
+assert s2.retrieval_top_k == fast['retrieval_top_k']
+print('org_settings round-trip ok')
+" """)
+    return ("org_settings round-trip ok" in o, o[:300])
+
+
+def CONFIG_CP03():
+    """Audit script reports 0 violations."""
+    c, o = _run("python scripts/audit_hardcoded_values.py")
+    return ("0 violations" in o, o[:300])
+
+
+def AUDIT_CP01():
+    """Audit completeness: all pipeline events carry run_id."""
+    c, o = _run("python scripts/test_audit_completeness.py")
+    return ("All tests passed" in o, o[:400])
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 CHECKPOINTS = {
@@ -1137,6 +1182,10 @@ CHECKPOINTS = {
     "SK09-CP04": (SK09_CP04, "HR agent test passes"),
     "SK09-CP05": (SK09_CP05, "Regression still passes after expansion"),
     "SK09-CP06": (SK09_CP06, "Drift detector shows clean"),
+    "CONFIG-CP01": (CONFIG_CP01, "platform.yaml + product.yaml load via settings"),
+    "CONFIG-CP02": (CONFIG_CP02, "OrgSettings round-trip from product.yaml presets"),
+    "CONFIG-CP03": (CONFIG_CP03, "Audit script reports 0 hardcoded violations"),
+    "AUDIT-CP01":  (AUDIT_CP01,  "Audit completeness: all pipeline events carry run_id"),
 }
 
 # ── Runner ─────────────────────────────────────────────────────────────
@@ -1147,9 +1196,9 @@ def run_checkpoint(cp_id: str, state: dict) -> bool:
         return False
 
     fn, description = CHECKPOINTS[cp_id]
-    print(f"\n{'─'*56}")
+    print(f"\n{'-'*56}")
     print(f"  {cp_id}: {description}")
-    print(f"{'─'*56}")
+    print(f"{'-'*56}")
 
     start = time.time()
     try:
@@ -1162,7 +1211,7 @@ def run_checkpoint(cp_id: str, state: dict) -> bool:
         passed, message = False, traceback.format_exc()[-300:]
     elapsed = time.time() - start
 
-    status = "✓ PASS" if passed else "✗ FAIL"
+    status = "PASS" if passed else "FAIL"
     print(f"  {status} ({elapsed:.1f}s)")
     if message:
         print(f"  {message[:200]}")
@@ -1171,7 +1220,7 @@ def run_checkpoint(cp_id: str, state: dict) -> bool:
         mark_passed(cp_id, state)
     else:
         mark_failed(cp_id, state)
-        print(f"\n  ⛔ STOP — fix this before continuing")
+        print(f"\n  STOP - fix this before continuing")
 
     with open(LOG_FILE, "a") as f:
         f.write(f"\n## {cp_id} — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
@@ -1195,10 +1244,10 @@ def show_status(state: dict):
         print(f"\nFailed ({len(failed)}):")
         for cp in failed:
             _, desc = CHECKPOINTS.get(cp, (None, "unknown"))
-            print(f"  ✗ {cp}: {desc}")
+            print(f"  FAIL {cp}: {desc}")
 
     print(f"\nNext skill: ", end="")
-    skills = ["SK01","SK02","SK03","SK03b","SK04","SK05","SK06","SK07","SK08","SK09"]
+    skills = ["SK01","SK02","SK03","SK03b","SK04","SK05","SK06","SK07","SK08","SK09","CONFIG"]
     current = state.get("current_skill")
     if not current:
         print("SK01 — start here")
@@ -1208,7 +1257,7 @@ def show_status(state: dict):
                 print(skills[i + 1])
                 break
         else:
-            print("All skills complete 🎉")
+            print("All skills complete")
     print("="*56)
 
 

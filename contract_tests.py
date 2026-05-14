@@ -21,13 +21,13 @@ def contract(name):
             print(f"\n  Contract: {name}")
             try:
                 fn()
-                print("  \u2713 PASS")
+                print("  PASS")
                 RESULTS.append((name, True, None))
             except AssertionError as e:
-                print(f"  \u2717 FAIL: {e}")
+                print(f"  FAIL: {e}")
                 RESULTS.append((name, False, str(e)))
             except Exception as e:
-                print(f"  \u2717 ERROR: {type(e).__name__}: {e}")
+                print(f"  ERROR: {type(e).__name__}: {e}")
                 RESULTS.append((name, False, str(e)))
         return wrapper
     return decorator
@@ -352,9 +352,9 @@ def main():
     passed = sum(1 for _,p,_ in RESULTS if p)
     print(f"CONTRACTS: {passed}/{len(RESULTS)} passed")
     if passed == len(RESULTS):
-        print("\u2713 All interfaces intact")
+        print("[OK] All interfaces intact")
     else:
-        print("\u2717 Violations detected")
+        print("[FAIL] Violations detected")
         for n,ok,e in RESULTS:
             if not ok:
                 print(f"\n  FAILED: {n}\n    {(e or '')[:200]}")

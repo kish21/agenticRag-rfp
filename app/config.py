@@ -10,29 +10,22 @@ class Settings(BaseSettings):
 
     # OpenAI (also used for embeddings regardless of llm_provider)
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o"
-    openai_embedding_model: str = "text-embedding-3-large"
     openai_temperature: float = 0.1
 
     # Azure OpenAI
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
-    azure_openai_deployment: str = "gpt-4o"
-    azure_openai_embedding_deployment: str = "text-embedding-3-large"
     azure_openai_api_version: str = "2024-12-01-preview"
 
     # Anthropic
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-20250514"
 
     # OpenRouter
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_model: str = "openai/gpt-4o"
 
     # Ollama (local — Qwen, Llama, Mistral etc.)
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:72b"
 
     # LangSmith (new SDK uses LANGSMITH_* prefix — v0.2+)
     langsmith_tracing: bool = True
@@ -45,6 +38,13 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
 
+    # Observability provider
+    # Options: langfuse | stdout | none
+    # langfuse — LangFuse cloud (default)
+    # stdout   — JSON logs to console (dev / air-gapped)
+    # none     — silent drop (testing, CI)
+    observability_provider: str = "langfuse"
+
     # Reranker provider
     # Options: cohere | bge | colbert | none
     # cohere  — Cohere Rerank API (paid, best quality)
@@ -55,7 +55,6 @@ class Settings(BaseSettings):
 
     # Cohere
     cohere_api_key: str = ""
-    cohere_rerank_model: str = "rerank-english-v3.0"
 
     # App
     app_api_key: str = ""
@@ -96,8 +95,6 @@ class Settings(BaseSettings):
     modal_token_secret: str = ""
 
     # Platform behaviour
-    confidence_threshold: float = 0.75
-    max_retry_limit: int = 5
     hard_flag_blocks_pipeline: bool = True
     rate_limit_requests_per_minute: int = 50
     skip_embeddings: bool = False  # set True in dev/test to skip OpenAI embedding calls

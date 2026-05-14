@@ -1,3 +1,5 @@
+from app.config import settings as _cfg
+
 HR_AGENT_CONFIG = {
     "identity": {
         "agent_type": "hr",
@@ -32,7 +34,7 @@ HR_AGENT_CONFIG = {
         },
     },
     "agent_behaviour": {
-        "llm": {"temperature": 0.0},
+        "llm": {"model": _cfg.platform.llm.primary_model, "temperature": 0.0},
         "tone": "conversational",
     },
     "output": {

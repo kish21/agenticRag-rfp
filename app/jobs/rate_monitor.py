@@ -1,7 +1,7 @@
 import datetime
 import httpx
 
-from app.core.langfuse_client import log_critic_flag
+from app.core.observability_provider import log_critic_flag
 
 _ALERT_THRESHOLD_PCT = 2.0
 _LOOKBACK_HOURS = 1

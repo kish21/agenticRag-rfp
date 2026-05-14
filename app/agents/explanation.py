@@ -13,8 +13,10 @@ import re
 import uuid
 
 from app.core.llm_provider import call_llm
+from pydantic import ValidationError
 from app.core.output_models import (
     ExplanationOutput, VendorNarrative, GroundedClaim,
+    SynthesisLLMResponse,
     DecisionOutput, EvaluationOutput, ExtractionOutput,
 )
 from app.agents.critic import critic_after_explanation
@@ -121,38 +123,31 @@ async def _generate_vendor_narrative(
                          response_format={"type": "json_object"})
 
     try:
-        parsed = json.loads(raw)
+        raw_dict = json.loads(raw)
     except json.JSONDecodeError:
-        parsed = {}
+        raw_dict = {}
 
-    raw_claims = parsed.get("grounded_claims", [])
+    try:
+        synthesis = SynthesisLLMResponse.model_validate(raw_dict)
+    except ValidationError:
+        synthesis = SynthesisLLMResponse()
+
     verified_claims = []
     ungrounded_count = 0
 
-    for c in raw_claims:
-        quote = c.get("grounding_quote", "")
-        chunk_id = c.get("source_chunk_id", "")
-        if verify_grounding(c.get("claim_text", ""), quote, chunk_id, source_chunks):
-            verified_claims.append(
-                GroundedClaim(
-                    claim_text=c.get("claim_text", ""),
-                    grounding_quote=quote,
-                    source_chunk_id=chunk_id,
-                    source_filename=c.get("source_filename", ""),
-                    source_page=c.get("source_page", 1),
-                    confidence=c.get("confidence", 0.8),
-                )
-            )
+    for claim in synthesis.grounded_claims:
+        if verify_grounding(claim.claim_text, claim.grounding_quote, claim.source_chunk_id, source_chunks):
+            verified_claims.append(claim)
         else:
             ungrounded_count += 1
 
     return VendorNarrative(
         vendor_id=vendor_id,
         vendor_name=vendor_name,
-        executive_summary=parsed.get("executive_summary", ""),
-        compliance_narrative=parsed.get("compliance_narrative", ""),
-        scoring_narrative=parsed.get("scoring_narrative", ""),
-        recommendation_rationale=parsed.get("recommendation_rationale", ""),
+        executive_summary=synthesis.executive_summary,
+        compliance_narrative=synthesis.compliance_narrative,
+        scoring_narrative=synthesis.scoring_narrative,
+        recommendation_rationale=synthesis.recommendation_rationale,
         grounded_claims=verified_claims,
         ungrounded_claims_removed=ungrounded_count,
     )
@@ -169,7 +164,12 @@ def _build_fact_context(extraction: ExtractionOutput) -> str:
     for proj in extraction.projects:
         lines.append(f"Project: {proj.client_name} ({proj.client_sector})")
     for price in extraction.pricing:
-        lines.append(f"Pricing: Year {price.year} £{price.total_gbp:,.0f}" if price.total_gbp else f"Pricing: £{price.amount_gbp:,.0f}/yr")
+        if price.total_gbp:
+            lines.append(f"Pricing: Year {price.year} £{price.total_gbp:,.0f}")
+        elif price.amount_gbp:
+            lines.append(f"Pricing: £{price.amount_gbp:,.0f}/yr")
+        else:
+            lines.append(f"Pricing: {price.description or 'amount not specified'}")
     return "\n".join(lines) if lines else "No extracted facts available."
 
 

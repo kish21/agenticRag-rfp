@@ -94,4 +94,9 @@ def seed():
         print("Seeded: 1 dept mandatory + 2 dept scoring criteria")
         print(f"Org ID: {ORG_ID}")
 
+    # Seed org_settings using the product.yaml balanced preset
+    from app.core.org_settings import upsert_org_settings
+    upsert_org_settings(ORG_ID, updated_by="seed")
+    print(f"Seeded: org_settings for {ORG_ID} (balanced preset)")
+
 seed()

@@ -27,6 +27,7 @@ export default function OverridePage() {
   const vendorId = searchParams.get("vendor") ?? "";
 
   const [decision,   setDecision]   = useState<CurrentDecision | null>(null);
+  const [allVendors, setAllVendors] = useState<{vendor_id: string; vendor_name?: string; total_score?: number; decision_type: string; rank?: number}[]>([]);
   const [reason,     setReason]     = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState("");
@@ -44,6 +45,17 @@ export default function OverridePage() {
       .then(r => r.json())
       .then(setDecision)
       .catch(() => setError("Failed to load current decision."));
+    // Also load all vendors to show ranking preview
+    fetch(`${API}/api/v1/evaluate/${runId}/results`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+      .then(r => r.json())
+      .then(d => {
+        const short = (d.shortlisted_vendors ?? []).map((v: {vendor_id: string; vendor_name?: string; total_score?: number; rank?: number}) => ({...v, decision_type: "shortlisted"}));
+        const rej   = (d.rejected_vendors   ?? []).map((v: {vendor_id: string; vendor_name?: string; total_score?: number}) => ({...v, decision_type: "rejected"}));
+        setAllVendors([...short, ...rej]);
+      })
+      .catch(() => {});
   }, [runId, vendorId]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -179,6 +191,51 @@ export default function OverridePage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Ranking preview */}
+        {decision && allVendors.length > 0 && (
+          <div style={CARD}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 12, fontFamily: FONT }}>
+              After this override — projected ranking
+            </div>
+            {(() => {
+              const isRejected = decision.decision_type === "rejected";
+              const projected = allVendors
+                .map(v => {
+                  if (v.vendor_id !== vendorId) return v;
+                  return { ...v, decision_type: isRejected ? "shortlisted" : "rejected" };
+                })
+                .sort((a, b) => {
+                  if (a.decision_type === b.decision_type) return (b.total_score ?? 0) - (a.total_score ?? 0);
+                  return a.decision_type === "shortlisted" ? -1 : 1;
+                });
+              const shortlisted = projected.filter(v => v.decision_type === "shortlisted");
+              return (
+                <div>
+                  {shortlisted.length === 0 ? (
+                    <div style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT }}>No shortlisted vendors after this override.</div>
+                  ) : shortlisted.map((v, i) => (
+                    <div key={v.vendor_id} style={{
+                      display: "flex", alignItems: "center", gap: 10, marginBottom: 6,
+                      padding: "6px 10px", borderRadius: 6,
+                      background: v.vendor_id === vendorId ? "#10B98112" : P.bg.elevated,
+                      border: `1px solid ${v.vendor_id === vendorId ? "#10B98140" : P.border.dim}`,
+                    }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#10B981", fontFamily: FONT, minWidth: 24 }}>#{i + 1}</span>
+                      <span style={{ fontSize: 13, color: P.text.primary, fontFamily: FONT, flex: 1 }}>
+                        {v.vendor_name || v.vendor_id}
+                        {v.vendor_id === vendorId && <span style={{ fontSize: 10, color: "#10B981", marginLeft: 6 }}>← overridden</span>}
+                      </span>
+                      {v.total_score !== undefined && (
+                        <span style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT }}>{v.total_score.toFixed(1)}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 

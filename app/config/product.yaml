@@ -1,0 +1,60 @@
+# Defaults applied to brand-new orgs. Existing orgs keep their
+# org_settings row unchanged.
+new_org_defaults:
+  quality_tier: balanced
+  output_tone: formal
+  output_language: en-GB
+  citation_style: inline
+  include_confidence_score: true
+  include_evidence_quotes: true
+  max_evidence_quote_chars: 300
+  score_variance_threshold: 0.15
+  rank_margin_threshold: 3
+  parallel_vendors: true
+
+# Three named quality tiers. Each maps to a coherent set of retrieval
+# and confidence flags. Product can rebalance these without engineering.
+presets:
+  # All three tiers are identical for now.
+  # Differentiation (cost, quality, speed trade-offs) to be configured later
+  # when real customer usage data informs the right thresholds.
+  fast:
+    label: "Fast"
+    summary: "Full retrieval pipeline with BGE reranking and hybrid search."
+    cost_multiplier: 1.0
+    config: &unified_config
+      use_hyde: true
+      use_reranking: true
+      use_query_rewriting: true
+      use_hybrid_search: true
+      reranker_provider: "bge"
+      retrieval_top_k: 10
+      rerank_top_n: 5
+      mandatory_check_use_llm_verify: true
+      confidence_retry_threshold: 0.75
+      llm_temperature: 0.1
+
+  balanced:
+    label: "Balanced"
+    summary: "Full retrieval pipeline with BGE reranking and hybrid search."
+    cost_multiplier: 1.0
+    config: *unified_config
+
+  accurate:
+    label: "Accurate"
+    summary: "Full retrieval pipeline with BGE reranking and hybrid search."
+    cost_multiplier: 1.0
+    config: *unified_config
+
+# Score -> recommendation band mapping
+score_bands:
+  strongly_recommended: 85
+  recommended: 70
+  acceptable: 50
+  marginal: 0
+
+# Audit retention
+audit:
+  retain_decisions_years: 7
+  require_human_signoff: true
+  citation_required: true

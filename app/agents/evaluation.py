@@ -3,6 +3,11 @@ Evaluation Agent — reads PostgreSQL facts, evaluates mandatory checks and scor
 
 Key rule: reads from PostgreSQL (structured facts), NOT from Qdrant (raw chunks).
 Same typed facts in → same evaluation out. Temperature 0.0 enforces determinism.
+
+Mandatory check fallback: when PostgreSQL has no facts for a check, the evaluator
+queries Qdrant directly (top-K=5) and runs _llm_verify_threshold per chunk.
+This ensures checks with no extracted facts still get a verdict rather than defaulting
+to insufficient_evidence.
 """
 import json
 import uuid
@@ -25,6 +30,164 @@ from app.agents.critic import critic_after_evaluation
 from app.db.fact_store import get_vendor_facts
 
 
+async def _llm_verify_threshold(
+    chunk_text: str,
+    check_name: str,
+    what_passes: str,
+) -> dict:
+    """Ask the LLM whether a single chunk satisfies the mandatory check threshold."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a compliance verifier. "
+                "Check whether the provided text passage satisfies ALL stated conditions. "
+                "Only return satisfies=true if every condition in 'Passes when' is explicitly met. "
+                "Return only valid JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Requirement: {check_name}\n"
+                f"Passes when: {what_passes}\n\n"
+                f"Text passage:\n{chunk_text}\n\n"
+                "Does this passage satisfy ALL conditions?\n"
+                'Return JSON: {"satisfies": true|false, "evidence": "verbatim quote or empty string", "confidence": 0.0}'
+            ),
+        },
+    ]
+    raw = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
+    return json.loads(raw)
+
+
+# Stash most-recent critic verdict per (check_name, vendor_id) so callers
+# can inspect adequacy reasoning without changing the return signature.
+_last_retrieval_verdict: dict[tuple[str, str], object] = {}
+
+
+def get_last_retrieval_verdict(check_name: str, vendor_id: str):
+    """Return the CriticVerdict for the most recent retrieval attempt, or None."""
+    return _last_retrieval_verdict.get((check_name, vendor_id))
+
+
+def _chunks_from_output(output) -> list[dict]:
+    return [
+        {"text": c.text, "payload": {"chunk_id": c.chunk_id, "section_type": c.section_type}}
+        for c in output.chunks
+    ]
+
+
+async def _retrieve_top_k_for_check(
+    check_name: str,
+    vendor_id: str,
+    org_id: str,
+    k: int = 5,  # audit:allow — default when org_settings not available
+    what_passes: str = "",
+    org_settings=None,
+    run_id: str = "",
+) -> list[dict]:
+    """Retrieve evidence for a mandatory check via run_retrieval_agent (HyDE-aware).
+
+    Runs the retrieval critic after the first pass. If the critic judges the
+    chunks inadequate, retries once with escalated settings (hybrid+HyDE,
+    doubled K). Returns whichever chunks came from the final pass.
+    query priority: what_passes > check_name.
+    """
+    import logging
+    from app.agents.retrieval import run_retrieval_agent
+    from app.core.retrieval_critic import judge_retrieval, CriticVerdict
+    from app.core.audit import audit
+    from app.config import settings as cfg
+
+    log = logging.getLogger(__name__)
+    query = what_passes or check_name
+    max_retries = cfg.platform.infrastructure.retrieval_critic_max_retries
+    confidence_floor = cfg.platform.infrastructure.retrieval_critic_confidence_floor
+
+    chunks: list[dict] = []
+    verdict: CriticVerdict | None = None
+    retry_count = 0
+
+    # --- First pass ---
+    try:
+        output, _ = await run_retrieval_agent(
+            query=query,
+            vendor_id=vendor_id,
+            org_id=org_id,
+            rfp_id="",
+            is_mandatory_check=True,
+            org_settings=org_settings,
+            run_id=run_id or None,
+            criterion_id=check_name,
+        )
+        chunks = _chunks_from_output(output)
+    except Exception as exc:
+        log.warning("_retrieve_top_k_for_check: first pass failed: %s", exc)
+        chunks = []
+
+    verdict = await judge_retrieval(check_name, what_passes, chunks)
+    log.info(
+        "retrieval_critic first pass: check=%r adequate=%s confidence=%.2f missing=%r",
+        check_name, verdict.adequate, verdict.confidence, verdict.missing,
+    )
+
+    # --- Retry if inadequate and budget allows ---
+    if not (verdict.adequate and verdict.confidence >= confidence_floor) and max_retries > 0:
+        retry_count = 1
+
+        # Build escalated settings: force hybrid+HyDE, double K (cap 20)
+        escalated_top_k = min(20, (org_settings.retrieval_top_k if org_settings else k) * 2)  # audit:allow
+
+        class _EscalatedSettings:
+            use_hyde = True
+            use_hybrid_search = True
+            use_query_rewriting = True
+            retrieval_top_k = escalated_top_k
+            rerank_top_n = (org_settings.rerank_top_n if org_settings else 5)  # audit:allow
+            reranker_provider = (org_settings.reranker_provider if org_settings else None)  # audit:allow
+
+        try:
+            output2, _ = await run_retrieval_agent(
+                query=query,
+                vendor_id=vendor_id,
+                org_id=org_id,
+                rfp_id="",
+                is_mandatory_check=True,
+                org_settings=_EscalatedSettings(),
+                run_id=run_id or None,
+                criterion_id=f"{check_name}:retry",
+            )
+            chunks = _chunks_from_output(output2)
+        except Exception as exc:
+            log.warning("_retrieve_top_k_for_check: retry pass failed: %s", exc)
+
+        verdict = await judge_retrieval(check_name, what_passes, chunks)
+        log.info(
+            "retrieval_critic retry pass: check=%r adequate=%s confidence=%.2f missing=%r",
+            check_name, verdict.adequate, verdict.confidence, verdict.missing,
+        )
+
+    # --- Stash verdict + emit audit row ---
+    _last_retrieval_verdict[(check_name, vendor_id)] = verdict
+    audit(
+        org_id=org_id,
+        run_id=run_id or None,
+        event_type="retrieval_critic.verdict",
+        actor="retrieval_critic",
+        detail={
+            "check_name": check_name,
+            "vendor_id": vendor_id,
+            "adequate": verdict.adequate,
+            "confidence": verdict.confidence,
+            "missing": verdict.missing,
+            "retry_count": retry_count,
+        },
+    )
+
+    return chunks
+
+
 def _get_facts_for_target(facts: dict, target: ExtractionTarget) -> list[dict]:
     type_map = {
         "certification": facts.get("certifications", []),
@@ -45,6 +208,10 @@ async def _evaluate_mandatory_check(
     target: ExtractionTarget,
     relevant_facts: list[dict],
     vendor_id: str,
+    org_id: str = "",
+    org_settings=None,
+    retried_fact_types: list[str] | None = None,
+    run_id: str = "",
 ) -> ComplianceDecision:
     facts_text = (
         json.dumps(relevant_facts, indent=2, default=str)
@@ -87,10 +254,45 @@ async def _evaluate_mandatory_check(
     except ValueError:
         decision = ComplianceStatus.INSUFFICIENT_EVIDENCE
 
+    # Fallback: fire when (a) no facts + insufficient_evidence, OR
+    # (b) facts exist but decision is FAIL and extraction was NOT already retried
+    # by the extraction critic (which would mean the failure is genuine).
+    # extraction_was_retried prevents looping between the two critics.
+    extraction_was_retried = target.fact_type in (retried_fact_types or [])
+    should_fallback = org_id and (
+        (not relevant_facts and decision == ComplianceStatus.INSUFFICIENT_EVIDENCE)
+        or (relevant_facts and decision == ComplianceStatus.FAIL and not extraction_was_retried)
+    )
+    chunk_evidence: list[str] = []
+    if should_fallback:
+        top_k = org_settings.retrieval_top_k if org_settings is not None else 5  # audit:allow
+        chunks = await _retrieve_top_k_for_check(
+            check.name, vendor_id, org_id, k=top_k,
+            what_passes=check.what_passes, org_settings=org_settings,
+            run_id=run_id,
+        )
+        for chunk in chunks:
+            result = await _llm_verify_threshold(
+                chunk.get("text", ""), check.name, check.what_passes
+            )
+            if result.get("satisfies"):
+                ev = result.get("evidence", "")
+                if ev:
+                    chunk_evidence.append(ev)
+        if chunk_evidence:
+            decision = ComplianceStatus.PASS
+            parsed["confidence"] = 0.75  # audit:allow — result confidence score, not a threshold
+            parsed["reasoning"] = (
+                f"Verified in source document: {chunk_evidence[0][:120]}"
+            )
+            parsed["decision_basis"] = "explicit_confirmation"
+
     try:
         decision_basis = DecisionBasis(parsed.get("decision_basis", "not_addressed"))
     except ValueError:
         decision_basis = DecisionBasis.NOT_ADDRESSED
+
+    evidence = chunk_evidence if chunk_evidence else parsed.get("evidence_used", [])
 
     return ComplianceDecision(
         check_id=check.check_id,
@@ -98,7 +300,7 @@ async def _evaluate_mandatory_check(
         decision=decision,
         confidence=float(parsed.get("confidence", 0.5)),
         reasoning=parsed.get("reasoning", ""),
-        evidence_used=parsed.get("evidence_used", []),
+        evidence_used=evidence,
         contradictions_found=parsed.get("contradictions_found", []),
         decision_basis=decision_basis,
     )
@@ -170,15 +372,20 @@ async def run_evaluation_agent(
     org_id: str,
     evaluation_setup: EvaluationSetup,
     extraction_output: Optional[ExtractionOutput] = None,
+    run_id: str = "",
 ) -> tuple[EvaluationOutput, object]:
     evaluation_id = str(uuid.uuid4())
     warnings: list[str] = []
+
+    from app.core.org_settings import get_org_settings
+    org_settings = get_org_settings(org_id) if org_id else None
 
     # Reads from PostgreSQL — NOT Qdrant
     facts = get_vendor_facts(org_id, vendor_id, setup_id=evaluation_setup.setup_id)
     target_by_id = {t.target_id: t for t in evaluation_setup.extraction_targets}
 
     # Evaluate every mandatory check
+    _retried_fact_types = list(getattr(extraction_output, "retried_fact_types", []) or [])
     compliance_decisions: list[ComplianceDecision] = []
     for check in evaluation_setup.mandatory_checks:
         target = target_by_id.get(check.extraction_target_id)
@@ -187,7 +394,10 @@ async def run_evaluation_agent(
             continue
         try:
             decision = await _evaluate_mandatory_check(
-                check, target, _get_facts_for_target(facts, target), vendor_id
+                check, target, _get_facts_for_target(facts, target), vendor_id, org_id,
+                org_settings=org_settings,
+                retried_fact_types=_retried_fact_types,
+                run_id=run_id,
             )
             compliance_decisions.append(decision)
         except Exception as e:

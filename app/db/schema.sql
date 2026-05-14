@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     agent_events     JSONB NOT NULL DEFAULT '[]',
     agent_log        JSONB NOT NULL DEFAULT '[]',
     decision_output  JSONB,
+    vendor_names     JSONB DEFAULT '{}',
     created_at       TIMESTAMPTZ DEFAULT now(),
     completed_at     TIMESTAMPTZ
 );
@@ -480,3 +481,106 @@ DO $$ BEGIN
       current_setting('app.current_org_id', true));
   END IF;
 END $$;
+
+-- ── org_settings — per-org configuration overrides ──────────────────────────
+
+CREATE TABLE IF NOT EXISTS org_settings (
+    org_id                          TEXT        PRIMARY KEY,
+    quality_tier                    TEXT        NOT NULL DEFAULT 'balanced',
+
+    use_hyde                        BOOLEAN     NOT NULL DEFAULT FALSE,
+    use_reranking                   BOOLEAN     NOT NULL DEFAULT TRUE,
+    use_query_rewriting             BOOLEAN     NOT NULL DEFAULT TRUE,
+    use_hybrid_search               BOOLEAN     NOT NULL DEFAULT FALSE,
+    reranker_provider               TEXT        NOT NULL DEFAULT 'cohere',
+    retrieval_top_k                 INTEGER     NOT NULL DEFAULT 5,
+    rerank_top_n                    INTEGER     NOT NULL DEFAULT 3,
+    mandatory_check_use_llm_verify  BOOLEAN     NOT NULL DEFAULT TRUE,
+
+    confidence_retry_threshold      NUMERIC(3,2) NOT NULL DEFAULT 0.75,
+    score_variance_threshold        NUMERIC(3,2) NOT NULL DEFAULT 0.15,
+    rank_margin_threshold           INTEGER     NOT NULL DEFAULT 3,
+    llm_temperature                 NUMERIC(3,2) NOT NULL DEFAULT 0.10,
+
+    output_tone                     TEXT        NOT NULL DEFAULT 'formal',
+    output_language                 TEXT        NOT NULL DEFAULT 'en-GB',
+    citation_style                  TEXT        NOT NULL DEFAULT 'inline',
+    include_confidence_score        BOOLEAN     NOT NULL DEFAULT TRUE,
+    include_evidence_quotes         BOOLEAN     NOT NULL DEFAULT TRUE,
+    max_evidence_quote_chars        INTEGER     NOT NULL DEFAULT 300,
+
+    parallel_vendors                BOOLEAN     NOT NULL DEFAULT TRUE,
+
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by                      TEXT,
+
+    CHECK (confidence_retry_threshold BETWEEN 0 AND 1),
+    CHECK (score_variance_threshold   BETWEEN 0 AND 1),
+    CHECK (rank_margin_threshold      BETWEEN 0 AND 100),
+    CHECK (llm_temperature            BETWEEN 0 AND 2),
+    CHECK (output_tone IN ('formal','conversational','technical')),
+    CHECK (citation_style IN ('inline','footnote','appendix')),
+    CHECK (reranker_provider IN ('cohere','bge','colbert','none')),
+    CHECK (max_evidence_quote_chars BETWEEN 50 AND 2000)
+);
+
+CREATE TABLE IF NOT EXISTS org_settings_audit (
+    audit_id      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id        TEXT        NOT NULL,
+    changed_by    TEXT        NOT NULL,
+    changed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    field_name    TEXT        NOT NULL,
+    old_value     TEXT,
+    new_value     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_settings_audit_org
+    ON org_settings_audit(org_id, changed_at DESC);
+
+ALTER TABLE org_settings       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE org_settings_audit ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename='org_settings' AND policyname='org_settings_isolation'
+  ) THEN
+    CREATE POLICY org_settings_isolation ON org_settings
+        USING (org_id = current_setting('app.org_id', true));
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename='org_settings_audit' AND policyname='org_settings_audit_isolation'
+  ) THEN
+    CREATE POLICY org_settings_audit_isolation ON org_settings_audit
+        USING (org_id = current_setting('app.org_id', true));
+  END IF;
+END $$;
+
+-- ── Retrieval log — one row per retrieval call ────────────────────────────────
+-- Makes "what did the system see for this criterion on this run" a single SQL query.
+-- Never UPDATE or DELETE rows.
+
+CREATE TABLE IF NOT EXISTS retrieval_log (
+    log_id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id             UUID        REFERENCES evaluation_runs(run_id) ON DELETE SET NULL,
+    org_id             UUID        NOT NULL,
+    vendor_id          TEXT        NOT NULL,
+    criterion_id       TEXT,                    -- criterion_id or check name; NULL for ad-hoc
+    query_text         TEXT        NOT NULL,
+    rewritten_query    TEXT,
+    retrieval_strategy TEXT        NOT NULL,
+    chunks             JSONB       NOT NULL DEFAULT '[]',
+    scores             JSONB       NOT NULL DEFAULT '{}',
+    timing_ms          INTEGER,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_retrieval_log_run
+    ON retrieval_log(run_id, criterion_id);
+CREATE INDEX IF NOT EXISTS idx_retrieval_log_org_vendor
+    ON retrieval_log(org_id, vendor_id, created_at);

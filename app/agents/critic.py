@@ -193,14 +193,14 @@ def critic_after_extraction(
                     "Flag for human review. Facts are saved but auditability is reduced."
                 ))
 
-    # Hard-block only when the MAJORITY of facts fail AND overall risk is very high.
-    # Minority paraphrasing failures are an LLM verbatim issue, not fabrication.
+    # Hard-block when the MAJORITY of facts fail grounding — indicates fabrication,
+    # not mere paraphrasing. Individual soft flags are raised above for minority failures.
     total = len(all_items)
-    if total and grounding_failures > total // 2 and output.hallucination_risk > 0.7:
+    if total and grounding_failures > total // 2:
         flags.append(_make_flag(
             CriticSeverity.HARD, "extraction_agent",
             "high_hallucination_risk",
-            f"Majority of facts unverifiable ({grounding_failures}/{total}) with very high hallucination risk",
+            f"Majority of facts unverifiable ({grounding_failures}/{total})",
             f"hallucination_risk={output.hallucination_risk}",
             "Do not use extracted facts. Re-run extraction."
         ))

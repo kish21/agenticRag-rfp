@@ -1,0 +1,121 @@
+ingestion:
+  chunk_size_tokens: 500
+  chunk_overlap_tokens: 50
+  max_chunk_chars_for_rerank: 512
+
+embedding:
+  # Active model is chosen by EMBEDDING_PROVIDER in .env:
+  #   openai / azure  → openai_model
+  #   local / modal   → local_model
+  openai_model: "text-embedding-3-large"
+  local_model: "BAAI/bge-large-en-v1.5"
+  dimensions:
+    text-embedding-3-large: 3072
+    BAAI/bge-large-en-v1.5: 1024
+    nomic-ai/nomic-embed-text-v1.5: 768
+
+retrieval:
+  embedding_model: "text-embedding-3-large"   # legacy shim — prefer embedding.openai_model
+  embedding_dimensions: 3072                  # legacy shim — prefer embedding.dimensions
+  candidate_count_before_rerank: 20
+  reranker_models:
+    cohere:  "rerank-english-v3.0"
+    bge:     "BAAI/bge-reranker-v2-m3"
+    colbert: "colbert-ir/colbertv2.0"
+  dense_vector_name: "dense"
+  sparse_vector_name: "sparse"
+  fusion_method: "rrf"
+  rrf_k: 60
+
+llm:
+  primary_model: "gpt-4o"
+  fallback_model: "gpt-4o-mini"
+  compression_model: "gpt-4o-mini"
+  max_tokens: 4096
+  request_timeout_seconds: 120
+
+infrastructure:
+  org_settings_cache_ttl_seconds: 60
+  max_retries: 5
+  qdrant_collection_pattern: "{org_id}__{vendor_id}"
+  retrieval_critic_max_retries: 1
+  retrieval_critic_confidence_floor: 0.6
+  extraction_critic_max_retries: 1
+  extraction_critic_confidence_floor: 0.7
+
+retrieval_critic_prompt: |
+  You are evaluating whether a set of retrieved document passages
+  contains evidence sufficient to judge a procurement criterion.
+
+  Criterion: {criterion_name}
+  Threshold rule (what passes): {what_passes}
+
+  Retrieved passages:
+  {chunks}
+
+  Do these passages collectively contain the specific facts the
+  threshold rule asks for (identifiers, dates, amounts, named
+  entities, certifications, etc.)? Be strict: if the rule asks for
+  a certificate NUMBER and the passages only describe the
+  certification in general, the answer is NO.
+
+  Return strict JSON only, no other text:
+  {{
+    "adequate": true,
+    "confidence": 0.0,
+    "missing": "what specific fact(s) are absent, if any (one short line)"
+  }}
+
+extraction_critic_prompt: |
+  You are verifying whether an extracted fact correctly answers a
+  procurement criterion, based on the source passage it was drawn from.
+
+  Criterion being evaluated: {criterion_name}
+  Criterion threshold rule: {what_passes}
+
+  The extraction agent extracted this fact:
+    type: {fact_type}
+    value: {fact_value}
+    provider/issuer: {provider_or_issuer}
+    amount/number/date: {key_identifier}
+
+  Source passage (the exact text the extractor read):
+    {grounding_quote}
+
+  Question: Does the extracted fact correctly answer the criterion,
+  based on what the source passage actually states?
+
+  Be strict. Specifically:
+    - If the criterion asks about Professional Indemnity but the
+      extracted fact is Public Liability, the answer is NO — even
+      if PI is mentioned in passing in the source passage. The
+      extracted fact must be the PRIMARY statement, not an adjacent
+      or referenced fact.
+    - If the criterion asks for a certificate number and the
+      extracted fact has no certificate number (only a general
+      description of the certification), the answer is NO.
+    - If the source passage mentions multiple related items, the
+      extracted fact must match the SPECIFIC one the criterion asks
+      about, not a neighboring one.
+
+  Return strict JSON only, no other text:
+  {{
+    "adequate": <true if the extracted fact correctly answers the criterion, false otherwise>,
+    "confidence": <float 0.0-1.0, your certainty in this judgement>,
+    "missing": "<what specific fact is absent or wrong — one short line, empty string if adequate>",
+    "should_retry": <true if re-extracting with a more focused prompt could find the correct fact, false if the source passage simply does not contain it>
+  }}
+
+hyde_templates:
+  vendor_response: |
+    Write a 2-3 sentence passage from a vendor response document
+    that would directly answer this requirement. Use formal business
+    language. Return only the passage, no preamble.
+  rfp_requirement: |
+    Write a 1-2 sentence RFP clause that would contain the answer
+    to this question. Use formal procurement language. Return only
+    the passage, no preamble.
+  policy_document: |
+    Write a 1-2 sentence policy statement that answers this question.
+    Use formal HR or legal policy language. Return only the passage,
+    no preamble.

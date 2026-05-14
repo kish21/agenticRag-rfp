@@ -57,6 +57,25 @@ function SectionLabel({ children, isDark }: { children: React.ReactNode; isDark:
   );
 }
 
+function SourceLegend() {
+  const items = [
+    { key: "org",  label: "Organisation", color: "#9CA3AF" },
+    { key: "dept", label: "Department",   color: "#F59E0B" },
+    { key: "rfp",  label: "From RFP",     color: "#00D4AA" },
+    { key: "user", label: "Added by you", color: "#3B82F6" },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+      {items.map(item => (
+        <span key={item.key} style={{ fontSize: 10, color: item.color, fontFamily: FONT, display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: item.color, display: "inline-block" }} />
+          {item.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function SourceBadge({ source, isLocked }: { source?: string; isLocked?: boolean }) {
   if (!source) return null;
   const map: Record<string, { label: string; bg: string; color: string; border: string }> = {
@@ -192,13 +211,29 @@ export default function ConfirmPage() {
     setCriteria(prev => prev.filter(c => c.criterion_id !== id));
   }
   function addCriterion() {
-    setCriteria(prev => [...prev, {
-      criterion_id: `SC-USER-${uid()}`,
-      name: "New criterion",
-      weight: 0,
-      source: "user",
-      is_locked: false,
-    }]);
+    const NEW_WEIGHT = 0.05;
+    setCriteria(prev => {
+      const currentTotal = prev.reduce((s, c) => s + c.weight, 0);
+      const available = Math.max(0, 1 - currentTotal);
+      const newWeight = Math.min(NEW_WEIGHT, available);
+      // Proportionally reduce existing unlocked criteria to make room
+      const toAbsorb = newWeight - Math.max(0, available - newWeight);
+      const unlocked = prev.filter(c => !c.is_locked);
+      const unlockedTotal = unlocked.reduce((s, c) => s + c.weight, 0);
+      const rebalanced = unlockedTotal > 0 && toAbsorb > 0
+        ? prev.map(c => c.is_locked ? c : {
+            ...c,
+            weight: parseFloat(Math.max(0, c.weight - toAbsorb * (c.weight / unlockedTotal)).toFixed(3)),
+          })
+        : prev;
+      return [...rebalanced, {
+        criterion_id: `SC-USER-${uid()}`,
+        name: "New criterion",
+        weight: parseFloat(newWeight.toFixed(3)),
+        source: "user" as const,
+        is_locked: false,
+      }];
+    });
   }
 
   // Mandatory check field updates
@@ -366,6 +401,7 @@ export default function ConfirmPage() {
         {/* Mandatory checks */}
         <div style={CARD}>
           <SectionLabel isDark={isDark}>Mandatory checks — {checks.length} criteria</SectionLabel>
+          <SourceLegend />
           <p style={{ fontSize: 12, color: P.text.muted, marginBottom: 14, fontFamily: FONT }}>
             Vendors failing any of these checks are rejected before scoring begins.
           </p>

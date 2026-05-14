@@ -15,8 +15,8 @@ def _get_bge_model():
     if _bge_model is None:
         from sentence_transformers import CrossEncoder
         _bge_model = CrossEncoder(
-            "BAAI/bge-reranker-v2-m3",
-            max_length=512
+            settings.platform.retrieval.reranker_models["bge"],
+            max_length=settings.platform.ingestion.max_chunk_chars_for_rerank
         )
     return _bge_model
 
@@ -26,7 +26,7 @@ def _get_colbert_model():
     if _colbert_model is None:
         from ragatouille import RAGPretrainedModel
         _colbert_model = RAGPretrainedModel.from_pretrained(
-            "colbert-ir/colbertv2.0"
+            settings.platform.retrieval.reranker_models["colbert"]
         )
     return _colbert_model
 
@@ -34,7 +34,8 @@ def _get_colbert_model():
 def rerank(
     query: str,
     candidates: list[dict],
-    top_n: int = 5
+    top_n: int = 5,
+    provider: str | None = None,
 ) -> list[dict]:
     """
     Reranks candidates using the configured provider.
@@ -42,12 +43,13 @@ def rerank(
     Falls back to vector score order if provider fails.
 
     candidates: list of dicts with 'text' and 'score' keys
+    provider: override global RERANKER_PROVIDER (e.g. from org_settings)
     returns: top_n candidates sorted by rerank_score descending
     """
     if not candidates:
         return candidates
 
-    provider = settings.reranker_provider.lower()
+    provider = (provider or settings.reranker_provider).lower()
 
     try:
         if provider == "cohere":
@@ -73,9 +75,10 @@ def _rerank_cohere(
 ) -> list[dict]:
     import cohere
     co = cohere.ClientV2(api_key=settings.cohere_api_key)
-    docs = [c["text"][:512] for c in candidates]
+    _max_chars = settings.platform.ingestion.max_chunk_chars_for_rerank
+    docs = [c["text"][:_max_chars] for c in candidates]
     results = co.rerank(
-        model=settings.cohere_rerank_model,
+        model=settings.platform.retrieval.reranker_models["cohere"],
         query=query,
         documents=docs,
         top_n=top_n,
@@ -94,7 +97,8 @@ def _rerank_bge(
     top_n: int
 ) -> list[dict]:
     model = _get_bge_model()
-    pairs = [(query, c["text"][:512]) for c in candidates]
+    _max_chars = settings.platform.ingestion.max_chunk_chars_for_rerank
+    pairs = [(query, c["text"][:_max_chars]) for c in candidates]
     scores = model.predict(pairs)
     for i, score in enumerate(scores):
         candidates[i]["rerank_score"] = float(score)
@@ -112,7 +116,8 @@ def _rerank_colbert(
     top_n: int
 ) -> list[dict]:
     model = _get_colbert_model()
-    docs = [c["text"][:512] for c in candidates]
+    _max_chars = settings.platform.ingestion.max_chunk_chars_for_rerank
+    docs = [c["text"][:_max_chars] for c in candidates]
     results = model.rerank(query, docs, k=top_n)
     reranked = []
     for r in results:

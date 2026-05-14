@@ -44,15 +44,17 @@ Zero engine code changes. Built in app/core/llm_provider.py (created in Skill 01
 | `anthropic` | Claude via anthropic 0.49 | Prompt-based JSON (no response_format) |
 | `openrouter` | Any model via OpenRouter API | 200+ models, openai SDK with different base_url |
 | `ollama` | Qwen 2.5, Llama 3, Mistral locally | No API key, openai-compatible API |
+| `azure` | Azure OpenAI | Uses AzureAsyncOpenAI client |
+| `modal` | Qwen 2.5 72B AWQ via vLLM on Modal A100 | OpenAI-compatible endpoint, no per-token cost |
 
 Agents call `call_llm()` — never import provider SDKs directly in agent files.
-Embeddings always use OpenAI text-embedding-3-large regardless of LLM_PROVIDER.
+Embeddings are configurable via EMBEDDING_PROVIDER (openai/azure/local/modal) — no longer hardwired to OpenAI.
 
 ## MODAL DEPLOYMENT
 
 Two deployment surfaces:
 - **FastAPI** (local or any cloud): real-time API, agent orchestration, retrieval
-- **Modal** (`app_modal.py`): heavy PDF extraction, scheduled cleanup, rate monitoring
+- **Modal** (`app_modal.py`): PDF extraction (CPU), batch embeddings (A10G), LLM inference — Qwen 2.5 72B AWQ (A100-80GB), scheduled cleanup/rate monitoring
 
 Modal routes: PDFs >50 pages or scanned PDFs → Modal for burst CPU/OCR
 Modal schedules: daily cleanup, 30-minute rate monitoring

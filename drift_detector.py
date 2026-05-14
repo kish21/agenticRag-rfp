@@ -249,9 +249,9 @@ def main():
     check_security(issues)
 
     if not issues:
-        print("\n✓ No drift detected — project is on track")
+        print("\n[OK] No drift detected — project is on track")
         passed = len(state.get("passed_checkpoints", []))
-        print(f"  Checkpoints passed: {passed}/59")
+        print(f"  Checkpoints passed: {passed}/66")
         return
 
     critical = [i for i in issues if i["severity"] == "CRITICAL"]
@@ -259,19 +259,19 @@ def main():
     warnings = [i for i in issues if i["severity"] == "WARNING"]
 
     if critical:
-        print(f"\n🚨 CRITICAL ({len(critical)}) — Fix immediately:")
+        print(f"\n[CRITICAL] ({len(critical)}) - Fix immediately:")
         for i in critical:
             print(f"  [{i['type']}] {i['file']}")
             print(f"    {i['message']}")
 
     if errors:
-        print(f"\n✗ ERRORS ({len(errors)}) — Fix before continuing:")
+        print(f"\n[ERROR] ({len(errors)}) - Fix before continuing:")
         for i in errors:
             print(f"  [{i['type']}] {i.get('file','')}")
             print(f"    {i['message']}")
 
     if warnings:
-        print(f"\n⚠ WARNINGS ({len(warnings)}):")
+        print(f"\n[WARNING] ({len(warnings)}):")
         for i in warnings:
             print(f"  [{i['type']}] {i.get('file','')}")
             print(f"    {i['message']}")
@@ -279,7 +279,7 @@ def main():
     print(f"\nTotal: {len(critical)} critical, {len(errors)} errors, {len(warnings)} warnings")
 
     if critical or errors:
-        print("\n⛔ STOP CODING — fix issues above before continuing")
+        print("\nSTOP CODING - fix issues above before continuing")
         sys.exit(1)
 
 

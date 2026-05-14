@@ -1,216 +1,242 @@
-# BACKLOG
+# Backlog
 
-# Items noticed during this conversation that belong in future development.
-
-# Do not build any of these during Skills 01-06.
-
-# Review before starting work after first customer is live.
+**Last reorganised:** 12 May 2026
+**Owner:** Solo build, pre-first-customer
+**Convention:** Items move between sections as state changes. P0 blocks production launch; P1 is required UX; P2 is architectural improvement; P3 is polish; P4 is "wait until a customer asks."
 
 ---
 
-## OPEN ITEMS — Prioritised
+## ✅ COMPLETED — Done, dated, verified
 
-| Date    | What                                                                                             | Relevant to                          | Priority | Notes                                                                                                          |
-| ------- | ------------------------------------------------------------------------------------------------ | ------------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------- |
-| 2026-04 | Self-consistency voting — run same compliance check 3 times, take majority                       | After SK04                           | High     | Reduces hallucination risk on borderline decisions. Only for checks above approval threshold.                  |
-| 2026-04 | Verification step — second LLM call after synthesis checks every claim against retrieved context | After SK05                           | High     | Catches hallucinations before PDF report. Add as optional guardrail node.                                      |
-| 2026-04 | Human feedback capture — when evaluator overrides AI score, capture correction                   | After first customer                 | High     | Requires a feedback UI in the frontend. Corrections flow back into few-shot examples.                          |
-| 2026-04 | Score drift detection in production — alert when average confidence drops week-over-week         | After SK05                           | High     | LangSmith has the data. Needs a monitoring rule and Slack alert.                                               |
-| 2026-04 | Prompt versioning — track which prompt version produced which result                             | After SK04                           | Medium   | Cannot identify cause of accuracy changes without this. Store prompt_version in decisions table.               |
-| 2026-04 | Pydantic validation on synthesizer output                                                        | After SK03b                          | Medium   | ComplianceCheckResult and ScoringCriterionResult are done. SynthesisResult needed.                             |
-| 2026-04 | OCR for scanned PDFs — Tesseract integration                                                     | After first customer                 | Medium   | pypdf returns empty text for scanned documents. Many real vendor submissions are scanned.                      |
-| 2026-04 | Document versioning — track what was evaluated at what version                                   | After SK05                           | Medium   | Resubmission currently deletes all previous data. Needed for audit trail completeness.                         |
-| 2026-04 | Confidence calibration — empirical calibration of GPT-4o confidence scores                       | After first customer                 | Medium   | Requires ground truth dataset. 0.8 confidence may not mean 80% accurate on your documents.                     |
-| 2026-04 | Context compression — extract only relevant sentences from chunks before sending to LLM          | After SK03b                          | Medium   | LangChain ContextualCompressionRetriever. Reduces noise in context window.                                     |
-| 2026-04 | Lost-in-the-middle handling — place most important chunks first and last                         | After SK03b                          | Medium   | LLMs attend less to content in middle of long context. Sort chunks by importance.                              |
-| 2026-04 | Contextual chunk headers — prepend each chunk with parent section summary                        | After SK03b                          | Low      | Gives LLM context of where chunk sits in document. Additional LLM call per chunk.                              |
-| 2026-04 | A/B testing prompts — run two prompt versions on same evaluation, compare accuracy               | After first customer                 | Low      | Requires evaluation dataset for comparison. Cannot do this without ground truth.                               |
-| 2026-04 | Evaluation ground truth dataset — collect correct evaluations for accuracy measurement           | After first customer                 | Low      | Need real customer data to build this. Ask first customer to manually evaluate 20 vendors as ground truth.     |
-| 2026-04 | Chunk overlap strategy — sentence-boundary overlap instead of fixed token overlap                | After SK03b if score not good enough | Low      | Only needed if retrieval quality test still fails specific boundary cases.                                     |
-| 2026-04 | Retrieval quality monitoring in production                                                       | After SK05                           | Low      | 80% threshold test runs in dev. Need scheduled job that runs same test on production collections weekly.       |
-| 2026-04 | Hierarchical chunking — summary chunk + detail chunks per section                                | After SK03b if needed                | Low      | Higher complexity. Only add if standard chunking still struggles with very long sections.                      |
-| 2026-04 | SaaS billing system — usage metering per org                                                     | After SK06                           | Low      | Current platform has no billing. Need Stripe integration and usage tracking before selling to second customer. |
-| 2026-04 | Executive dashboard — CEO/CFO view of all active evaluations                                     | After SK06                           | Low      | Described in the platform vision. Not needed until multiple departments active at one company.                 |
-| 2026-04 | Approval SLA checker background job — flags overdue approvals                                    | After SK05                           | Low      | Modal scheduled function that runs hourly. Sends Slack reminder when approval is overdue.                      |
-
----
-
-## COMPLETED ITEMS
-
-| Date | What was built | Built in skill | Notes |
-| ---- | -------------- | -------------- | ----- |
-|      |                |                |       |
+| Date        | What                                                                                | How verified                                                             |
+| ----------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 12 May 2026 | Four-layer config architecture (.env + platform.yaml + product.yaml + org_settings) | All 21 fields surface via API; 60s cache; audit table records changes    |
+| 12 May 2026 | No-hardcode audit (`scripts/audit_hardcoded_values.py`)                             | Zero violations; planted-violation test confirms detection               |
+| 12 May 2026 | Hybrid retrieval (dense + sparse + RRF fusion) wired into `run_retrieval_agent`     | Verified via search_hybrid call; `use_hybrid_search` flag now functional |
+| 12 May 2026 | HyDE query expansion in retrieval                                                   | Active when `use_hyde=True`; template lives in platform.yaml             |
+| 12 May 2026 | Retrieval critic with single-retry escalation                                       | 4 events in audit_log for run c1ea20a6; correctly retried ClearPath PI   |
+| 12 May 2026 | Extraction critic for cert + insurance paths (mandatory)                            | Apex PI correctly retried; £10M Hiscox extracted on retry                |
+| 12 May 2026 | P0.5 extraction adjacency bug (mandatory only) — closed                             | Apex shortlisted; ClearPath rejected with dispositive £3M evidence       |
+| 12 May 2026 | Fixture test (`scripts/test_fixture_mandatory.py`)                                  | 4/4 known outcomes on Apex/ClearPath                                     |
+| 12 May 2026 | Thread `run_id` through retrieval critic audit emission (P0.10)                     | retrieval_critic.verdict events now carry run_id; verified 69/69         |
+| 12 May 2026 | Extend extraction critic to `fact_type="custom"` rows (P0.11)                       | Custom target loop added; 69/69, 4/4 fixture, 0 audit violations         |
+| 12 May 2026 | Extend extraction critic to scoring criteria (P0.6)                                 | Scoring loop added using rubric_9_10 as quality benchmark; 69/69          |
+| 12 May 2026 | Audit completeness CI check (P0.9) + extraction critic run_id threading             | AUDIT-CP01 added; extraction agent now threads run_id; 70/70              |
+| 12 May 2026 | Log raw LLM response on critic fallback (P1.6)                                      | Both critics now log raw_response + exception type before defaulting      |
+| 12 May 2026 | Approve page SLA countdown NaN bug (P0.14)                                          | Guard isNaN(ts); urgent from diff ms not parseInt(string); build clean    |
+| 12 May 2026 | Vendor name at upload (P0.13)                                                        | Editable name field per vendor; vendor_names JSONB in DB; results display |
+| 12 May 2026 | Re-evaluate button on results page (P0.15)                                           | Zero-score amber banner + re-evaluate POST endpoint; routes to progress   |
+| 12 May 2026 | Chunk-level retrieval audit table (P0.8)                                             | retrieval_log table; log_retrieval() emits per call; run_id+criterion_id  |
+| 12 May 2026 | Bulk extraction empty-fact retry (P0.7)                                              | Fixed skip on empty fact_list; targeted retry now fires for SLAs/pricing  |
+| 12 May 2026 | Department pills route to filtered view (P1.5)                                       | Each pill → /dashboard/department/[name] with filtered run list           |
+| 12 May 2026 | Weight editor auto-rebalance (P1.2)                                                  | New criterion defaults 5%; proportional rebalance of unlocked criteria    |
+| 12 May 2026 | Override preview showing updated ranking (P1.3)                                      | After-override ranking preview card with projected shortlist              |
+| 12 May 2026 | Side-by-side vendor comparison page (P1.1)                                           | /[runId]/compare with criteria rows × vendor columns; Compare button      |
+| 12 May 2026 | Pydantic validation on synthesizer output (P1.12)                                    | SynthesisLLMResponse model validates LLM JSON before VendorNarrative      |
+| 12 May 2026 | Recommendation text readable casing (P3.2)                                           | strongly_recommended → "Strongly recommended" in RecBadge                 |
+| 12 May 2026 | Score band tooltips on results (P3.1)                                                | title= tooltip on score showing band meaning on hover                     |
+| 12 May 2026 | Source badge legend visible by default (P3.3)                                        | SourceLegend component shown above criteria sections                      |
 
 ---
 
-## REJECTED ITEMS
+## 🔴 P0 — Blocks production launch
 
-| Date    | What was considered            | Reason rejected                                                                                                                  |
-| ------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-04 | Fine-tuning models             | Too expensive and slow for v1. Few-shot prompting achieves comparable results on this use case. Revisit after 1000+ evaluations. |
-| 2026-04 | Image/audio document ingestion | Out of scope for RFP evaluation. Vendor responses are text documents.                                                            |
-| 2026-04 | Multi-language support         | English only for v1. Add after first non-English customer requests it.                                                           |
+Things that prevent shipping to a paying customer.
 
-## BACKLOG ITEM: Vendor Q&A — Conversational RAG for Decision Makers
+### P0.12 — Multi-user visibility and role-based access
 
-**Priority:** High
-**Build in:** Skill 07 (Output + Frontend) — after Retrieval Agent (Skill 03b) complete
-**Depends on:** Qdrant collections populated by Ingestion Agent, Retrieval Agent working
+**Problem.** Today any user with a JWT for the same `org_id` can see any evaluation that org has run. RLS prevents cross-org leakage but not within-org. A procurement intern can see the CFO's confidential negotiations.
+
+**Fix.** Role-based visibility model (owner / dept member / approver / CFO / auditor / admin) with Postgres RLS policies and an `access_audit_log` table.
+
+**Effort.** 2-3 days.
 
 ---
 
-### What this is
+## 🟡 P1 — Required UX
 
-A conversational Q&A interface on the Evaluation Report page (Page 8) where a
-decision-maker can ask free-form questions about any vendor's submitted documents
-after the evaluation has run. Answers are grounded in the vendor's actual text —
-not the system's structured extraction — so the decision-maker can read the
-vendor's own words before making a judgment.
+Things that make the product usable rather than demoable.
 
-This is the simplest possible RAG in the system. The vendor documents are already
-in Qdrant from the Ingestion Agent. The Retrieval Agent already searches them.
-This feature just exposes that capability through a chat interface.
+### P1.4 — Cancel running pipeline
 
----
+**Problem.** No way to cancel mid-run; only option is wait for failure.
 
-### Why it exists — the problem it solves
+**Fix.** Cancel button sets status='cancelled'; active agents check flag at safe points and exit cleanly.
 
-Right now the decision-maker sees a rejection and either accepts it or overrides it
-blind. They are trusting the system's extraction without being able to interrogate
-the source documents themselves.
-
-Example scenario:
-The system rejects Vendor X for insufficient client references.
-The CFO asks: "Can you show me their references and how big those clients are?"
-Without this feature: the CFO cannot ask. They accept the rejection or override
-it with no evidence.
-With this feature: the CFO reads the vendor's own words. Three NHS Trust clients,
-500+ users each, named on page 12 of their submission. The CFO overrides with
-genuine informed judgment and a defensible audit trail.
+**Effort.** 1-2 days.
 
 ---
 
-### Design decisions — already made, do not revisit
+### P1.7 — Self-consistency voting for borderline compliance checks
 
-1. SCOPE: User selects one vendor from a dropdown. Q&A is scoped to that vendor's
-   Qdrant collection only. No cross-vendor answers. Prevents confusion.
+**Problem.** Single LLM call on a borderline decision is brittle. Same question, three runs, different answers.
 
-2. LOCATION: Tab on the Evaluation Report page (Page 8) — "Ask about this vendor"
-   tab alongside the existing results. Most natural moment is when reviewing results.
+**Fix.** Run same compliance check 3 times, take majority. Apply only when confidence is borderline (e.g. 0.5-0.75) and the check is above approval threshold.
 
-3. OVERRIDE CONNECTION: After the user gets an answer, they can click
-   "Override rejection using this evidence." The override form pre-fills with the
-   relevant grounding quote from the Q&A answer as the justification. The audit
-   trail then contains actual vendor document evidence, not just a human opinion.
-
-4. STRICT GROUNDING: Every answer must cite the exact quote and page number from
-   the vendor document. If the document does not contain the answer, the system
-   says "I could not find information about this in the vendor's submission."
-   Never hallucinate supporting evidence for an override. This protects the
-   audit trail.
-
-5. NOT A GENERAL CHATBOT: Only answers questions about vendor documents in the
-   current evaluation. Does not answer general knowledge questions. Out-of-scope
-   questions get: "I can only answer questions about the vendor documents in this
-   evaluation."
+**Effort.** Half a day.
 
 ---
 
-### What to build
+### P1.8 — Verification step after synthesis
 
-BACKEND — one new FastAPI endpoint:
+**Problem.** Synthesis step generates narrative claims. Without a verification pass, the report can contain claims not strictly supported by retrieved context.
 
-POST /api/evaluations/{run_id}/vendors/{vendor_id}/ask
+**Fix.** Second LLM call after synthesis checks every claim against retrieved chunks. Add as optional guardrail node before PDF report.
 
-Request body:
-question: str — the user's free-form question
-org_id: str — for tenant isolation
-
-What it does: 1. Validates the run_id and vendor_id belong to the org_id (tenant check) 2. Calls Retrieval Agent with the question, scoped to vendor_id collection 3. Passes retrieved chunks to LLM with a strict grounding prompt 4. Returns answer with cited chunks
-
-Response:
-answer: str — plain English answer
-citations: List[Citation] — grounding quotes with page numbers
-vendor_id: str
-confidence: str — "high" | "medium" | "low"
-not_found: bool — True if document did not contain answer
-
-New Pydantic models needed (add to output_models.py in Skill 07):
-
-    class Citation(BaseModel):
-        quote: str
-        page_number: int
-        section_title: str
-        chunk_id: str
-
-    class VendorQARequest(BaseModel):
-        question: str
-        org_id: str
-
-    class VendorQAResponse(BaseModel):
-        answer: str
-        citations: List[Citation]
-        vendor_id: str
-        confidence: str
-        not_found: bool
-        question_echo: str         — echo back the question asked
-
-FRONTEND — new panel on Page 8 (Evaluation Report):
-
-Tab: "Ask about this vendor" alongside existing report tabs.
-
-Left side: vendor selector dropdown (shows all vendors in the evaluation,
-rejected vendors shown with red indicator, passed vendors with teal).
-
-Main area: chat-style interface.
-Input box at bottom: "Ask a question about this vendor's submission..."
-Answers appear above with: - Plain English answer - Grounding quotes in styled blockquote boxes (same style as Page 6
-compliance results — dark background, indigo left border) - Page number and section title for each quote - Confidence indicator
-
-Override connection:
-When vendor is rejected and Q&A returns an answer with citations,
-show a button below the answer:
-"Override rejection — use this as justification"
-Clicking this: - Opens the override side panel (same as Page 10 override panel) - Pre-fills the reason field with the most relevant citation quote - User can edit before submitting - Override is saved with the grounding evidence as documented reason
-
-Empty state: "Select a vendor and ask a question about their submission.
-For example: 'What client references did they provide?' or
-'What did they say about their security approach?'"
-
-LLM PROMPT for the Q&A endpoint (strict grounding):
-
-System: "You are answering questions about a vendor's submitted document.
-Answer only using the provided context. Every claim in your answer must
-reference a specific passage from the context. If the context does not
-contain the answer, say exactly: 'I could not find information about this
-in the vendor's submission.' Do not use any knowledge outside the provided
-context. Do not speculate."
-
-User: "Context: {retrieved_chunks_with_page_numbers}
-Question: {user_question}
-Answer with citations to specific passages."
+**Effort.** Half a day.
 
 ---
 
-### What does NOT change
+### P1.9 — Human feedback capture for AI score overrides
 
-- No new agents
-- No new databases
-- No new Qdrant collections (vendor documents already there from Ingestion)
-- No changes to the evaluation pipeline
-- No changes to existing output models except adding Citation,
-  VendorQARequest, VendorQAResponse in Skill 07
+**Problem.** When evaluator overrides an AI score, the correction is lost. Future runs don't benefit.
+
+**Fix.** Feedback UI in frontend; corrections flow back into few-shot example bank.
+
+**Effort.** 1 day.
 
 ---
 
-### Test case — use Chemtura / YASH
+### P1.10 — Score drift detection in production
 
-When this is built, test with:
-Question: "What client references did YASH provide and how large are those clients?"
-Expected: System finds the John Deere, Stanley Works, Monsanto references
-from the YASH document and shows the exact text with page numbers.
+**Problem.** No alerting if average confidence drops week-over-week.
 
-Question: "What did YASH say about their insurance coverage?"
-Expected: not_found=True because YASH left an internal question in their
-submission instead of answering. System says it could not find information.
-This is the correct answer — do not hallucinate insurance coverage.
+**Fix.** LangSmith has the data. Monitoring rule + Slack alert.
+
+**Effort.** Half a day.
+
+---
+
+### P1.11 — Vendor Q&A — Conversational RAG for decision makers
+
+**Problem.** Decision-makers see a rejection and either accept or override blind. They cannot interrogate the source documents.
+
+**Fix.** Tab on the Evaluation Report page — "Ask about this vendor" — chat-style interface scoped to one vendor's Qdrant collection. Strict grounding: every answer cites exact quote + page number; never hallucinate evidence for overrides. Connects to the override flow: clicking "Override using this evidence" pre-fills the override form with the citation.
+
+**Backend.** New endpoint `POST /api/evaluations/{run_id}/vendors/{vendor_id}/ask`. New Pydantic models: `Citation`, `VendorQARequest`, `VendorQAResponse`.
+
+**Frontend.** Vendor selector dropdown; chat input; grounded answers with citation blockquotes; "Override using this evidence" button for rejected vendors.
+
+**Effort.** 2-3 days.
+
+**Test case.** Use Chemtura/YASH fixture: "What client references did YASH provide?" — should find John Deere, Stanley Works, Monsanto with page numbers.
+
+---
+
+
+## 🔵 P2 — Architectural improvements
+
+Things that make the system more robust or capable. Interview-worthy "next steps."
+
+### P2.1 — Replace TF-IDF sparse with proper BM25
+
+**Fix.** Switch to Qdrant's native BM25 sparse vectors. Re-ingestion required. **Effort:** Half a day including backfill.
+
+### P2.2 — Retrieval critic LLM cache
+
+**Fix.** Hash inputs into cache key; Redis or Postgres lookup before LLM call; 7-day TTL. **Effort:** Half a day.
+
+### P2.3 — Hybrid search for Balanced tier
+
+Decision needed: enable by default (raises cost ~3.5x) vs. keep as escalation only. **Effort:** 10 min config change. Wait for production data.
+
+### P2.4 — Expanded fixture suite
+
+Add fixtures for construction, healthcare, public sector, software. **Effort:** 1 day per fixture.
+
+### P2.5 — Critic retry cost analysis dashboard
+
+First-pass vs retry rate over time, by criterion type. **Effort:** 1 day.
+
+### P2.6 — Confidence-tier-aware UX
+
+Banner showing current tier and cost-per-evaluation; cost history. **Effort:** 1-2 days.
+
+### P2.7 — Prompt versioning
+
+`prompt_version` column in decisions table; emit version with every LLM call. **Effort:** Half a day.
+
+### P2.8 — OCR for scanned PDFs
+
+Tesseract integration in ingestion path. Detect scan-only pages; OCR them. **Effort:** 1 day.
+
+### P2.9 — Document versioning
+
+Version vendor documents; keep previous versions queryable. **Effort:** 1 day.
+
+### P2.10 — Confidence calibration
+
+Empirically calibrate confidence scores against ground truth dataset (P3.6 prerequisite). **Effort:** 2 days.
+
+### P2.11 — Context compression
+
+`ContextualCompressionRetriever` extracts only relevant sentences from chunks. **Effort:** Half a day.
+
+### P2.12 — Lost-in-the-middle handling
+
+Sort retrieved chunks by importance; place most important first and last. **Effort:** 2 hours.
+
+### P2.13 — Contextual chunk headers
+
+Prepend each chunk with parent section summary. One extra LLM call per chunk at ingestion. **Effort:** 1 day.
+
+---
+
+## ⚪ P3 — Polish
+
+| ID    | What                                                                                  | Effort     |
+| ----- | ------------------------------------------------------------------------------------- | ---------- |
+| P3.4  | Dashboard search and filter (vendor, RFP, date, status)                               | Half a day |
+| P3.5  | Estimated time remaining on progress page                                             | Half a day |
+| P3.6  | Ground truth evaluation dataset (first customer, 20 vendors)                          | Ongoing    |
+| P3.7  | A/B prompt testing — requires P3.6                                                    | 1 day      |
+| P3.8  | Export with criterion-level detail + grounding quotes                                 | Half a day |
+| P3.9  | Save as draft on upload page                                                          | Half a day |
+| P3.10 | Retry failed pipeline from progress page (from blocked agent, not scratch)            | 1 day      |
+| P3.11 | Approval SLA checker background job + Slack reminder                                  | Half a day |
+| P3.12 | Retrieval quality monitoring in production (weekly scheduled test)                    | Half a day |
+
+---
+
+## 🟣 P4 — Future architecture
+
+Only build when a customer asks.
+
+| ID   | What                                                                       |
+| ---- | -------------------------------------------------------------------------- |
+| P4.1 | Cross-encoder reranker swap (Cohere → BGE) once cost matters               |
+| P4.2 | Multi-language support (EN-GB only now; add on first non-English customer) |
+| P4.3 | Cross-evaluation memory (vendor history across multiple RFPs)              |
+| P4.4 | Slack/email/Teams approval notifications                                   |
+| P4.5 | Long-context experimental mode for small RFP sets (<200 pages)             |
+| P4.6 | SaaS billing system (Stripe integration, per-org usage metering)           |
+| P4.7 | Executive dashboard (CEO/CFO view across departments)                      |
+| P4.8 | Chunk overlap strategy (sentence-boundary if needed)                       |
+| P4.9 | Hierarchical chunking (summary + detail per section)                       |
+
+---
+
+## ❌ REJECTED — Considered and not building
+
+| Date     | What                                | Why rejected                                                                   |
+| -------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| Apr 2026 | Fine-tuning models                  | Too expensive for v1; few-shot achieves comparable. Revisit after 1000+ evals. |
+| Apr 2026 | Image/audio ingestion               | Out of scope; vendor responses are text.                                       |
+| Apr 2026 | Knowledge graph layer               | Doesn't solve any observed failure mode.                                       |
+| Apr 2026 | Per-customer LLM provider switching | Operational complexity without clear benefit.                                  |
+| Apr 2026 | Real-time collaborative editing     | Procurement is sequential, not collaborative writing.                          |
+| Apr 2026 | Mobile app                          | Procurement is desktop work.                                                   |
+
+---
+
+## How to use this document
+
+**Don't move items by date.** Move them by state. Completed → COMPLETED section with the date and verification method. In progress → IN FLIGHT with who's working on it. Active backlog → tiered by P-level.
+
+**Re-tier monthly.** A P2 today may become P0 the moment a customer hits the underlying gap. A P0 may slide to P1 if the workaround turns out acceptable.
+
+**Each item has problem / fix / effort.** If you can't write those three, it's not an item — it's an idea. Ideas live in a separate "ideas to evaluate" list, not in the backlog.
+
+**The COMPLETED section is your interview story.** When asked _"what have you actually built?"_ — read down the COMPLETED table. Each row is a defensible claim with evidence.
+
+**The P0 section is your honest answer to _"what's not done yet?"_** Not "everything is done" — "here are the genuine production blockers I haven't shipped yet and roughly how long each would take." That's senior thinking.

@@ -516,8 +516,9 @@ export default function DashboardPage() {
   }
 
   function handleDrillDown(agentId: string) {
-    setActiveSection(agentId);
-    setTimeout(() => router.push(`/procurement/upload?from=overview`), 200);
+    const agent = DEPT_AGENTS.find(a => a.id === agentId);
+    const dept = agent ? encodeURIComponent(agent.name) : agentId;
+    router.push(`/dashboard/department/${dept}`);
   }
 
   const drilledAgent = activeSection !== "overview"

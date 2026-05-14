@@ -17,52 +17,17 @@ from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     get_leaf_nodes,
 )
-import httpx
-from openai import OpenAI, AzureOpenAI
 from app.config import settings
+from app.core.embedding_provider import embed_text, embed_batch, get_embedding_dimensions
 
 if TYPE_CHECKING:
     from app.core.output_models import EvaluationSetup
 
-_embed_client = None
-
-
-def get_embed_client():
-    global _embed_client
-    if _embed_client is None:
-        http_client = httpx.Client(verify=settings.ssl_verify) if not settings.ssl_verify else None
-        if settings.llm_provider == "azure":
-            _embed_client = AzureOpenAI(
-                azure_endpoint=settings.azure_openai_endpoint,
-                api_key=settings.azure_openai_api_key,
-                api_version=settings.azure_openai_api_version,
-                **({"http_client": http_client} if http_client else {}),
-            )
-        else:
-            _embed_client = OpenAI(
-                api_key=settings.openai_api_key,
-                **({"http_client": http_client} if http_client else {}),
-            )
-    return _embed_client
-
 
 def get_dense_embedding(text: str) -> list[float]:
-    """Dense embedding — 3072 dimensions.
-    Uses Azure OpenAI when LLM_PROVIDER=azure, otherwise OpenAI directly.
-    Returns zero vector when skip_embeddings=True (dev/test mode)."""
-    if settings.skip_embeddings:
-        return [0.0] * 3072
-    client = get_embed_client()
-    model = (
-        settings.azure_openai_embedding_deployment
-        if settings.llm_provider == "azure"
-        else settings.openai_embedding_model
-    )
-    response = client.embeddings.create(
-        model=model,
-        input=text[:8000],
-    )
-    return response.data[0].embedding
+    """Single-text dense embedding via configured provider.
+    Kept for backwards compatibility — new code should call embed_text() directly."""
+    return embed_text(text)
 
 
 def get_sparse_embedding(text: str) -> tuple[list[int], list[float]]:
@@ -183,8 +148,9 @@ def process_document(
         }
     )
 
+    _csize = settings.platform.ingestion.chunk_size_tokens
     hierarchical_parser = HierarchicalNodeParser.from_defaults(
-        chunk_sizes=[2048, 512, 128]
+        chunk_sizes=[_csize * 4, _csize, _csize // 4]
     )
     sentence_parser = SentenceWindowNodeParser.from_defaults(
         window_size=3,
@@ -228,13 +194,12 @@ def process_document(
         }
         priority = priority_map.get(section_type, 3)
 
-        dense = get_dense_embedding(text)
         sparse_indices, sparse_values = get_sparse_embedding(text)
 
         chunks.append({
             "chunk_id": str(uuid.uuid4()),
             "text": text,
-            "dense_vector": dense,
+            "dense_vector": None,   # filled in batch below
             "sparse_indices": sparse_indices,
             "sparse_values": sparse_values,
             "section_id": section_id,
@@ -247,6 +212,12 @@ def process_document(
             "org_id": org_id,
             "window": node.metadata.get("window", ""),
         })
+
+    # Batch-embed all chunks in one provider call (GPU-efficient for Modal)
+    texts = [c["text"] for c in chunks]
+    dense_vectors = embed_batch(texts)
+    for chunk, vec in zip(chunks, dense_vectors):
+        chunk["dense_vector"] = vec
 
     return chunks
 

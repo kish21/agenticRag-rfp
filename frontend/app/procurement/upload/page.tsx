@@ -97,6 +97,104 @@ export default function UploadPage() {
   );
 }
 
+/** Clean a filename stem into a human-readable vendor name. */
+function cleanVendorName(filename: string): string {
+  const stem = filename.replace(/\.[^.]+$/, "");
+  return stem.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Derive vendor_id from filename (mirrors the backend logic). */
+function fileToVid(filename: string): string {
+  return filename.replace(/\.[^.]+$/, "");
+}
+
+interface VendorEntry { file: File; displayName: string; }
+
+/** Vendor drop zone that shows an editable name field per file. */
+function VendorDropZone({ entries, onAdd, onRemove, onRename, isDark }: {
+  entries: VendorEntry[];
+  onAdd: (files: File[]) => void;
+  onRemove: (i: number) => void;
+  onRename: (i: number, name: string) => void;
+  isDark: boolean;
+}) {
+  const P     = isDark ? PALETTE : PALETTE_LIGHT;
+  const accent = "#8B5CF6";
+  const [over, setOver] = useState(false);
+  const ref   = useRef<HTMLInputElement>(null);
+
+  const handle = useCallback((list: FileList | null) => {
+    if (!list) return;
+    const bad  = Array.from(list).filter(f => !validFile(f));
+    if (bad.length) alert(`Rejected: ${bad.map(f => f.name).join(", ")}\nOnly PDF and DOCX are accepted.`);
+    const good = Array.from(list).filter(validFile);
+    if (good.length) onAdd(good);
+  }, [onAdd]);
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: P.text.secondary, marginBottom: 8, fontFamily: FONT }}>
+        Vendor Responses (one or more)
+      </div>
+      <div
+        onDragOver={e => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={e => { e.preventDefault(); setOver(false); handle(e.dataTransfer.files); }}
+        onClick={() => ref.current?.click()}
+        style={{
+          border: `2px dashed ${over ? accent : P.border.mid}`,
+          borderRadius: TOKENS.radius.card, padding: "26px 20px",
+          textAlign: "center", cursor: "pointer",
+          background: over ? accent + "0D" : P.bg.surface,
+          transition: "all 140ms",
+        }}
+      >
+        <div style={{ fontSize: 24, marginBottom: 6, opacity: 0.5 }}>⬆</div>
+        <div style={{ fontSize: 13, color: P.text.secondary, fontFamily: FONT, marginBottom: 3 }}>
+          Drop here or <span style={{ color: accent, fontWeight: 500 }}>browse</span>
+        </div>
+        <div style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT }}>One file per vendor — PDF or DOCX</div>
+        <input ref={ref} type="file" accept={[".pdf", ".docx"].join(",")} multiple
+          style={{ display: "none" }} onChange={e => handle(e.target.files)} />
+      </div>
+
+      {entries.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          {entries.map((entry, i) => (
+            <div key={i} style={{
+              background: P.bg.elevated, borderRadius: 8, border: `1px solid ${P.border.dim}`,
+              padding: "10px 12px",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ fontSize: 15 }}>{entry.file.name.endsWith(".pdf") ? "📄" : "📝"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.file.name} · {fmtSize(entry.file.size)}</div>
+                </div>
+                <button onClick={e => { e.stopPropagation(); onRemove(i); }} style={{ background: "none", border: "none", cursor: "pointer", color: P.text.muted, fontSize: 15, padding: 2 }}>✕</button>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT, flexShrink: 0 }}>Vendor name</label>
+                <input
+                  value={entry.displayName}
+                  onChange={e => onRename(i, e.target.value)}
+                  placeholder="e.g. Apex Technology"
+                  suppressHydrationWarning
+                  style={{
+                    flex: 1, fontFamily: FONT, fontSize: 12,
+                    padding: "5px 10px", borderRadius: 6,
+                    border: `1px solid ${P.border.mid}`,
+                    background: P.bg.surface, color: P.text.primary, outline: "none",
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UploadPageInner() {
   const { isDark, toggle } = useTheme();
   const P            = isDark ? PALETTE : PALETTE_LIGHT;
@@ -104,7 +202,7 @@ function UploadPageInner() {
   const searchParams = useSearchParams();
 
   const [rfp,           setRfp]           = useState<File[]>([]);
-  const [vendors,       setVendors]       = useState<File[]>([]);
+  const [vendors,       setVendors]       = useState<VendorEntry[]>([]);
   const [dept,          setDept]          = useState("");
   const [rfpTitle,      setRfpTitle]      = useState("");
 
@@ -135,7 +233,15 @@ function UploadPageInner() {
       body.append("department", dept.trim());
       body.append("contract_value", contractValue.trim() || "0");
       body.append("vendor_ids", "[]");  // derived from filenames server-side
-      vendors.forEach(v => body.append("vendor_files", v));
+      // Build vendor_names map: vid → display name (only non-empty overrides)
+      const namesMap: Record<string, string> = {};
+      vendors.forEach(entry => {
+        const vid = fileToVid(entry.file.name);
+        const name = entry.displayName.trim();
+        if (name && name !== vid) namesMap[vid] = name;
+      });
+      body.append("vendor_names", JSON.stringify(namesMap));
+      vendors.forEach(entry => body.append("vendor_files", entry.file));
       const res = await fetch(`${API}/api/v1/evaluate/start`, {
         method: "POST",
         headers: { Authorization: `Bearer ${getToken()}` },
@@ -242,10 +348,12 @@ function UploadPageInner() {
               onAdd={f => setRfp(f)} onRemove={i => setRfp(fs => fs.filter((_, j) => j !== i))}
               isDark={isDark} accent={TEAL} />
 
-            <DropZone label="Vendor Responses (one or more)" hint="One file per vendor. File name = vendor name."
-              multiple files={vendors}
-              onAdd={f => setVendors(v => [...v, ...f])} onRemove={i => setVendors(v => v.filter((_, j) => j !== i))}
-              isDark={isDark} accent="#8B5CF6" />
+            <VendorDropZone
+              entries={vendors}
+              onAdd={files => setVendors(v => [...v, ...files.map(f => ({ file: f, displayName: cleanVendorName(f.name) }))])}
+              onRemove={i => setVendors(v => v.filter((_, j) => j !== i))}
+              onRename={(i, name) => setVendors(v => v.map((e, j) => j === i ? { ...e, displayName: name } : e))}
+              isDark={isDark} />
 
             {error && (
               <div style={{
@@ -268,7 +376,7 @@ function UploadPageInner() {
               </button>
               {!ready && !loading && (
                 <span style={{ fontSize: 11, color: P.text.muted }}>
-                  {!rfpTitle.trim() ? "Enter an RFP title" : !dept.trim() ? "Enter a department name" : !rfp.length ? "Upload the RFP file" : "Add at least one vendor response"}
+                  {!rfpTitle.trim() ? "Enter an RFP title" : !dept.trim() ? "Enter a department name" : !rfp.length ? "Upload the RFP file" : vendors.length === 0 ? "Add at least one vendor response" : ""}
                 </span>
               )}
             </div>

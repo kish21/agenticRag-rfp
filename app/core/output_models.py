@@ -348,6 +348,7 @@ class ExtractionOutput(BaseModel):
     extraction_completeness: float = Field(ge=0.0, le=1.0)
     hallucination_risk: float = Field(ge=0.0, le=1.0)
     warnings: List[str] = []
+    retried_fact_types: List[str] = []  # fact types where extraction critic triggered a retry
 
 
 # ── Evaluation output ─────────────────────────────────────
@@ -464,9 +465,26 @@ class GroundedClaim(BaseModel):
     claim_text: str
     grounding_quote: str
     source_chunk_id: str
-    source_filename: str
-    source_page: int
-    confidence: float
+    source_filename: str = ""
+    source_page: int = 1
+    confidence: float = 0.8
+
+
+class SynthesisLLMResponse(BaseModel):
+    """Validates the raw LLM JSON output from the synthesis/explanation step."""
+    executive_summary: str = ""
+    compliance_narrative: str = ""
+    scoring_narrative: str = ""
+    recommendation_rationale: str = ""
+    grounded_claims: List[GroundedClaim] = []
+
+    @field_validator("grounded_claims", mode="before")
+    @classmethod
+    def _coerce_claims(cls, v: object) -> object:
+        if not isinstance(v, list):
+            return []
+        return v
+
 
 class VendorNarrative(BaseModel):
     vendor_id: str

@@ -8,8 +8,11 @@ Supported providers:
   openrouter  — Any model via OpenRouter (openai SDK, different base_url)
   ollama      — Local models (Qwen, Llama, Mistral) via Ollama REST API
   azure       — Azure OpenAI via openai 2.x AzureAsyncOpenAI client
+  modal       — Qwen 2.5 72B via vLLM on Modal A100 (OpenAI-compatible endpoint)
+                Set MODAL_LLM_ENDPOINT after: modal deploy app_modal.py --env rag
 """
 from typing import Optional
+from langsmith import traceable
 from app.config import settings
 
 
@@ -59,6 +62,24 @@ def get_llm_client():
             kwargs["http_client"] = http_client
         return AsyncOpenAI(**kwargs)
 
+    elif provider == "modal":
+        from openai import AsyncOpenAI
+        import httpx
+        if not settings.modal_llm_endpoint:
+            raise ValueError(
+                "MODAL_LLM_ENDPOINT is not set. "
+                "Deploy first: modal deploy app_modal.py --env rag "
+                "then copy the printed URL into .env"
+            )
+        # 10-minute timeout — Modal cold start (A100 spin-up + vLLM load) can take 5+ min
+        # follow_redirects=True — Modal returns 303 during cold start while container warms up
+        modal_http = httpx.AsyncClient(timeout=600, verify=settings.ssl_verify, follow_redirects=True)
+        return AsyncOpenAI(
+            api_key="modal",
+            base_url=f"{settings.modal_llm_endpoint.rstrip('/')}/v1",
+            http_client=modal_http,
+        )
+
     elif provider == "azure":
         from openai import AsyncAzureOpenAI
         kwargs = {
@@ -73,22 +94,24 @@ def get_llm_client():
     else:
         raise ValueError(
             f"Unknown LLM_PROVIDER: '{provider}'. "
-            f"Valid options: openai, anthropic, openrouter, ollama, azure"
+            f"Valid options: openai, anthropic, openrouter, ollama, azure, modal"
         )
 
 
 def get_model_name() -> str:
     provider = settings.llm_provider.lower()
     mapping = {
-        "openai": settings.openai_model,
-        "anthropic": settings.anthropic_model,
-        "openrouter": settings.openrouter_model,
-        "ollama": settings.ollama_model,
-        "azure": settings.azure_openai_deployment,
+        "openai":      settings.openai_model,
+        "anthropic":   settings.anthropic_model,
+        "openrouter":  settings.openrouter_model,
+        "ollama":      settings.ollama_model,
+        "azure":       settings.azure_openai_deployment,
+        "modal":       settings.modal_llm_model,
     }
     return mapping.get(provider, settings.openai_model)
 
 
+@traceable(run_type="llm", name="call_llm")
 async def call_llm(
     messages: list[dict],
     temperature: float = 0.1,
@@ -139,14 +162,16 @@ async def call_llm(
         return await call_with_backoff(_call)
 
     else:
-        # OpenAI, OpenRouter, Ollama — all use chat.completions.create
+        # OpenAI, OpenRouter, Ollama, Modal — all use chat.completions.create
         kwargs = dict(
             model=get_model_name(),
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        if response_format:
+        # Modal/vLLM: skip response_format — xgrammar guided decoding crashes vLLM engine.
+        # Qwen follows JSON instructions in the prompt without it (same as Anthropic path).
+        if response_format and provider != "modal":
             kwargs["response_format"] = response_format
 
         async def _call():

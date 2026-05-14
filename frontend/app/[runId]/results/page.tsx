@@ -33,6 +33,13 @@ interface Results {
 
 // ── Score bar ──────────────────────────────────────────────────────────────────
 
+const SCORE_BAND_LABEL: (score: number) => string = (score) => {
+  if (score >= 8) return "8–10: Strongly recommended — meets or exceeds most criteria";
+  if (score >= 6) return "6–7.9: Recommended — meets key criteria with minor gaps";
+  if (score >= 4) return "4–5.9: Acceptable — partial compliance, consider risk";
+  return "0–3.9: Marginal — significant gaps, high risk";
+};
+
 function ScoreBar({ score, isDark }: { score: number; isDark: boolean }) {
   const P      = isDark ? PALETTE : PALETTE_LIGHT;
   const colour = score >= 8 ? "#10B981" : score >= 6 ? "#00D4AA" : score >= 4 ? "#F59E0B" : "#EF4444";
@@ -41,7 +48,12 @@ function ScoreBar({ score, isDark }: { score: number; isDark: boolean }) {
       <div style={{ flex: 1, height: 5, borderRadius: 3, background: P.border.dim, overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${score * 10}%`, background: colour, borderRadius: 3, transition: "width 600ms ease" }} />
       </div>
-      <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 600, color: colour, flexShrink: 0 }}>{score.toFixed(1)}</span>
+      <span
+        title={SCORE_BAND_LABEL(score)}
+        style={{ fontFamily: MONO, fontSize: 13, fontWeight: 600, color: colour, flexShrink: 0, cursor: "help", borderBottom: `1px dotted ${colour}60` }}
+      >
+        {score.toFixed(1)}
+      </span>
     </div>
   );
 }
@@ -63,7 +75,7 @@ function RecBadge({ rec }: { rec: string }) {
       background: colour + "18", padding: "3px 9px",
       borderRadius: 12, border: `1px solid ${colour}40`, fontFamily: FONT,
     }}>
-      {rec.replace(/_/g, " ")}
+      {rec.replace(/_/g, " ").replace(/^\w/, c => c.toUpperCase())}
     </span>
   );
 }
@@ -99,10 +111,12 @@ export default function ResultsPage() {
   const { isDark, toggle } = useTheme();
   const P                  = isDark ? PALETTE : PALETTE_LIGHT;
 
-  const [results,     setResults]     = useState<Results | null>(null);
-  const [agentLog,    setAgentLog]    = useState<{ts: string; agent: string; status: string; message: string}[]>([]);
+  const [results,      setResults]      = useState<Results | null>(null);
+  const [agentLog,     setAgentLog]     = useState<{ts: string; agent: string; status: string; message: string}[]>([]);
+  const [vendorNames,  setVendorNames]  = useState<Record<string, string>>({});
+  const [reEvaluating, setReEvaluating] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [auditTrail,  setAuditTrail]  = useState<any[]>([]);
+  const [auditTrail,   setAuditTrail]   = useState<any[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState("");
   const [downloading, setDownloading] = useState<"pdf" | "excel" | null>(null);
@@ -128,6 +142,7 @@ export default function ResultsPage() {
       .then(([d, a]) => {
         setResults(d.decision ?? d);
         setAgentLog(d.agent_log ?? []);
+        setVendorNames(d.vendor_names ?? {});
         setAuditTrail(a.events ?? []);
         setLoading(false);
       })
@@ -149,6 +164,20 @@ export default function ResultsPage() {
         URL.revokeObjectURL(url);
       }
     } finally { setDownloading(null); }
+  }
+
+  async function reEvaluate() {
+    setReEvaluating(true);
+    try {
+      const res = await fetch(`${API}/api/v1/evaluate/${runId}/re-evaluate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      router.push(`/${runId}/progress`);
+    } catch {
+      setReEvaluating(false);
+    }
   }
 
   const CARD = { background: P.bg.surface, borderRadius: TOKENS.radius.card, border: `1px solid ${P.border.mid}` };
@@ -175,6 +204,8 @@ export default function ResultsPage() {
   const shortlisted: any[] = results?.shortlisted_vendors ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rejected:    any[] = results?.rejected_vendors    ?? [];
+  const allZero = shortlisted.length > 0 && shortlisted.every((v: { total_score: number }) => v.total_score === 0);
+  const showReEvaluate = shortlisted.length === 0 || allZero;
   const ar          = results.approval_routing;
 
   return (
@@ -207,13 +238,51 @@ export default function ResultsPage() {
 
       <main style={{ maxWidth: 900, margin: "0 auto", padding: "36px 28px 80px", display: "flex", flexDirection: "column", gap: 18 }}>
 
+        {/* Zero-score / no-shortlist banner */}
+        {showReEvaluate && (
+          <div style={{
+            background: "#F59E0B10", border: "1px solid #F59E0B50",
+            borderRadius: TOKENS.radius.card, padding: "16px 20px",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#F59E0B", fontFamily: FONT, marginBottom: 3 }}>
+                {shortlisted.length === 0 ? "No vendors were shortlisted" : "All vendors scored 0.0"}
+              </div>
+              <div style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT }}>
+                The pipeline may have run before documents were fully indexed. Re-evaluate to retry with the same setup and documents.
+              </div>
+            </div>
+            <button onClick={reEvaluate} disabled={reEvaluating} style={{
+              background: "#F59E0B", color: "#1A1200", border: "none",
+              borderRadius: TOKENS.radius.btn, padding: "9px 20px",
+              fontSize: 13, fontFamily: FONT, fontWeight: 600,
+              cursor: reEvaluating ? "not-allowed" : "pointer", flexShrink: 0,
+              opacity: reEvaluating ? 0.6 : 1,
+            }}>
+              {reEvaluating ? "Starting…" : "↺ Re-evaluate"}
+            </button>
+          </div>
+        )}
+
         {/* Summary header */}
         <div style={{ ...CARD, padding: "20px 22px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <h1 style={{ fontSize: 18, fontWeight: 700, color: P.text.primary, margin: 0, fontFamily: FONT }}>
               Evaluation results
             </h1>
-            <div style={{ fontFamily: MONO, fontSize: 11, color: P.text.muted }}>{runId}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {shortlisted.length > 1 && (
+                <button onClick={() => router.push(`/${runId}/compare`)} style={{
+                  background: "transparent", border: "1px solid #00D4AA40",
+                  borderRadius: 7, padding: "5px 12px", fontSize: 11,
+                  color: "#00D4AA", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
+                }}>
+                  ⇔ Compare
+                </button>
+              )}
+              <div style={{ fontFamily: MONO, fontSize: 11, color: P.text.muted }}>{runId}</div>
+            </div>
           </div>
           <div style={{ display: "flex", gap: 24 }}>
             <div>
@@ -289,7 +358,7 @@ export default function ResultsPage() {
                         }}>#{v.rank}</div>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 14, fontWeight: 600, color: P.text.primary, fontFamily: FONT, marginBottom: 4 }}>
-                            {v.vendor_name || v.vendor_id}
+                            {vendorNames[v.vendor_id] || v.vendor_name || v.vendor_id}
                           </div>
                           <ScoreBar score={v.total_score} isDark={isDark} />
                         </div>
@@ -357,7 +426,7 @@ export default function ResultsPage() {
                 {rejected.map(v => (
                   <div key={v.vendor_id} style={{ background: "#EF444410", border: "1px solid #EF444430", borderRadius: 10, padding: "14px 16px" }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#EF4444", fontFamily: FONT, marginBottom: 6 }}>
-                      {v.vendor_name || v.vendor_id}
+                      {vendorNames[v.vendor_id] || v.vendor_name || v.vendor_id}
                     </div>
                     <div style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT, marginBottom: 8 }}>
                       Failed checks: {v.failed_checks.join(", ")}

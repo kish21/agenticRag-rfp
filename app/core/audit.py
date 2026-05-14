@@ -40,6 +40,8 @@ EVENTS = {
     "override.submitted",# human overrode an agent decision
     "approval.requested",# approval workflow triggered
     "approval.responded",# approver accepted or rejected
+    "retrieval_critic.verdict",  # retrieval critic judged chunk adequacy
+    "extraction_critic.verdict", # extraction critic judged a single extracted fact
 }
 
 
@@ -81,3 +83,65 @@ def audit(
             )
     except Exception as exc:
         log.error("audit write failed: %s", exc)
+
+
+def log_retrieval(
+    *,
+    org_id:             str,
+    vendor_id:          str,
+    query_text:         str,
+    retrieval_strategy: str,
+    chunks:             list,
+    run_id:             str | None = None,
+    criterion_id:       str | None = None,
+    rewritten_query:    str | None = None,
+    scores:             dict | None = None,
+    timing_ms:          int | None = None,
+) -> None:
+    """
+    Insert one row into retrieval_log.
+    Never raises — swallows errors to avoid killing the caller.
+    """
+    try:
+        chunk_rows = [
+            {
+                "chunk_id":   c.chunk_id if hasattr(c, "chunk_id") else c.get("chunk_id", ""),
+                "text":       (c.text if hasattr(c, "text") else c.get("text", ""))[:500],
+                "score":      c.final_score if hasattr(c, "final_score") else c.get("score", 0.0),
+                "page":       c.page_number if hasattr(c, "page_number") else c.get("page_number"),
+                "filename":   c.filename if hasattr(c, "filename") else c.get("filename", ""),
+            }
+            for c in chunks
+        ]
+        engine = get_engine()
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text("""
+                    INSERT INTO retrieval_log
+                        (run_id, org_id, vendor_id, criterion_id,
+                         query_text, rewritten_query, retrieval_strategy,
+                         chunks, scores, timing_ms)
+                    VALUES
+                        (CAST(:run_id AS uuid),
+                         CAST(:org_id AS uuid),
+                         :vendor_id, :criterion_id,
+                         :query_text, :rewritten_query, :retrieval_strategy,
+                         CAST(:chunks AS jsonb),
+                         CAST(:scores AS jsonb),
+                         :timing_ms)
+                """),
+                {
+                    "run_id":             run_id,
+                    "org_id":             org_id,
+                    "vendor_id":          vendor_id,
+                    "criterion_id":       criterion_id,
+                    "query_text":         query_text,
+                    "rewritten_query":    rewritten_query,
+                    "retrieval_strategy": retrieval_strategy,
+                    "chunks":             json.dumps(chunk_rows),
+                    "scores":             json.dumps(scores or {}),
+                    "timing_ms":          timing_ms,
+                },
+            )
+    except Exception as exc:
+        log.error("log_retrieval write failed: %s", exc)

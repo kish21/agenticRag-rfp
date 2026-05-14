@@ -34,12 +34,16 @@ def rfp_collection_name(org_id: str, rfp_id: str) -> str:
     return f"{prefix}_{org_id}_rfp_{rfp_id}".replace("-", "_").lower()
 
 
-def create_collection(name: str, vector_size: int = 3072):
+def create_collection(name: str, vector_size: int | None = None):
     """
     Creates a Qdrant collection with both dense and sparse vectors.
     Dense: for semantic similarity search (OpenAI embeddings)
     Sparse: for BM25 keyword search
     """
+    from app.core.embedding_provider import get_embedding_dimensions
+    if vector_size is None:
+        vector_size = get_embedding_dimensions()
+
     client = get_qdrant_client()
 
     existing = [c.name for c in client.get_collections().collections]
@@ -137,6 +141,81 @@ def search_dense(
             "payload": r.payload
         }
         for r in results
+    ]
+
+
+def search_hybrid(
+    collection: str,
+    query_text: str,
+    org_id: str,
+    vendor_id: str,
+    limit: int,
+    dense_vector: list[float] | None = None,
+) -> list[dict]:
+    """
+    Hybrid retrieval combining dense semantic and sparse lexical signals
+    via Reciprocal Rank Fusion (RRF).
+
+    If dense_vector is provided (e.g. HyDE already produced one) it is
+    used directly; otherwise query_text is embedded fresh. Sparse vector
+    is always computed from query_text so lexical signals are grounded
+    in the literal query, not the hypothetical document.
+
+    Returns the same dict shape as search_dense so callers are
+    interchangeable.
+    """
+    from qdrant_client import models as qm
+    from app.core.embedding_provider import embed_text
+    from app.core.llamaindex_pipeline import get_sparse_embedding
+    from app.config import settings
+
+    cfg = settings.platform.retrieval
+    client = get_qdrant_client()
+
+    dense_vec = dense_vector if dense_vector is not None else embed_text(query_text)
+    sparse_indices, sparse_values = get_sparse_embedding(query_text)
+
+    must_conditions = [
+        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
+        FieldCondition(key="vendor_id", match=MatchValue(value=vendor_id)),
+    ]
+    qfilter = Filter(must=must_conditions)
+
+    prefetch = [
+        qm.Prefetch(
+            query=dense_vec,
+            using=cfg.dense_vector_name,
+            limit=limit * 2,
+            filter=qfilter,
+        ),
+        qm.Prefetch(
+            query=qm.SparseVector(
+                indices=sparse_indices,
+                values=sparse_values,
+            ),
+            using=cfg.sparse_vector_name,
+            limit=limit * 2,
+            filter=qfilter,
+        ),
+    ]
+
+    result = client.query_points(
+        collection_name=collection,
+        prefetch=prefetch,
+        query=qm.FusionQuery(fusion=qm.Fusion.RRF),
+        limit=limit,
+        with_payload=True,
+        with_vectors=False,
+    )
+
+    return [
+        {
+            "chunk_id": p.payload.get("chunk_id"),
+            "text": p.payload.get("text", ""),
+            "score": p.score,
+            "payload": p.payload,
+        }
+        for p in result.points
     ]
 
 

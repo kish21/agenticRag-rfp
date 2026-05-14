@@ -57,7 +57,8 @@ def _db_get_run(run_id: str, org_id: str) -> dict:
                        rfp_title, department, rfp_filename,
                        status, vendor_ids, contract_value,
                        agent_events, agent_log, decision_output,
-                       created_at, completed_at
+                       created_at, completed_at,
+                       vendor_names
                 FROM evaluation_runs
                 WHERE run_id = CAST(:rid AS uuid)
                   AND org_id = CAST(:oid AS uuid)
@@ -113,6 +114,8 @@ def _db_append_log(run_id: str, entry: dict) -> None:
 
 def _db_save_decision(run_id: str, decision: dict) -> None:
     engine = get_engine()
+    # PostgreSQL rejects  (null byte) in jsonb — strip before saving
+    dec_json = json.dumps(decision).replace(chr(0), "")
     with engine.begin() as conn:
         conn.execute(
             sa.text("""
@@ -122,7 +125,7 @@ def _db_save_decision(run_id: str, decision: dict) -> None:
                     completed_at = now()
                 WHERE run_id = CAST(:rid AS uuid)
             """),
-            {"dec": json.dumps(decision), "rid": run_id},
+            {"dec": dec_json, "rid": run_id},
         )
 
 
@@ -175,10 +178,12 @@ def _db_get_setup(setup_id: str) -> dict | None:
 
 @router.post("/start")
 async def start_evaluation(
+    background_tasks: BackgroundTasks,
     rfp_title: str = Form(...),
     department: str = Form(...),
     contract_value: float = Form(...),
     vendor_ids: str = Form(default="[]"),
+    vendor_names: str = Form(default="{}"),
     rfp_file: UploadFile = File(...),
     vendor_files: list[UploadFile] = File(default=[]),
     user: TokenData = Depends(get_current_user),
@@ -214,28 +219,24 @@ async def start_evaluation(
         merge_criteria,
     )
 
-    # Extract text from RFP for LLM analysis
+    # Extract text from RFP for PDF parsing (no LLM — fast)
     rfp_text = extract_rfp_text(rfp_bytes)
 
-    # Load org and department criteria templates
+    # Load org and department criteria templates (DB only — fast)
     org_criteria  = get_org_criteria(user.org_id)
     dept_criteria = get_dept_criteria(user.org_id, department)
 
-    # Extract criteria from RFP using LLM
-    rfp_criteria = await extract_criteria_from_rfp(rfp_text)
-
-    # Merge all three sources
+    # Merge org+dept templates only — RFP LLM extraction runs in background
     merged = merge_criteria(
         org_criteria=org_criteria,
         dept_criteria=dept_criteria,
-        rfp_criteria=rfp_criteria,
+        rfp_criteria={},           # empty — LLM extraction not yet run
         department=department,
         rfp_id=rfp_id,
         org_id=user.org_id,
     )
 
-    # Build final EvaluationSetup
-    # Fall back to sensible defaults only if merge produced nothing
+    # Build initial EvaluationSetup with defaults — overwritten by background task once LLM finishes
     mandatory_checks = merged["mandatory_checks"] or [
         MandatoryCheck(
             check_id="chk-default-001",
@@ -306,11 +307,13 @@ async def start_evaluation(
             sa.text("""
                 INSERT INTO evaluation_runs
                     (run_id, org_id, rfp_id, setup_id, rfp_title, department,
-                     rfp_filename, rfp_bytes, status, vendor_ids, contract_value)
+                     rfp_filename, rfp_bytes, status, vendor_ids, contract_value,
+                     vendor_names)
                 VALUES
                     (CAST(:run_id AS uuid), CAST(:org_id AS uuid), :rfp_id, :setup_id,
                      :rfp_title, :department, :rfp_filename, :rfp_bytes,
-                     'pending_confirm', :vendor_ids, :contract_value)
+                     'pending_confirm', :vendor_ids, :contract_value,
+                     CAST(:vendor_names AS jsonb))
             """),
             {
                 "run_id":       run_id,
@@ -323,6 +326,7 @@ async def start_evaluation(
                 "rfp_bytes":    rfp_bytes,
                 "vendor_ids":   vendor_list,
                 "contract_value": contract_value,
+                "vendor_names": vendor_names if vendor_names.strip() else "{}",
             },
         )
         # Store each vendor file in vendor_documents
@@ -356,6 +360,13 @@ async def start_evaluation(
                   "rfp_filename": rfp_file.filename, "vendor_count": len(vendor_file_map),
                   "vendor_files": list(vendor_file_map.keys()),
                   "contract_value": contract_value})
+
+    # Run LLM criteria extraction in background — updates setup once Modal responds
+    background_tasks.add_task(
+        _refine_setup_with_llm,
+        setup_id, rfp_text, org_criteria, dept_criteria,
+        department, rfp_id, user.org_id,
+    )
 
     return {"run_id": run_id, "setup_id": setup_id, "rfp_id": rfp_id}
 
@@ -486,6 +497,86 @@ async def update_setup(
         raise HTTPException(422, f"Invalid setup: {e}")
     save_evaluation_setup(existing, org_id=user.org_id)
     return {"status": "updated"}
+
+
+# ── Background: LLM criteria refinement ───────────────────────────────────────
+
+async def _refine_setup_with_llm(
+    setup_id: str,
+    rfp_text: str,
+    org_criteria: dict,
+    dept_criteria: dict,
+    department: str,
+    rfp_id: str,
+    org_id: str,
+) -> None:
+    """
+    Runs after /start returns. Calls the LLM to extract RFP-specific criteria
+    and overwrites the default setup in the DB. The confirm page shows defaults
+    until this completes, then refreshes with LLM-extracted criteria.
+    """
+    from app.core.criteria_merger import extract_criteria_from_rfp, merge_criteria
+    from app.core.output_models import MandatoryCheck, ScoringCriterion, ExtractionTarget
+    from app.db.fact_store import save_evaluation_setup
+    try:
+        rfp_criteria = await extract_criteria_from_rfp(rfp_text)
+        merged = merge_criteria(
+            org_criteria=org_criteria,
+            dept_criteria=dept_criteria,
+            rfp_criteria=rfp_criteria,
+            department=department,
+            rfp_id=rfp_id,
+            org_id=org_id,
+        )
+        if not merged["mandatory_checks"] and not merged["scoring_criteria"]:
+            return  # nothing better than defaults — leave as-is
+
+        from app.db.fact_store import get_engine
+        import sqlalchemy as sa
+        engine = get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.text("SELECT setup_json FROM evaluation_setups WHERE setup_id = :sid"),
+                {"sid": setup_id},
+            ).fetchone()
+        if not row:
+            return
+        import json
+        existing = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        if merged["mandatory_checks"]:
+            existing["mandatory_checks"] = [
+                m if isinstance(m, dict) else m.model_dump() for m in merged["mandatory_checks"]
+            ]
+        if merged["scoring_criteria"]:
+            existing["scoring_criteria"] = [
+                c if isinstance(c, dict) else c.model_dump() for c in merged["scoring_criteria"]
+            ]
+        if merged.get("extraction_targets"):
+            existing["extraction_targets"] = [
+                t if isinstance(t, dict) else t.model_dump() for t in merged["extraction_targets"]
+            ]
+        else:
+            # Auto-create a minimal ExtractionTarget for every mandatory check
+            # whose extraction_target_id has no matching entry in extraction_targets
+            existing_target_ids = {t["target_id"] for t in existing.get("extraction_targets", [])}
+            for mc in existing.get("mandatory_checks", []):
+                mc = mc if isinstance(mc, dict) else mc.model_dump()
+                et_id = mc.get("extraction_target_id")
+                if et_id and et_id not in existing_target_ids:
+                    existing.setdefault("extraction_targets", []).append({
+                        "target_id": et_id,
+                        "name": mc.get("name", et_id),
+                        "description": mc.get("description", ""),
+                        "fact_type": "certification",
+                        "is_mandatory": True,
+                        "feeds_check_id": mc.get("check_id", ""),
+                    })
+                    existing_target_ids.add(et_id)
+        existing["source"] = merged.get("source", "llm_refined")
+        save_evaluation_setup(existing, org_id=org_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"LLM criteria refinement failed for {setup_id}: {e}")
 
 
 # ── POST /{runId}/confirm ──────────────────────────────────────────────────────
@@ -656,7 +747,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         for vid in vendor_ids:
             ext_out, critic_ext = await run_extraction_agent(
                 retrieval_output=retrieval_outputs[vid], vendor_id=vid, org_id=org_id,
-                doc_id=f"{rfp_id}-{vid}", setup_id=setup_id, evaluation_setup=evaluation_setup)
+                doc_id=f"{rfp_id}-{vid}", setup_id=setup_id, evaluation_setup=evaluation_setup,
+                run_id=run_id)
             extraction_outputs[vid] = ext_out
             source_chunks[vid] = "\n".join(
                 c.text for c in retrieval_outputs[vid].chunks
@@ -677,6 +769,7 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         evaluation_outputs: dict = {}
         for vid in vendor_ids:
             ev_out, _ = await run_evaluation_agent(vendor_id=vid, org_id=org_id,
+                                                    run_id=run_id,
                                                     evaluation_setup=evaluation_setup,
                                                     extraction_output=extraction_outputs.get(vid))
             evaluation_outputs[vid] = ev_out
@@ -805,12 +898,13 @@ async def get_results(run_id: str, user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
     decision = run.get("decision_output")
     return {
-        "run_id":     run_id,
-        "status":     run.get("status"),
-        "rfp_title":  run.get("rfp_title", ""),
-        "department": run.get("department", ""),
-        "decision":   decision,
-        "agent_log":  run.get("agent_log") or [],
+        "run_id":       run_id,
+        "status":       run.get("status"),
+        "rfp_title":    run.get("rfp_title", ""),
+        "department":   run.get("department", ""),
+        "decision":     decision,
+        "agent_log":    run.get("agent_log") or [],
+        "vendor_names": run.get("vendor_names") or {},
     }
 
 
@@ -899,6 +993,40 @@ async def submit_override(run_id: str, body: OverrideRequest,
                   "override_id": override.override_id})
 
     return {"override_id": override.override_id, "status": "recorded"}
+
+
+# ── POST /{runId}/re-evaluate ─────────────────────────────────────────────────
+
+@router.post("/{run_id}/re-evaluate")
+async def re_evaluate(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    user: TokenData = Depends(get_current_user),
+):
+    """Re-run the pipeline for a completed/failed run (e.g. all scores were 0)."""
+    run = _db_get_run(run_id, user.org_id)
+    if run["status"] in ("running",):
+        raise HTTPException(status_code=409, detail="Pipeline is still running")
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text("""
+                UPDATE evaluation_runs
+                SET status = 'running',
+                    decision_output = NULL,
+                    agent_events = '[]',
+                    agent_log = '[]',
+                    completed_at = NULL
+                WHERE run_id = CAST(:rid AS uuid)
+            """),
+            {"rid": run_id},
+        )
+
+    audit(org_id=user.org_id, run_id=run_id, event_type="run.confirmed",
+          actor=user.email, detail={"re_evaluate": True, "rfp_title": run.get("rfp_title")})
+    background_tasks.add_task(_run_pipeline, run_id, user.org_id)
+    return {"run_id": run_id, "status": "running"}
 
 
 # ── GET /{runId}/audit ────────────────────────────────────────────────────────

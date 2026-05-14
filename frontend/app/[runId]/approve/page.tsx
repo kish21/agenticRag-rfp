@@ -29,23 +29,28 @@ interface ApprovalContext {
 // ── SLA Countdown ──────────────────────────────────────────────────────────────
 
 function SlaCountdown({ deadline }: { deadline: string }) {
-  const [left, setLeft] = useState("");
+  const [left,   setLeft]   = useState("");
+  const [urgent, setUrgent] = useState(false);
+
   useEffect(() => {
+    const ts = new Date(deadline).getTime();
     const tick = () => {
-      const diff = new Date(deadline).getTime() - Date.now();
-      if (diff <= 0) { setLeft("Expired"); return; }
+      if (isNaN(ts)) { setLeft("—"); setUrgent(false); return; }
+      const diff = ts - Date.now();
+      if (diff <= 0) { setLeft("Expired"); setUrgent(true); return; }
       const h = Math.floor(diff / 3_600_000);
       const m = Math.floor((diff % 3_600_000) / 60_000);
       setLeft(`${h}h ${m}m remaining`);
+      setUrgent(diff < 4 * 3_600_000);
     };
     tick();
     const iv = setInterval(tick, 60_000);
     return () => clearInterval(iv);
   }, [deadline]);
-  const urgent = left.startsWith("Expired") || parseInt(left) < 4;
+
   return (
     <span style={{ fontFamily: MONO, fontSize: 12, color: urgent ? "#EF4444" : "#F59E0B", fontWeight: 600 }}>
-      {left}
+      {left || "—"}
     </span>
   );
 }

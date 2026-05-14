@@ -10,15 +10,17 @@ Pipeline:
 6. Critic check
 """
 import asyncio
+import time
 import uuid
 
 from app.core.llm_provider import call_llm
 from app.core.output_models import RetrievalOutput, RetrievedChunk
-from app.core.qdrant_client import collection_name, search_dense
+from app.core.qdrant_client import collection_name, search_dense, search_hybrid
 from app.core.llamaindex_pipeline import get_dense_embedding
 from app.core.reranker_provider import rerank as rerank_candidates
 from app.agents.critic import critic_after_retrieval
 from app.config import settings
+from app.core.audit import log_retrieval
 
 
 # ---------------------------------------------------------------------------
@@ -48,18 +50,10 @@ async def _rewrite_query(query: str) -> str:
 
 
 async def _generate_hyde_document(query: str, doc_type: str = "vendor_response") -> str:
-    templates = {
-        "vendor_response": (
-            "Write a 2-3 sentence passage from a vendor response that directly answers this. "
-            "Use formal business language. Return only the passage."
-        ),
-        "rfp_requirement": (
-            "Write a 1-2 sentence RFP clause containing the answer. "
-            "Use formal procurement language. Return only the passage."
-        ),
-    }
+    templates = settings.platform.hyde_templates
+    template = templates.get(doc_type) or templates.get("vendor_response", "")
     messages = [
-        {"role": "system", "content": templates.get(doc_type, templates["vendor_response"])},
+        {"role": "system", "content": template},
         {"role": "user", "content": query},
     ]
     result = await call_llm(messages, temperature=0.1)
@@ -139,34 +133,60 @@ async def run_retrieval_agent(
     n_final: int = 5,
     is_mandatory_check: bool = False,
     section_type_filter: str = None,
+    org_settings=None,
+    run_id: str | None = None,
+    criterion_id: str | None = None,
 ) -> tuple[RetrievalOutput, object]:
     query_id = str(uuid.uuid4())
     hyde_used = False
+    use_hybrid_search = False
+    _t0 = time.monotonic()
 
-    # Step 1: Query intelligence
+    # Apply org_settings overrides when provided
+    if org_settings is not None:
+        use_hyde = org_settings.use_hyde
+        use_rewriting = org_settings.use_query_rewriting
+        n_candidates = org_settings.retrieval_top_k
+        n_final = org_settings.rerank_top_n
+        use_hybrid_search = org_settings.use_hybrid_search
+
+    # Step 1: Query intelligence — track retrieval_text for sparse embedding
     if use_hyde:
         hyp_doc = await _generate_hyde_document(query, "vendor_response")
         retrieval_vector = get_dense_embedding(hyp_doc)
+        retrieval_text = hyp_doc          # HyDE doc used for both dense + sparse
         rewritten_query = f"[HyDE] {hyp_doc[:100]}"
         hyde_used = True
     elif use_rewriting:
         rewritten = await _rewrite_query(query)
         retrieval_vector = get_dense_embedding(rewritten)
+        retrieval_text = rewritten
         rewritten_query = rewritten
     else:
         retrieval_vector = get_dense_embedding(query)
+        retrieval_text = query
         rewritten_query = query
 
-    # Step 2: Dense retrieval from Qdrant
+    # Step 2: Retrieval — hybrid (dense+sparse RRF) or dense-only
     coll = collection_name(org_id, vendor_id)
-    raw_results = search_dense(
-        collection=coll,
-        query_vector=retrieval_vector,
-        org_id=org_id,
-        vendor_id=vendor_id,
-        limit=n_candidates,
-        section_type_filter=section_type_filter,
-    )
+    if use_hybrid_search:
+        raw_results = search_hybrid(
+            collection=coll,
+            query_text=retrieval_text,
+            org_id=org_id,
+            vendor_id=vendor_id,
+            limit=n_candidates,
+            dense_vector=retrieval_vector,
+        )
+    else:
+        raw_results = search_dense(
+            collection=coll,
+            query_vector=retrieval_vector,
+            org_id=org_id,
+            vendor_id=vendor_id,
+            limit=n_candidates,
+            section_type_filter=section_type_filter,
+        )
 
     if not raw_results:
         output = RetrievalOutput(
@@ -181,6 +201,11 @@ async def run_retrieval_agent(
             empty_retrieval=True,
             warnings=["No chunks found in collection"],
         )
+        log_retrieval(
+            org_id=org_id, vendor_id=vendor_id, run_id=run_id, criterion_id=criterion_id,
+            query_text=query, rewritten_query=rewritten_query, retrieval_strategy="dense",
+            chunks=[], timing_ms=int((time.monotonic() - _t0) * 1000),
+        )
         return output, critic_after_retrieval(output, is_mandatory_check)
 
     # Step 3: Cohere Rerank
@@ -188,7 +213,14 @@ async def run_retrieval_agent(
         {"text": r["text"], "score": r["score"], "payload": r["payload"]}
         for r in raw_results
     ]
-    reranked = rerank_candidates(query, candidates, top_n=n_final)
+    import asyncio
+    reranked = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: rerank_candidates(
+            query, candidates, top_n=n_final,
+            provider=org_settings.reranker_provider if org_settings else None,
+        )
+    )
 
     # Step 4: Lost-in-middle reorder (best first, second-best last)
     # Context compression is intentionally skipped: compressing chunk text
@@ -223,12 +255,17 @@ async def run_retrieval_agent(
 
     avg_score = sum(c.final_score for c in chunks) / len(chunks) if chunks else 0.0
 
+    mode = "hybrid" if use_hybrid_search else "dense"
+    if hyde_used:
+        mode += "+hyde"
+    retrieval_strategy = f"{mode}+rerank"
+
     output = RetrievalOutput(
         query_id=query_id,
         original_query=query,
         rewritten_query=rewritten_query,
         hyde_query_used=hyde_used,
-        retrieval_strategy="dense+rerank+compress",
+        retrieval_strategy=retrieval_strategy,
         chunks=chunks,
         total_candidates_before_rerank=len(raw_results),
         confidence=round(min(1.0, avg_score), 3),
@@ -236,4 +273,11 @@ async def run_retrieval_agent(
         warnings=[],
     )
 
+    log_retrieval(
+        org_id=org_id, vendor_id=vendor_id, run_id=run_id, criterion_id=criterion_id,
+        query_text=query, rewritten_query=rewritten_query,
+        retrieval_strategy=retrieval_strategy, chunks=chunks,
+        scores={"avg": round(avg_score, 3), "n_candidates": len(raw_results)},
+        timing_ms=int((time.monotonic() - _t0) * 1000),
+    )
     return output, critic_after_retrieval(output, is_mandatory_check)
