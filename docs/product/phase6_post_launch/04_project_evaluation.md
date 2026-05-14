@@ -5,12 +5,11 @@
 
 ## What This Document Is
 
-A structured, honest technical and product evaluation of the Enterprise Vendor Governance Platform. Written as if an independent senior AI engineer or technical interviewer reviewed the codebase and documentation.
+A structured technical and product assessment of the Enterprise Vendor Governance Platform.
 
 Useful for:
-- Interview preparation (know your own strengths and gaps before they ask)
 - Identifying next high-value improvements
-- Demonstrating technical maturity (you can critique your own work)
+- Demonstrating technical maturity (the ability to critique your own work)
 
 ---
 
@@ -68,9 +67,7 @@ Extraction currently uses prompt-based JSON (`{"type": "json_object"}`), which b
 | Held-out test set benchmark | Not done | No annotated test set exists yet |
 | MRR@10 measurement | Not done | No ground truth evaluation |
 
-**The gap:** The retrieval pipeline is architecturally complete and follows current best practices. What is missing is a held-out evaluation set with annotated ground truth. Without this, the quality claims (>90% adequacy rate, etc.) are targets, not measurements.
-
-**Interview-ready answer:** "The retrieval architecture follows the 2024–2025 state of the art — hybrid dense+sparse, HyDE, query rewriting, CrossEncoder reranking. The pipeline is complete. I have not yet run a formal held-out benchmark with annotated ground truth — that is the next measurement milestone before production."
+**The gap:** The retrieval pipeline is architecturally complete and follows current best practices. What is missing is a held-out evaluation set with annotated ground truth. Without this, the quality claims (>90% adequacy rate, etc.) are targets, not measurements. Building an annotated test set is the next measurement milestone before production.
 
 ---
 
@@ -144,9 +141,7 @@ The Extraction Critic is designed to catch this, but it has not been tested agai
 
 ---
 
-## 7. Overall Project Rating
-
-### As a Portfolio Project for AI Engineering Interviews
+## 7. Overall Technical Assessment
 
 | Dimension | Score | Rationale |
 |---|---|---|
@@ -154,50 +149,9 @@ The Extraction Critic is designed to catch this, but it has not been tested agai
 | RAG sophistication | 8/10 | Hybrid search, HyDE, query rewriting, CrossEncoder — state of the art. Missing: held-out benchmark |
 | Production thinking | 8/10 | Multi-tenancy, audit trail, RBAC, rate limiting, observability — all present |
 | Governance / responsible AI | 9/10 | Grounding enforcement, human override, EU AI Act classification, ISO 42001 alignment |
-| Product thinking | 9/10 | CEO dashboard, stakeholder map, personas, OKRs, competitive analysis — rarely seen in portfolio projects |
+| Product thinking | 9/10 | CEO dashboard, stakeholder map, personas, OKRs, competitive analysis — full product lifecycle coverage |
 | Documentation quality | 9/10 | 30+ documents across 6 lifecycle phases — exceptional for a solo project |
 | Test coverage | 5/10 | Contract tests and checkpoints are strong. Unit/integration/load tests are incomplete |
 | Cloud deployment | 4/10 | Not yet deployed to cloud — Modal blocked, no CI/CD. Strong design, weak execution evidence |
 | Benchmarked AI quality | 3/10 | No held-out evaluation set, no annotated ground truth, no red team results |
-| **Overall** | **7.5/10** | Strong senior-level portfolio project. The gaps are known and articulated — which itself is a green flag |
-
----
-
-## 8. What to Do Before a Senior AI Engineer Interview
-
-**High priority (do these first):**
-
-1. **Deploy to cloud** — even a free-tier Railway/Render deployment counts. "I have a live URL" changes the conversation.
-2. **Run one real evaluation** — upload a real (or realistic synthetic) RFP, run the pipeline end to end, screenshot the CEO dashboard with real data.
-3. **Build a 10-pair extraction test set** — manually annotate 10 criterion-vendor pairs and measure extraction accuracy. A number, even a rough one, is better than "we haven't measured yet."
-4. **Write a 2-minute demo script** — what you show, in what order, what you say at each step.
-
-**Medium priority:**
-
-5. **Run the red team** — inject 10 hallucinated facts, show the Critic blocks them. Screenshot the HARD block message.
-6. **Add one CI/CD step** — even a GitHub Action that runs `contract_tests.py` on every push.
-7. **Record a 3-minute Loom demo** — walk through the CEO dashboard, the extraction view, and the override panel.
-
-**Lower priority:**
-
-8. Table-aware PDF parsing (pdfplumber) — meaningful quality improvement but not interview-blocking.
-9. Extraction via tool_use — reliability improvement, not visible to interviewers.
-
----
-
-## 9. How to Talk About This Project in Interviews
-
-### Opening (30 seconds)
-> "I built an enterprise vendor governance platform — a 9-agent AI pipeline that evaluates RFP vendor documents and surfaces the results to a CEO dashboard showing real-time spend commitment, duplicate vendor alerts, and pricing inconsistencies across departments. The core design decision was making every extracted fact grounded to a verbatim source quote, enforced by a Critic agent that hard-blocks the pipeline if hallucination is detected."
-
-### If they ask about the architecture
-Lead with: Qdrant (hybrid search) + PostgreSQL (structured facts) + LangGraph (enforced Critic topology). Explain why two storage layers. Explain why LangGraph over CrewAI (typed state, enforced topology). These are the decisions that show senior-level thinking.
-
-### If they ask about RAG quality
-Be honest: "The retrieval pipeline follows current best practice — hybrid dense+sparse, HyDE, query rewriting, CrossEncoder reranking. I don't have a published held-out benchmark yet — that's on my near-term list. What I do have is a structural guarantee: the Retrieval Critic and Extraction Critic validate adequacy at each step, and the grounding quote check makes hallucination detection a hard constraint, not a probabilistic one."
-
-### If they ask what you'd do differently
-Lead with: table-aware PDF parsing from day one, extraction via tool_use from the start, and the CEO dashboard as the primary surface rather than something added at the end.
-
-### If they ask about production readiness
-Be direct: "The architecture is production-quality. The deployment is not yet in production — I'm blocked by a Modal SSL issue on the cloud deployment. The automated test suite is functional for contracts and checkpoints but lacks comprehensive unit/integration/load tests. I know exactly what the gaps are and I have a prioritised plan to close them."
+| **Overall** | **7.5/10** | Strong design and product scope. The known gaps (test coverage, cloud deployment, held-out benchmarks) are the immediate next priorities. |
