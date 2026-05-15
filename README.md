@@ -73,6 +73,7 @@ Full product lifecycle documentation — 32 documents across 6 phases:
 | [**Build**](docs/product/phase4_build/) | [Evaluation Framework](docs/product/phase4_build/01_evaluation_framework.md) · [Prompt Registry](docs/product/phase4_build/02_prompt_registry.md) · [Observability Plan](docs/product/phase4_build/03_observability_plan.md) · [Test Plan](docs/product/phase4_build/04_test_plan.md) |
 | [**Deployment**](docs/product/phase5_deployment/) | [Deployment Runbook](docs/product/phase5_deployment/01_deployment_runbook.md) · [Incident Response](docs/product/phase5_deployment/02_incident_response.md) · [AI Governance](docs/product/phase5_deployment/03_ai_governance.md) · [RBAC Design](docs/product/phase5_deployment/04_rbac_design.md) · [Multi-Cloud Guide](docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md) |
 | [**Post-Launch**](docs/product/phase6_post_launch/) | [Retrospective](docs/product/phase6_post_launch/01_retrospective.md) · [Product Roadmap](docs/product/phase6_post_launch/02_product_roadmap.md) · [Capacity Planning](docs/product/phase6_post_launch/03_capacity_planning.md) · [Technical Assessment](docs/product/phase6_post_launch/04_project_evaluation.md) |
+| [**Developer Reference**](docs/dev/) | [Backlog](docs/dev/BACKLOG.md) · [Platform Decisions](docs/dev/PLATFORM_DECISIONS.md) · [Production Checklist](docs/dev/PRODUCTION_CHECKLIST.md) |
 
 ---
 
@@ -225,7 +226,9 @@ agenticRag-rfp/
 │   └── jobs/            # rate_monitor.py, cleanup.py (Modal scheduled)
 ├── app_modal.py         # Modal deployment — PDF, embedding, LLM functions
 ├── frontend/            # Next.js — CEO dashboard, procurement UI, admin console
-├── docs/product/        # Full product lifecycle documentation (32 files)
+├── docs/
+│   ├── dev/             # Backlog, platform decisions, production checklist
+│   └── product/         # Full product lifecycle documentation (32 files, 6 phases)
 ├── tests/               # Contract tests, checkpoint runner, regression tests
 ├── scripts/             # migrate.py, reset_dev_data.py, debug_run.py
 └── docker-compose.yml   # Local dev — Qdrant + PostgreSQL

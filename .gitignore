@@ -42,6 +42,7 @@ evals/
 # Build state & checkpoint artifacts (regenerate automatically)
 build_state.json
 daily_build_log.md
+checkpoint_log.md
 
 # Platform runtime outputs (contain real RFP/vendor data)
 output/
