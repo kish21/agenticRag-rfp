@@ -42,7 +42,7 @@
 | `superadmin` | Platform operator — can manage all orgs | Cross-org (platform team only) |
 | `admin` | Org admin — can manage tenants, users, settings within their org | Org-scoped |
 | `ceo` | Executive view — read all departments, all regions within their org | Org-scoped, all departments/regions |
-| `cfo` | Financial view — same as CEO, plus contract approval for >£500K | Org-scoped |
+| `cfo` | Financial view — same as CEO, plus contract approval for >$500K | Org-scoped |
 | `regional_director` | Sees their region only | Region-scoped |
 | `department_head` | Sees their department only, can approve evaluations | Department-scoped |
 | `procurement_manager` | Full pipeline access within their department | Department-scoped |

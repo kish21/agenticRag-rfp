@@ -77,7 +77,7 @@
 |---|---|---|
 | insurance_type | text | e.g. Professional_Indemnity, Public_Liability |
 | coverage_amount | numeric | In source currency |
-| currency | text | GBP / USD / EUR |
+| currency | text | USD / EUR / GBP |
 | provider | text | Insurance company name |
 | policy_number | text | Policy identifier |
 | grounding_quote | text | Verbatim |

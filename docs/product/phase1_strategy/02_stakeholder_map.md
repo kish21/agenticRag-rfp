@@ -30,19 +30,19 @@
 ### CFO
 - **What they see**: Spend dashboard — committed vs. budgeted, savings vs. prior period, contract value by department
 - **What they care about**: "What is the total vendor spend commitment this quarter? Where are we overpaying?"
-- **Decision authority**: Approves contracts above £500K
+- **Decision authority**: Approves contracts above $500K
 - **Engagement cadence**: Monthly board pack, real-time dashboard access
 
 ### Regional Director
 - **What they see**: Region-filtered view — all RFPs in their geography, local vendor decisions, regional spend
 - **What they care about**: "What vendors are we choosing in my region and are we getting the right price?"
-- **Decision authority**: Approves contracts £100K–£500K within their region
+- **Decision authority**: Approves contracts $100K–$500K within their region
 - **Engagement cadence**: On-demand dashboard access
 
 ### Department Head
 - **What they see**: Department-filtered view — their active and historical RFPs, vendor scores, recommendations
 - **What they care about**: "Is the evaluation complete? Which vendor does the AI recommend and why?"
-- **Decision authority**: Approves contracts under £100K; escalates above
+- **Decision authority**: Approves contracts under $100K; escalates above
 - **Engagement cadence**: Triggered notifications at each pipeline milestone
 
 ### Procurement Manager

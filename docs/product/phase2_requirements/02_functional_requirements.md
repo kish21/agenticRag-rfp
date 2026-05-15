@@ -53,7 +53,7 @@
 |---|---|
 | FR-05.1 | Comparator agent shall rank all vendors in a single RFP run using a SQL join across PostgreSQL fact tables |
 | FR-05.2 | Comparator shall flag if rank margin between top-2 vendors is within `rank_margin_threshold` (default 3 points) |
-| FR-05.3 | Decision agent shall route to approval tier based on contract value: <£100K → Dept Head, £100K–£500K → Regional Dir, >£500K → CFO |
+| FR-05.3 | Decision agent shall route to approval tier based on contract value: <$100K → Dept Head, $100K–$500K → Regional Dir, >$500K → CFO |
 | FR-05.4 | Approval tier thresholds shall be configurable per org in org_settings — not hardcoded |
 | FR-05.5 | Decision agent shall create a pending approval record and notify the correct approver |
 

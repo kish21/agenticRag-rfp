@@ -113,11 +113,11 @@ python scripts/test_llm_call.py
 ```
 
 ### Cost at this profile
-- Modal A100 LLM: ~£3–4/GPU-hour (pay per use, no idle cost)
-- Modal A10G embedding: ~£0.50/GPU-hour
-- Qdrant Cloud Starter: £25/month
-- Supabase Pro: £25/month
-- **Total: ~£50–200/month** depending on evaluation volume
+- Modal A100 LLM: ~$3–4/GPU-hour (pay per use, no idle cost)
+- Modal A10G embedding: ~$0.50/GPU-hour
+- Qdrant Cloud Starter: $25/month
+- Supabase Pro: $25/month
+- **Total: ~$50–200/month** depending on evaluation volume
 
 ---
 
@@ -269,11 +269,11 @@ curl https://rfp-api.<region>.azurecontainerapps.io/health
 All data stays in `uksouth` (or your chosen Azure region). Azure OpenAI processes prompts in-region. No data crosses Azure region boundaries unless you configure geo-redundancy.
 
 ### Cost at this profile
-- Azure OpenAI: pay per token (~£0.002–0.01/1K tokens depending on model)
-- Azure Database for PostgreSQL: ~£50–150/month
-- Azure Container Apps: ~£30–100/month (auto-scaled)
-- Qdrant Cloud: £25–200/month
-- **Total: ~£150–500/month** (dominated by Azure OpenAI token cost at volume)
+- Azure OpenAI: pay per token (~$0.002–0.01/1K tokens depending on model)
+- Azure Database for PostgreSQL: ~$50–150/month
+- Azure Container Apps: ~$30–100/month (auto-scaled)
+- Qdrant Cloud: $25–200/month
+- **Total: ~$150–500/month** (dominated by Azure OpenAI token cost at volume)
 
 ---
 
@@ -405,10 +405,10 @@ curl https://<alb-dns>/health
 
 ### Cost at this profile
 - OpenAI API: pay per token (~$0.002–0.01/1K tokens)
-- RDS PostgreSQL db.t4g.medium: ~£50/month
-- ECS Fargate (2 tasks): ~£60/month
-- CloudFront + S3: ~£5/month
-- **Total: ~£150–300/month** + OpenAI API cost
+- RDS PostgreSQL db.t4g.medium: ~$50/month
+- ECS Fargate (2 tasks): ~$60/month
+- CloudFront + S3: ~$5/month
+- **Total: ~$150–300/month** + OpenAI API cost
 
 ---
 
@@ -568,11 +568,11 @@ elif provider == "vertex":
 For now, use `LLM_PROVIDER=openrouter` with `OPENROUTER_MODEL=google/gemini-1.5-pro` to access Gemini via OpenAI-compatible API.
 
 ### Cost at this profile
-- Cloud Run (2 vCPU, 2GB, min 1 instance): ~£40/month
-- Cloud SQL db-g1-small: ~£30/month
+- Cloud Run (2 vCPU, 2GB, min 1 instance): ~$40/month
+- Cloud SQL db-g1-small: ~$30/month
 - Firebase Hosting: Free tier sufficient
 - OpenAI API: pay per token
-- **Total: ~£100–250/month** + LLM API cost
+- **Total: ~$100–250/month** + LLM API cost
 
 ---
 

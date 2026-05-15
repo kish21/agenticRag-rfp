@@ -102,10 +102,10 @@ Priya runs a department of 80 people and manages a technology vendor budget of �
 **Organisation:** Global professional services firm, 45 countries
 
 ### Context
-Marcus oversees vendor spend across 22 countries in EMEA. He approves all contracts over £500K and is responsible for presenting vendor cost optimisation to the group CFO quarterly. He has recently discovered that three offices in EMEA are each paying different rates to the same cloud infrastructure vendor — with no one having negotiated a consolidated deal.
+Marcus oversees vendor spend across 22 countries in EMEA. He approves all contracts over €500K and is responsible for presenting vendor cost optimisation to the group CFO quarterly. He has recently discovered that three offices in EMEA are each paying different rates to the same cloud infrastructure vendor — with no one having negotiated a consolidated deal.
 
 ### Goals
-- Know immediately when a contract commitment exceeds £500K anywhere in EMEA
+- Know immediately when a contract commitment exceeds €500K anywhere in EMEA
 - Identify where the company is paying inconsistent prices to the same vendor across regions
 - Track savings realised from consolidated vendor negotiations
 - Get a clean spend report for the group CFO with no manual aggregation
@@ -122,7 +122,7 @@ Marcus oversees vendor spend across 22 countries in EMEA. He approves all contra
 - Export to board pack format: one click, not one week
 
 ### Jobs-to-be-Done
-> "When a contract above £500K is about to be signed anywhere in EMEA, I need to know before it happens, see the evaluation evidence, and either approve or challenge it — from my dashboard, not from an email chain."
+> "When a contract above €500K is about to be signed anywhere in EMEA, I need to know before it happens, see the evaluation evidence, and either approve or challenge it — from my dashboard, not from an email chain."
 
 ---
 

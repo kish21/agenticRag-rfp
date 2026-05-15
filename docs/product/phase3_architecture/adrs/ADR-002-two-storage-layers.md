@@ -17,7 +17,7 @@ Maintain two storage layers. Qdrant for raw chunk embeddings; PostgreSQL for ext
 
 The Evaluation Agent needs to score vendors against criteria like:
 - "Does vendor have ISO 27001 certification with certificate number?"
-- "Is professional indemnity insurance ≥ £5M?"
+- "Is professional indemnity insurance ≥ $5M?"
 - "Is uptime SLA ≥ 99.9%?"
 
 These questions require **typed comparison** (numeric, date, string equality). A raw text chunk cannot be queried with SQL. The LLM would have to re-extract the fact every time it evaluates — with no consistency guarantee and no audit trail of what was extracted.

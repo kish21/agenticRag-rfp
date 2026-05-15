@@ -33,7 +33,7 @@ The vendor evaluation and procurement automation space has several incumbents, b
 ### Icertis (Contract Lifecycle Management)
 - **Focus:** Contract management after vendor selection — not the evaluation phase
 - **AI:** Contract clause extraction, obligation tracking
-- **Gap:** Does not evaluate competing vendor proposals. No CEO spend dashboard. No multi-agent pipeline. Costs £200K–£2M/year for enterprise.
+- **Gap:** Does not evaluate competing vendor proposals. No CEO spend dashboard. No multi-agent pipeline. Costs $200K–$2M/year for enterprise.
 - **Our advantage:** We cover the evaluation phase (before contract) that Icertis ignores. We are the missing layer upstream.
 
 ### Ironclad
@@ -51,7 +51,7 @@ The vendor evaluation and procurement automation space has several incumbents, b
 ### SAP Ariba
 - **Focus:** Full procure-to-pay suite for very large enterprises
 - **AI:** Basic NLP for supplier matching
-- **Gap:** Heavyweight, designed for Fortune 500. Evaluation is still largely manual within Ariba. £500K+ implementation cost.
+- **Gap:** Heavyweight, designed for Fortune 500. Evaluation is still largely manual within Ariba. $500K+ implementation cost.
 - **Our advantage:** Purpose-built for the evaluation phase, deploying in a day, 1/10th the cost.
 
 ### Raw LLM (ChatGPT/Claude via API)
@@ -86,6 +86,6 @@ The vendor evaluation and procurement automation space has several incumbents, b
 
 | Segment | Existing tools cost | Our target price | Advantage |
 |---|---|---|---|
-| Mid-market (50–200 RFPs/year) | £80K–£200K/year (Coupa/Icertis) | £30K–£60K/year | 50–70% lower |
-| Enterprise (200+ RFPs/year) | £200K–£2M/year (SAP Ariba) | £60K–£150K/year | 70–80% lower |
-| Public sector | Manual (no tooling budget) | £20K–£40K/year | Greenfield |
+| Mid-market (50–200 RFPs/year) | $80K–$200K/year (Coupa/Icertis) | $30K–$60K/year | 50–70% lower |
+| Enterprise (200+ RFPs/year) | $200K–$2M/year (SAP Ariba) | $60K–$150K/year | 70–80% lower |
+| Public sector | Manual (no tooling budget) | $20K–$40K/year | Greenfield |

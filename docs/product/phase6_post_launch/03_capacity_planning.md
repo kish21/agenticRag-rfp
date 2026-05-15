@@ -35,9 +35,9 @@
 
 | Stage | Qdrant Setup | Estimated Cost |
 |---|---|---|
-| Pilot | Qdrant Cloud Starter (4GB RAM) | ~£25/month |
-| 10 Customers | Qdrant Cloud Business (16GB RAM) | ~£200/month |
-| 100 Customers | Qdrant Cloud Enterprise (3 × 64GB nodes) | ~£2,000/month |
+| Pilot | Qdrant Cloud Starter (4GB RAM) | ~$25/month |
+| 10 Customers | Qdrant Cloud Business (16GB RAM) | ~$200/month |
+| 100 Customers | Qdrant Cloud Enterprise (3 × 64GB nodes) | ~$2,000/month |
 
 ---
 
@@ -62,9 +62,9 @@
 
 | Stage | PostgreSQL Setup | Estimated Cost |
 |---|---|---|
-| Pilot | Supabase Free (500MB) | £0/month |
-| 10 Customers | Supabase Pro (8GB) | ~£25/month |
-| 100 Customers | RDS PostgreSQL Multi-AZ (db.r6g.large, 100GB) | ~£300/month |
+| Pilot | Supabase Free (500MB) | $0/month |
+| 10 Customers | Supabase Pro (8GB) | ~$25/month |
+| 100 Customers | RDS PostgreSQL Multi-AZ (db.r6g.large, 100GB) | ~$300/month |
 
 ---
 
@@ -78,8 +78,8 @@
 | 10 Customers | 100 | ~50 | 5,000 | 15s | ~21 GPU-hours |
 | 100 Customers | 1,000 | ~50 | 50,000 | 15s | ~208 GPU-hours |
 
-**Modal A100 rate:** ~£3–4/GPU-hour
-**Cost at 100 customers:** ~£600–830/month for LLM inference
+**Modal A100 rate:** ~$3–4/GPU-hour
+**Cost at 100 customers:** ~$600–830/month for LLM inference
 
 ### Embedding (A10G, BGE batch)
 
@@ -88,17 +88,17 @@
 | 10 Customers | 1,200,000 | 200ms/200 chunks | ~0.3 GPU-hours |
 | 100 Customers | 12,000,000 | 200ms/200 chunks | ~3.3 GPU-hours |
 
-**Embedding cost:** Negligible at these scales (~£10–15/month).
+**Embedding cost:** Negligible at these scales (~$10–15/month).
 
 ### Cold Start Strategy
 
 | Stage | Strategy | Cold start cost |
 |---|---|---|
 | Pilot | On-demand (no min_containers) | 5–10 min cold start, accepted |
-| 10 Customers | `min_containers=1` (1 warm A100) | ~£2,400/month (always-on) |
-| 100 Customers | `min_containers=2` (2 warm A100s) | ~£4,800/month (always-on) |
+| 10 Customers | `min_containers=1` (1 warm A100) | ~$2,400/month (always-on) |
+| 100 Customers | `min_containers=2` (2 warm A100s) | ~$4,800/month (always-on) |
 
-**Decision at 10 customers:** Weigh £2,400/month always-on vs. customer experience of 10-minute cold starts. First paying customer likely requires always-on.
+**Decision at 10 customers:** Weigh $2,400/month always-on vs. customer experience of 10-minute cold starts. First paying customer likely requires always-on.
 
 ---
 
@@ -110,7 +110,7 @@
 | 10 Customers | 50 | 20 | 2 × Cloud Run instances (1GB, 2 CPU) |
 | 100 Customers | 500 | 200 | Auto-scaling Cloud Run (max 10 instances) |
 
-**Cost at 100 customers:** ~£200–400/month (Cloud Run, pay-per-request).
+**Cost at 100 customers:** ~$200–400/month (Cloud Run, pay-per-request).
 
 ---
 
@@ -118,12 +118,12 @@
 
 | Stage | Qdrant | PostgreSQL | Modal LLM | API | Observability | **Total/month** |
 |---|---|---|---|---|---|---|
-| Pilot | £25 | £0 | ~£25 | ~£10 | £50 | **~£110** |
-| 10 Customers | £200 | £25 | ~£2,500 | ~£50 | £100 | **~£2,875** |
-| 100 Customers | £2,000 | £300 | ~£5,000 | ~£400 | £300 | **~£8,000** |
+| Pilot | $25 | $0 | ~$25 | ~$10 | $50 | **~$110** |
+| 10 Customers | $200 | $25 | ~$2,500 | ~$50 | $100 | **~$2,875** |
+| 100 Customers | $2,000 | $300 | ~$5,000 | ~$400 | $300 | **~$8,000** |
 
-At 100 customers paying £30K/year (£2,500/month), platform gross margin is ~**68%**.
-At £60K/year pricing, gross margin is ~**84%**.
+At 100 customers paying $30K/year ($2,500/month), platform gross margin is ~**68%**.
+At $60K/year pricing, gross margin is ~**84%**.
 
 ---
 

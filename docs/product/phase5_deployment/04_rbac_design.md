@@ -52,19 +52,19 @@ All scoping (`org_id`, `department_id`, `region_id`) is extracted from the JWT s
 ### ceo / cfo
 - **Scope:** All departments + all regions within their org
 - **Who:** C-suite executives
-- **Can:** View CEO dashboard (all metrics), drill into any evaluation, approve contracts (CFO: >£500K), download PDF reports
+- **Can:** View CEO dashboard (all metrics), drill into any evaluation, approve contracts (CFO: >$500K), download PDF reports
 - **Cannot:** Trigger evaluations, apply score overrides, manage users
 
 ### regional_director
 - **Scope:** Their region_id only
 - **Who:** Regional Managing Directors, Regional CFOs
-- **Can:** View all evaluations in their region, approve contracts £100K–£500K, view regional spend dashboard
+- **Can:** View all evaluations in their region, approve contracts $100K–$500K, view regional spend dashboard
 - **Cannot:** See other regions' data
 
 ### department_head
 - **Scope:** Their department_id only
 - **Who:** Director of IT, Director of HR, etc.
-- **Can:** View their department's evaluations, approve contracts <£100K, view department spend
+- **Can:** View their department's evaluations, approve contracts <$100K, view department spend
 - **Cannot:** See other departments' data, trigger evaluations, apply score overrides
 
 ### procurement_manager
@@ -127,9 +127,9 @@ The approval tier (contract value routing) is separate from RBAC role:
 
 | Contract Value | Required Approver Role | Configured In |
 |---|---|---|
-| < £100K | `department_head` | `org_settings.approval_tier_1_threshold` |
-| £100K – £500K | `regional_director` | `org_settings.approval_tier_2_threshold` |
-| > £500K | `cfo` | `org_settings.approval_tier_3_threshold` |
+| < $100K | `department_head` | `org_settings.approval_tier_1_threshold` |
+| $100K – $500K | `regional_director` | `org_settings.approval_tier_2_threshold` |
+| > $500K | `cfo` | `org_settings.approval_tier_3_threshold` |
 
 These thresholds are configurable per org via admin API. They are not hardcoded.
 

@@ -88,7 +88,7 @@ Enterprise organisations conduct RFP evaluations in silos. Different departments
 
 ### CFO
 - As a CFO, I want to see total committed vendor spend by region and category in real time, so I can produce an accurate board report without manual aggregation.
-- As a CFO, I want to be notified before any contract above £500K is signed, so I can review and approve or block it.
+- As a CFO, I want to be notified before any contract above $500K is signed, so I can review and approve or block it.
 
 ### IT Admin
 - As an IT Admin, I want to onboard a new department as a tenant without touching source code, so I can self-serve without raising vendor tickets.

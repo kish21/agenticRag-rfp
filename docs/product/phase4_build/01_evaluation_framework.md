@@ -55,7 +55,7 @@ python tests/evaluation/retrieval_eval.py --test-set tests/data/retrieval_test_s
 50 deliberately injected hallucinations:
 - Fabricated certificate numbers (e.g., ISO 27001 cert number "XYZ-99999" that does not appear in the PDF)
 - Wrong insurance type (extracted PI when source says PL)
-- Wrong coverage amount (£10M extracted when source says £5M)
+- Wrong coverage amount ($10M extracted when source says $5M)
 - Date transposition (expiry year swapped)
 
 All 50 should be caught by the Extraction Critic or grounding check.

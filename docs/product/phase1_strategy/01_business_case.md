@@ -53,25 +53,25 @@ An agentic AI platform that:
 | Item | Estimate |
 |---|---|
 | Analyst time saved per RFP | 20 hours (from 28h to 8h) |
-| Average analyst cost | £75/hour |
-| Savings per RFP | £1,500 |
-| Annual savings (100 RFPs) | £150,000 |
-| Overpay reduction (10% of £5M vendor spend) | £500,000 |
-| Duplicate vendor onboarding reduction | £50,000 |
-| **Total year-1 benefit** | **£700,000** |
+| Average analyst cost | $75/hour |
+| Savings per RFP | $1,500 |
+| Annual savings (100 RFPs) | $150,000 |
+| Overpay reduction (10% of $5M vendor spend) | $500,000 |
+| Duplicate vendor onboarding reduction | $50,000 |
+| **Total year-1 benefit** | **$700,000** |
 
 ### Platform Cost
 
 | Item | Cost |
 |---|---|
-| Modal GPU compute (A100, burst) | ~£2,000/month |
-| LangSmith observability | £500/month |
-| Infrastructure (Qdrant + PostgreSQL, cloud) | £300/month |
-| **Total annual platform cost** | **~£33,600** |
+| Modal GPU compute (A100, burst) | ~$2,000/month |
+| LangSmith observability | $500/month |
+| Infrastructure (Qdrant + PostgreSQL, cloud) | $300/month |
+| **Total annual platform cost** | **~$33,600** |
 
 ### ROI
 
-**Year-1 net benefit: ~£666,000**
+**Year-1 net benefit: ~$666,000**
 **Payback period: < 1 month after deployment**
 
 ---
@@ -89,7 +89,7 @@ An agentic AI platform that:
 
 - Regulatory exposure: manual RFP evaluations with no audit trail fail GDPR Article 22 (automated decision making) and procurement law in public sector
 - Competitive disadvantage: peers using AI evaluation cut procurement cycles from weeks to hours
-- Talent cost: hiring additional procurement analysts to handle RFP volume growth is £60–90K per head
+- Talent cost: hiring additional procurement analysts to handle RFP volume growth is $60–90K per head
 
 ---
 

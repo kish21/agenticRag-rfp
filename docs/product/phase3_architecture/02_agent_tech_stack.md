@@ -144,7 +144,7 @@ Each agent in the 9-agent pipeline uses a specific combination of libraries, mod
 | Component | Technology | Why |
 |---|---|---|
 | Approval tiers | Read from `org_settings` (not hardcoded) | Customer-configurable thresholds |
-| Default tiers | <£100K → Dept Head, £100K–£500K → Regional Dir, >£500K → CFO | `product.yaml` new_org_defaults |
+| Default tiers | <$100K → Dept Head, $100K–$500K → Regional Dir, >$500K → CFO | `product.yaml` new_org_defaults |
 | Routing | Deterministic — no LLM for routing | Rule-based governance, not probabilistic |
 | LLM use | Fallback only — explain routing rationale | Only if structured routing fails |
 | Notification | Creates pending approval record in `evaluation_decisions` | Triggers dashboard alert for approver |

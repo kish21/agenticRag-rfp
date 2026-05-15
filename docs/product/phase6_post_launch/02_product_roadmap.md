@@ -25,7 +25,7 @@
 ### Agent Improvements (Tier 1 from backlog)
 - [ ] Table-aware PDF parsing (`pdfplumber` / `pymupdf4llm`) — biggest source of extraction failures
 - [ ] Extraction via `tool_use` / function-calling — eliminate JSON parsing fragility
-- [ ] Configurable approval tiers per org (move £100K/£500K to `org_settings`) — currently hardcoded
+- [ ] Configurable approval tiers per org (move $100K/$500K to `org_settings`) — currently hardcoded
 - [ ] Citation footnotes with page numbers in PDF report
 
 ### Customer Delivery

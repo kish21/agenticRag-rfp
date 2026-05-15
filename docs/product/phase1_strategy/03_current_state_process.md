@@ -84,7 +84,7 @@ This document maps how RFP evaluations are conducted today across enterprise dep
 ### Visibility
 - **The CEO has zero real-time visibility** into what RFPs are active
 - No system knows that IT in Singapore and HR in Germany are evaluating Vendor X simultaneously
-- No one knows the company is paying Vendor X £200K in APAC and £280K in EMEA for the same service
+- No one knows the company is paying Vendor X $200K in APAC and €280K in EMEA for the same service
 - Vendor spend is only visible at year-end during the CFO's manual audit
 
 ### Governance
@@ -165,9 +165,9 @@ This document maps how RFP evaluations are conducted today across enterprise dep
 
 7. DECISION AGENT
    Routes to approval tier based on contract value
-   Under £100K → Department Head
-   £100K–£500K → Regional Director
-   Over £500K → CFO
+   Under $100K → Department Head
+   $100K–$500K → Regional Director
+   Over $500K → CFO
    ↓ < 30 seconds
 
 8. EXPLANATION AGENT
