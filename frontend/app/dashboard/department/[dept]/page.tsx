@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { FONT, PALETTE, PALETTE_LIGHT, TOKENS, agentColour } from "@/lib/theme";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 
 interface EvalRun {
   run_id: string;
@@ -18,12 +19,12 @@ interface EvalRun {
 
 function StatusBadge({ status }: { status: EvalRun["status"] }) {
   const cfg: Record<string, { label: string; bg: string; fg: string }> = {
-    running:          { label: "Running",          bg: "#3B82F620", fg: "#3B82F6" },
-    pending_approval: { label: "Pending Approval", bg: "#F59E0B20", fg: "#F59E0B" },
-    complete:         { label: "Complete",         bg: "#10B98120", fg: "#10B981" },
-    blocked:          { label: "Blocked",          bg: "#EF444420", fg: "#EF4444" },
+    running:          { label: "Running",          bg: "var(--color-info)20",    fg: "var(--color-info)"    },
+    pending_approval: { label: "Pending Approval", bg: "var(--color-warning)20", fg: "var(--color-warning)" },
+    complete:         { label: "Complete",         bg: "var(--color-success)20", fg: "var(--color-success)" },
+    blocked:          { label: "Blocked",          bg: "var(--color-error)20",   fg: "var(--color-error)"   },
   };
-  const c = cfg[status] ?? { label: status, bg: "#ffffff10", fg: "#94A3B8" };
+  const c = cfg[status] ?? { label: status, bg: "var(--color-border)", fg: "var(--color-text-muted)" };
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
@@ -37,7 +38,7 @@ function StatusBadge({ status }: { status: EvalRun["status"] }) {
 export default function DepartmentPage() {
   const router = useRouter();
   const params = useParams();
-  const { isDark, toggle } = useTheme();
+  const { isDark } = useThemeContext();
   const P = isDark ? PALETTE : PALETTE_LIGHT;
 
   const dept = decodeURIComponent(params.dept as string);
@@ -63,10 +64,8 @@ export default function DepartmentPage() {
   }, [dept]);
 
   return (
-    <div style={{ minHeight: "100vh", background: isDark ? "#090C12" : "#F8FAFC", fontFamily: FONT }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg-gradient)", fontFamily: FONT }}>
       <TopBar
-        isDark={isDark}
-        onToggle={toggle}
         crumbs={[
           { label: "Dashboard", href: "/dashboard" },
           { label: dept },

@@ -5,7 +5,6 @@ import { useState } from "react";
 // ── Injected styles ────────────────────────────────────────────────────────────
 
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
   @keyframes pulse    { 0%,100%{opacity:1} 50%{opacity:0.25} }
   @keyframes slidein  { from{transform:translateX(100%)} to{transform:translateX(0)} }
   @keyframes fadein   { from{opacity:0} to{opacity:1} }
@@ -21,8 +20,8 @@ const PURPLE = "#7C3AED";
 const TEAL   = "#00D4AA";
 const AMBER  = "#F59E0B";
 const RED    = "#EF4444";
-const FONT   = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif";
-const MONO   = "'IBM Plex Mono', ui-monospace, 'Cascadia Code', monospace";
+const FONT   = "var(--font-sans)";
+const MONO   = "var(--font-mono)";
 
 const DARK = {
   bg:       "#0D0F1A",

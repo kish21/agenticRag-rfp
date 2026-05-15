@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS } from "@/lib/theme";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -49,7 +50,7 @@ function SlaCountdown({ deadline }: { deadline: string }) {
   }, [deadline]);
 
   return (
-    <span style={{ fontFamily: MONO, fontSize: 12, color: urgent ? "#EF4444" : "#F59E0B", fontWeight: 600 }}>
+    <span style={{ fontFamily: MONO, fontSize: 12, color: urgent ? "var(--color-error)" : "var(--color-warning)", fontWeight: 600 }}>
       {left || "—"}
     </span>
   );
@@ -60,8 +61,8 @@ function SlaCountdown({ deadline }: { deadline: string }) {
 export default function ApprovePage() {
   const { runId }          = useParams<{ runId: string }>();
   const router             = useRouter();
-  const { isDark, toggle } = useTheme();
-  const P                  = isDark ? PALETTE : PALETTE_LIGHT;
+  const { isDark } = useThemeContext();
+  const P          = isDark ? PALETTE : PALETTE_LIGHT;
 
   const [ctx,        setCtx]        = useState<ApprovalContext | null>(null);
   const [loading,    setLoading]    = useState(true);
@@ -71,9 +72,7 @@ export default function ApprovePage() {
   const [submitting, setSubmitting] = useState(false);
   const [done,       setDone]       = useState<"approve" | "reject" | "escalate" | "">("");
 
-  const BG = isDark
-    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
-    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
+  const BG = "var(--bg-gradient)";
 
   useEffect(() => {
     fetch(`${API}/api/v1/evaluate/${runId}/results`, {
@@ -127,7 +126,7 @@ export default function ApprovePage() {
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Approval required" }]} />
+      <TopBar crumbs={[{ label: "Approval required" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
         <span style={{ color: P.text.muted, fontSize: 13 }}>Loading approval context…</span>
       </div>
@@ -136,29 +135,29 @@ export default function ApprovePage() {
 
   if (!ctx) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Approval required" }]} />
+      <TopBar crumbs={[{ label: "Approval required" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
-        <span style={{ color: "#EF4444", fontSize: 13 }}>{error}</span>
+        <span style={{ color: "var(--color-error)", fontSize: 13 }}>{error}</span>
       </div>
     </div>
   );
 
   if (done) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Approval complete" }]} />
+      <TopBar crumbs={[{ label: "Approval complete" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
         <div style={{ ...CARD, textAlign: "center", maxWidth: 400, padding: "40px 32px" }}>
           <div style={{ fontSize: 40, marginBottom: 14 }}>
             {done === "approve" ? "✓" : done === "reject" ? "✗" : "⬆"}
           </div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: done === "approve" ? "#10B981" : done === "reject" ? "#EF4444" : "#F59E0B", margin: "0 0 8px", fontFamily: FONT }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: done === "approve" ? "var(--color-success)" : done === "reject" ? "var(--color-error)" : "var(--color-warning)", margin: "0 0 8px", fontFamily: FONT }}>
             {done === "approve" ? "Approved" : done === "reject" ? "Rejected" : "Escalated"}
           </h2>
           <p style={{ fontSize: 13, color: P.text.muted, margin: "0 0 20px", fontFamily: FONT }}>
             Decision recorded with full audit trail.
           </p>
           <button onClick={() => router.push(`/${runId}/results`)} style={{
-            background: "#00D4AA", color: "#071510", border: "none",
+            background: "var(--color-accent)", color: "var(--color-accent-foreground)", border: "none",
             borderRadius: TOKENS.radius.btn, padding: "10px 24px",
             fontSize: 13, fontFamily: FONT, fontWeight: 600, cursor: "pointer", width: "100%",
           }}>
@@ -174,7 +173,7 @@ export default function ApprovePage() {
 
   return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
+      <TopBar
         crumbs={[{ label: "Approval required" }, { label: ctx.rfp_title }]}
         right={<SlaCountdown deadline={ctx.sla_deadline} />}
       />
@@ -182,10 +181,10 @@ export default function ApprovePage() {
       <main style={{ maxWidth: 820, margin: "0 auto", padding: "36px 28px 80px", display: "flex", flexDirection: "column", gap: 18 }}>
 
         {/* Header */}
-        <div style={{ ...CARD, borderLeft: "3px solid #F59E0B" }}>
+        <div style={{ ...CARD, borderLeft: "3px solid var(--color-warning)" }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#F59E0B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, fontFamily: FONT }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-warning)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, fontFamily: FONT }}>
                 Approval required — Tier {ctx.approval_tier}
               </div>
               <h1 style={{ fontSize: 20, fontWeight: 700, color: P.text.primary, margin: "0 0 6px", fontFamily: FONT }}>
@@ -220,7 +219,7 @@ export default function ApprovePage() {
           <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 12, fontFamily: FONT }}>
             AI recommendation
           </div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: "#10B981", marginBottom: 4, fontFamily: FONT }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--color-success)", marginBottom: 4, fontFamily: FONT }}>
             {ctx.recommended_vendor}
           </div>
           <div style={{ fontSize: 12, color: P.text.muted, marginBottom: 14, fontFamily: FONT }}>Highest-ranked vendor across all criteria</div>
@@ -252,16 +251,16 @@ export default function ApprovePage() {
                 }}>
                   <div style={{
                     width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
-                    background: v.rank === 1 ? "#00D4AA" : P.border.mid,
+                    background: v.rank === 1 ? "var(--color-accent)" : "var(--color-border)",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontFamily: MONO, fontSize: 12, fontWeight: 700,
-                    color: v.rank === 1 ? "#071510" : P.text.muted,
+                    color: v.rank === 1 ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
                   }}>#{v.rank}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: P.text.primary, fontFamily: FONT }}>{v.vendor_name || v.vendor_id}</div>
                     <div style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT }}>{v.recommendation.replace(/_/g, " ")}</div>
                   </div>
-                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 700, color: v.rank === 1 ? "#00D4AA" : P.text.secondary }}>
+                  <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 700, color: v.rank === 1 ? "var(--color-accent)" : "var(--color-text-secondary)" }}>
                     {v.total_score.toFixed(1)}<span style={{ fontSize: 11, color: P.text.muted }}>/10</span>
                   </div>
                 </div>
@@ -272,8 +271,8 @@ export default function ApprovePage() {
 
         {/* Risk flags */}
         {ctx.risk_flags.length > 0 && (
-          <div style={{ background: "#EF444410", border: "1px solid #EF444440", borderRadius: TOKENS.radius.card, padding: "16px 18px" }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: "#EF4444", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10, fontFamily: FONT }}>
+          <div style={{ background: "var(--color-error)10", border: "1px solid var(--color-error)40", borderRadius: TOKENS.radius.card, padding: "16px 18px" }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--color-error)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10, fontFamily: FONT }}>
               Review flags
             </div>
             {ctx.risk_flags.map((f, i) => (
@@ -291,9 +290,9 @@ export default function ApprovePage() {
           <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
             {(["approve", "reject", "escalate"] as const).map(a => {
               const colours = {
-                approve:  { bg: "#10B98118", border: "#10B98140", text: "#10B981" },
-                reject:   { bg: "#EF444418", border: "#EF444440", text: "#EF4444" },
-                escalate: { bg: "#F59E0B18", border: "#F59E0B40", text: "#F59E0B" },
+                approve:  { bg: "var(--color-success)18", border: "var(--color-success)40", text: "var(--color-success)" },
+                reject:   { bg: "var(--color-error)18",   border: "var(--color-error)40",   text: "var(--color-error)"   },
+                escalate: { bg: "var(--color-warning)18", border: "var(--color-warning)40", text: "var(--color-warning)" },
               };
               const c = colours[a];
               const selected = action === a;
@@ -321,7 +320,7 @@ export default function ApprovePage() {
                 style={{
                   width: "100%", fontFamily: FONT, fontSize: 13,
                   padding: "10px 12px", borderRadius: 8,
-                  border: `1px solid ${reason.trim().length >= 20 ? "#10B981" : P.border.mid}`,
+                  border: `1px solid ${reason.trim().length >= 20 ? "var(--color-success)" : "var(--color-border)"}`,
                   background: P.bg.elevated, color: P.text.primary,
                   outline: "none", resize: "vertical", boxSizing: "border-box",
                 }}
@@ -333,14 +332,14 @@ export default function ApprovePage() {
           )}
 
           {error && (
-            <div style={{ background: "#EF444414", border: "1px solid #EF4444", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#EF4444", fontFamily: FONT, marginBottom: 12 }}>
+            <div style={{ background: "var(--color-error)14", border: "1px solid var(--color-error)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "var(--color-error)", fontFamily: FONT, marginBottom: 12 }}>
               {error}
             </div>
           )}
 
           <button onClick={submit} disabled={!canSubmit || submitting} style={{
-            width: "100%", background: !canSubmit || submitting ? P.border.mid : "#00D4AA",
-            color: !canSubmit || submitting ? P.text.muted : "#071510",
+            width: "100%", background: !canSubmit || submitting ? "var(--color-border)" : "var(--color-accent)",
+            color: !canSubmit || submitting ? "var(--color-text-muted)" : "var(--color-accent-foreground)",
             border: "none", borderRadius: TOKENS.radius.btn,
             padding: "11px", fontSize: 13, fontFamily: FONT, fontWeight: 600,
             cursor: !canSubmit || submitting ? "not-allowed" : "pointer",

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS, AGENT_COLOUR } from "@/lib/theme";
 
 const API     = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -17,10 +18,10 @@ const AGENTS = [
   { id: "retrieval",   label: "Retrieval",   desc: "Hybrid search + Cohere rerank + HyDE",        colour: AGENT_COLOUR.legal      },
   { id: "extraction",  label: "Extraction",  desc: "Extracts structured facts → PostgreSQL",      colour: AGENT_COLOUR.finance    },
   { id: "evaluation",  label: "Evaluation",  desc: "Scores vendors against criteria",             colour: AGENT_COLOUR.operations },
-  { id: "comparator",  label: "Comparator",  desc: "Cross-vendor ranking, rank stability check",  colour: "#EC4899"               },
-  { id: "decision",    label: "Decision",    desc: "Governance routing, approval tier selection", colour: "#14B8A6"               },
-  { id: "explanation", label: "Explanation", desc: "Grounded report — every claim cited",         colour: "#F97316"               },
-  { id: "critic",      label: "Critic",      desc: "Validates every agent output for quality",    colour: "#6366F1"               },
+  { id: "comparator",  label: "Comparator",  desc: "Cross-vendor ranking, rank stability check",  colour: "var(--color-info)"    },
+  { id: "decision",    label: "Decision",    desc: "Governance routing, approval tier selection", colour: "var(--color-success)"  },
+  { id: "explanation", label: "Explanation", desc: "Grounded report — every claim cited",         colour: "var(--color-warning)"  },
+  { id: "critic",      label: "Critic",      desc: "Validates every agent output for quality",    colour: "var(--color-accent)"   },
 ] as const;
 
 type AgentStatus = "pending" | "running" | "done" | "blocked" | "warned";
@@ -29,11 +30,11 @@ interface AgentEvent { agent: string; status: AgentStatus; message?: string; log
 interface LogEntry   { ts: string; agent: string; status: AgentStatus; message: string; }
 
 const STATUS_COLOUR: Record<AgentStatus, string> = {
-  pending: "#374151",
-  running: "#3B82F6",
-  done:    "#10B981",
-  blocked: "#EF4444",
-  warned:  "#F59E0B",
+  pending: "var(--color-text-muted)",
+  running: "var(--color-info)",
+  done:    "var(--color-success)",
+  blocked: "var(--color-error)",
+  warned:  "var(--color-warning)",
 };
 const STATUS_ICON: Record<AgentStatus, string> = {
   pending: "○", running: "◉", done: "✓", blocked: "✗", warned: "⚠",
@@ -55,8 +56,8 @@ function Spinner({ colour }: { colour: string }) {
 export default function ProgressPage() {
   const { runId }          = useParams<{ runId: string }>();
   const router             = useRouter();
-  const { isDark, toggle } = useTheme();
-  const P                  = isDark ? PALETTE : PALETTE_LIGHT;
+  const { isDark } = useThemeContext();
+  const P          = isDark ? PALETTE : PALETTE_LIGHT;
 
   const [statuses, setStatuses] = useState<Record<string, AgentStatus>>(
     Object.fromEntries(AGENTS.map(a => [a.id, "pending"]))
@@ -71,9 +72,7 @@ export default function ProgressPage() {
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
 
-  const BG = isDark
-    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
-    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
+  const BG = "var(--bg-gradient)";
 
   // Save runId so user can reload without losing progress
   useEffect(() => {
@@ -140,7 +139,7 @@ export default function ProgressPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
+      <TopBar
         crumbs={[
           { label: "Procurement", href: "/" },
           { label: runId.slice(0, 8) + "…", href: `/${runId}/confirm` },
@@ -161,9 +160,9 @@ export default function ProgressPage() {
               </div>
             </div>
             <div style={{
-              background: "#00D4AA18", border: "1px solid #00D4AA40",
+              background: "var(--color-accent)18", border: "1px solid var(--color-accent)40",
               borderRadius: 20, padding: "4px 12px",
-              fontSize: 11, color: "#00D4AA", fontWeight: 600, fontFamily: FONT,
+              fontSize: 11, color: "var(--color-accent)", fontWeight: 600, fontFamily: FONT,
             }}>
               ● Progress saved — reload safely
             </div>
@@ -173,10 +172,10 @@ export default function ProgressPage() {
           <div style={{ marginBottom: 6 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
               <span style={{ fontSize: 12, color: P.text.secondary, fontFamily: FONT }}>{doneCount} of {AGENTS.length} agents complete</span>
-              <span style={{ fontFamily: MONO, fontSize: 12, color: "#00D4AA", fontWeight: 600 }}>{progress}%</span>
+              <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--color-accent)", fontWeight: 600 }}>{progress}%</span>
             </div>
             <div style={{ height: 6, borderRadius: 3, background: P.border.dim, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${progress}%`, background: "#00D4AA", borderRadius: 3, transition: "width 500ms ease" }} />
+              <div style={{ height: "100%", width: `${progress}%`, background: "var(--color-accent)", borderRadius: 3, transition: "width 500ms ease" }} />
             </div>
           </div>
         </div>
@@ -195,7 +194,7 @@ export default function ProgressPage() {
                 display: "flex", alignItems: "center", gap: 14,
                 padding: "13px 20px",
                 borderBottom: isLast ? "none" : `1px solid ${P.border.dim}`,
-                background: running ? (isDark ? "#111828" : "#F0F9FF") : "transparent",
+                background: running ? "var(--color-surface-hover)" : "transparent",
                 transition: "background 200ms",
               }}>
                 {/* Status icon */}
@@ -247,7 +246,7 @@ export default function ProgressPage() {
             </div>
             <div ref={logRef} style={{ maxHeight: 260, overflowY: "auto", padding: "8px 0" }}>
               {logEntries.map((entry, i) => {
-                const dotColour = entry.status === "done" ? "#10B981" : entry.status === "blocked" ? "#EF4444" : "#3B82F6";
+                const dotColour = entry.status === "done" ? "var(--color-success)" : entry.status === "blocked" ? "var(--color-error)" : "var(--color-info)";
                 const time = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                 return (
                   <div key={i} style={{ display: "flex", gap: 12, padding: "7px 20px", alignItems: "flex-start" }}>
@@ -264,9 +263,9 @@ export default function ProgressPage() {
         {/* Blocked error */}
         {blocked && (
           <div style={{
-            background: "#EF444414", border: "1px solid #EF4444",
+            background: "var(--color-error)14", border: "1px solid var(--color-error)",
             borderRadius: TOKENS.radius.card, padding: "14px 18px",
-            fontSize: 13, color: "#EF4444", fontFamily: FONT,
+            fontSize: 13, color: "var(--color-error)", fontFamily: FONT,
           }}>
             <strong>Pipeline blocked:</strong> {blocked}
           </div>
@@ -275,7 +274,7 @@ export default function ProgressPage() {
         {/* Done CTA */}
         {done && (
           <button onClick={() => router.push(`/${runId}/results`)} style={{
-            background: "#00D4AA", color: "#071510", border: "none",
+            background: "var(--color-accent)", color: "var(--color-accent-foreground)", border: "none",
             borderRadius: TOKENS.radius.btn, padding: "13px",
             fontSize: 14, fontFamily: FONT, fontWeight: 700, cursor: "pointer",
             width: "100%",

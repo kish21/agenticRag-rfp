@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS } from "@/lib/theme";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -40,12 +41,11 @@ const SCORE_BAND_LABEL: (score: number) => string = (score) => {
   return "0–3.9: Marginal — significant gaps, high risk";
 };
 
-function ScoreBar({ score, isDark }: { score: number; isDark: boolean }) {
-  const P      = isDark ? PALETTE : PALETTE_LIGHT;
-  const colour = score >= 8 ? "#10B981" : score >= 6 ? "#00D4AA" : score >= 4 ? "#F59E0B" : "#EF4444";
+function ScoreBar({ score }: { score: number }) {
+  const colour = score >= 8 ? "var(--color-success)" : score >= 6 ? "var(--color-info)" : score >= 4 ? "var(--color-warning)" : "var(--color-error)";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <div style={{ flex: 1, height: 5, borderRadius: 3, background: P.border.dim, overflow: "hidden" }}>
+      <div style={{ flex: 1, height: 5, borderRadius: 3, background: "var(--color-border)", overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${score * 10}%`, background: colour, borderRadius: 3, transition: "width 600ms ease" }} />
       </div>
       <span
@@ -61,10 +61,10 @@ function ScoreBar({ score, isDark }: { score: number; isDark: boolean }) {
 // ── Recommendation badge ───────────────────────────────────────────────────────
 
 const REC_COLOUR: Record<string, string> = {
-  strongly_recommended: "#10B981",
-  recommended:          "#00D4AA",
-  acceptable:           "#F59E0B",
-  marginal:             "#EF4444",
+  strongly_recommended: "var(--color-success)",
+  recommended:          "var(--color-info)",
+  acceptable:           "var(--color-warning)",
+  marginal:             "var(--color-error)",
 };
 
 function RecBadge({ rec }: { rec: string }) {
@@ -82,20 +82,18 @@ function RecBadge({ rec }: { rec: string }) {
 
 // ── Tab button ─────────────────────────────────────────────────────────────────
 
-function Tab({ label, active, count, onClick, isDark }: { label: string; active: boolean; count?: number; onClick: () => void; isDark: boolean }) {
-  const P      = isDark ? PALETTE : PALETTE_LIGHT;
-  const TEAL   = "#00D4AA";
+function Tab({ label, active, count, onClick }: { label: string; active: boolean; count?: number; onClick: () => void }) {
   return (
     <button onClick={onClick} style={{
       background: "none", border: "none", cursor: "pointer", fontFamily: FONT,
       fontSize: 13, fontWeight: active ? 600 : 400,
-      color: active ? TEAL : P.text.muted,
-      borderBottom: `2px solid ${active ? TEAL : "transparent"}`,
-      padding: "10px 16px", transition: "color 140ms",
+      color: active ? "var(--color-accent)" : "var(--color-text-muted)",
+      borderBottom: `2px solid ${active ? "var(--color-accent)" : "transparent"}`,
+      padding: "10px 16px", transition: "color var(--transition)",
     }}>
       {label}
       {count !== undefined && (
-        <span style={{ marginLeft: 6, fontSize: 11, background: active ? TEAL + "20" : P.border.dim, color: active ? TEAL : P.text.muted, padding: "1px 6px", borderRadius: 10 }}>
+        <span style={{ marginLeft: 6, fontSize: 11, background: active ? "var(--color-accent)20" : "var(--color-border)", color: active ? "var(--color-accent)" : "var(--color-text-muted)", padding: "1px 6px", borderRadius: 10 }}>
           {count}
         </span>
       )}
@@ -108,7 +106,7 @@ function Tab({ label, active, count, onClick, isDark }: { label: string; active:
 export default function ResultsPage() {
   const { runId }          = useParams<{ runId: string }>();
   const router             = useRouter();
-  const { isDark, toggle } = useTheme();
+  const { isDark } = useThemeContext();
   const P                  = isDark ? PALETTE : PALETTE_LIGHT;
 
   const [results,      setResults]      = useState<Results | null>(null);
@@ -125,9 +123,7 @@ export default function ResultsPage() {
   const [logOpen,     setLogOpen]     = useState(false);
   const [auditOpen,   setAuditOpen]   = useState(false);
 
-  const BG = isDark
-    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
-    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
+  const BG = "var(--bg-gradient)";
 
   useEffect(() => {
     const token = getToken();
@@ -184,18 +180,18 @@ export default function ResultsPage() {
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Procurement", href: "/" }, { label: "Results" }]} />
+      <TopBar crumbs={[{ label: "Procurement", href: "/" }, { label: "Results" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
-        <span style={{ color: P.text.muted, fontSize: 13 }}>Loading results…</span>
+        <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>Loading results…</span>
       </div>
     </div>
   );
 
   if (!results) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Procurement", href: "/" }, { label: "Results" }]} />
+      <TopBar crumbs={[{ label: "Procurement", href: "/" }, { label: "Results" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
-        <span style={{ color: "#EF4444", fontSize: 13 }}>{error}</span>
+        <span style={{ color: "var(--color-error)", fontSize: 13 }}>{error}</span>
       </div>
     </div>
   );
@@ -210,7 +206,7 @@ export default function ResultsPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
+      <TopBar
         crumbs={[
           { label: "Procurement", href: "/" },
           { label: runId.slice(0, 8) + "…" },
@@ -219,16 +215,16 @@ export default function ResultsPage() {
         right={
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => download("pdf")} disabled={!!downloading} style={{
-              background: "transparent", border: "1px solid #3B82F6",
+              background: "transparent", border: "1px solid var(--color-info)",
               borderRadius: 7, padding: "5px 12px", fontSize: 11,
-              color: "#3B82F6", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
+              color: "var(--color-info)", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
             }}>
               {downloading === "pdf" ? "…" : "↓ PDF"}
             </button>
             <button onClick={() => download("excel")} disabled={!!downloading} style={{
-              background: "transparent", border: "1px solid #10B981",
+              background: "transparent", border: "1px solid var(--color-success)",
               borderRadius: 7, padding: "5px 12px", fontSize: 11,
-              color: "#10B981", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
+              color: "var(--color-success)", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
             }}>
               {downloading === "excel" ? "…" : "↓ Excel"}
             </button>
@@ -241,20 +237,20 @@ export default function ResultsPage() {
         {/* Zero-score / no-shortlist banner */}
         {showReEvaluate && (
           <div style={{
-            background: "#F59E0B10", border: "1px solid #F59E0B50",
+            background: "var(--color-warning)10", border: "1px solid var(--color-warning)50",
             borderRadius: TOKENS.radius.card, padding: "16px 20px",
             display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
           }}>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#F59E0B", fontFamily: FONT, marginBottom: 3 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-warning)", fontFamily: FONT, marginBottom: 3 }}>
                 {shortlisted.length === 0 ? "No vendors were shortlisted" : "All vendors scored 0.0"}
               </div>
-              <div style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT }}>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)", fontFamily: FONT }}>
                 The pipeline may have run before documents were fully indexed. Re-evaluate to retry with the same setup and documents.
               </div>
             </div>
             <button onClick={reEvaluate} disabled={reEvaluating} style={{
-              background: "#F59E0B", color: "#1A1200", border: "none",
+              background: "var(--color-warning)", color: "#1A1200", border: "none",
               borderRadius: TOKENS.radius.btn, padding: "9px 20px",
               fontSize: 13, fontFamily: FONT, fontWeight: 600,
               cursor: reEvaluating ? "not-allowed" : "pointer", flexShrink: 0,
@@ -274,9 +270,9 @@ export default function ResultsPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {shortlisted.length > 1 && (
                 <button onClick={() => router.push(`/${runId}/compare`)} style={{
-                  background: "transparent", border: "1px solid #00D4AA40",
+                  background: "transparent", border: "1px solid var(--color-accent)40",
                   borderRadius: 7, padding: "5px 12px", fontSize: 11,
-                  color: "#00D4AA", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
+                  color: "var(--color-accent)", cursor: "pointer", fontFamily: FONT, fontWeight: 500,
                 }}>
                   ⇔ Compare
                 </button>
@@ -287,16 +283,16 @@ export default function ResultsPage() {
           <div style={{ display: "flex", gap: 24 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Shortlisted</div>
-              <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "#10B981", marginTop: 3 }}>{(shortlisted ?? []).length}</div>
+              <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "var(--color-success)", marginTop: 3 }}>{(shortlisted ?? []).length}</div>
             </div>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Rejected</div>
-              <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "#EF4444", marginTop: 3 }}>{(rejected ?? []).length}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Rejected</div>
+              <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "var(--color-error)", marginTop: 3 }}>{(rejected ?? []).length}</div>
             </div>
             {ar && (
               <div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: P.text.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Approval tier</div>
-                <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "#F59E0B", marginTop: 3 }}>{ar.approval_tier}</div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", fontFamily: FONT }}>Approval tier</div>
+                <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, color: "var(--color-warning)", marginTop: 3 }}>{ar.approval_tier}</div>
               </div>
             )}
           </div>
@@ -305,24 +301,24 @@ export default function ResultsPage() {
         {/* Approval routing notice */}
         {ar && (
           <div style={{
-            background: "#F59E0B12", border: "1px solid #F59E0B50",
+            background: "var(--color-warning)12", border: "1px solid var(--color-warning)50",
             borderRadius: TOKENS.radius.card, padding: "14px 18px",
           }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#F59E0B", marginBottom: 5, fontFamily: FONT }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-warning)", marginBottom: 5, fontFamily: FONT }}>
               Approval required — Tier {ar.approval_tier}
             </div>
-            <div style={{ fontSize: 12, color: P.text.secondary, fontFamily: FONT }}>
+            <div style={{ fontSize: 12, color: "var(--color-text-secondary)", fontFamily: FONT }}>
               Routed to: <strong>{ar.approver_role.replace(/_/g, " ")}</strong>
               {" · "}SLA: {ar.sla_hours}h
               {" · "}Deadline: {new Date(ar.sla_deadline).toLocaleString()}
             </div>
             {results.requires_human_review && (
-              <div style={{ fontSize: 12, color: "#EF4444", fontFamily: FONT, marginTop: 6 }}>
+              <div style={{ fontSize: 12, color: "var(--color-error)", fontFamily: FONT, marginTop: 6 }}>
                 ⚠ Human review required: {(results.review_reasons ?? []).join("; ")}
               </div>
             )}
             <button onClick={() => router.push(`/${runId}/approve`)} style={{
-              marginTop: 10, background: "#F59E0B", color: "#1A0D00", border: "none",
+              marginTop: 10, background: "var(--color-warning)", color: "#1A0D00", border: "none",
               borderRadius: 7, padding: "7px 16px", fontSize: 12,
               fontFamily: FONT, fontWeight: 600, cursor: "pointer",
             }}>
@@ -334,8 +330,8 @@ export default function ResultsPage() {
         {/* Tabs */}
         <div style={{ ...CARD, overflow: "hidden" }}>
           <div style={{ display: "flex", borderBottom: `1px solid ${P.border.dim}`, padding: "0 8px" }}>
-            <Tab label="Shortlisted" active={tab === "shortlisted"} count={shortlisted.length} onClick={() => setTab("shortlisted")} isDark={isDark} />
-            <Tab label="Rejected"    active={tab === "rejected"}    count={rejected.length}    onClick={() => setTab("rejected")}    isDark={isDark} />
+            <Tab label="Shortlisted" active={tab === "shortlisted"} count={shortlisted.length} onClick={() => setTab("shortlisted")} />
+            <Tab label="Rejected"    active={tab === "rejected"}    count={rejected.length}    onClick={() => setTab("rejected")} />
           </div>
 
           <div style={{ padding: "18px 20px" }}>
@@ -353,14 +349,14 @@ export default function ResultsPage() {
                       <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14 }}>
                         <div style={{
                           width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-                          background: "#00D4AA", display: "flex", alignItems: "center", justifyContent: "center",
-                          fontFamily: MONO, fontSize: 13, fontWeight: 700, color: "#071510",
+                          background: "var(--color-accent)", display: "flex", alignItems: "center", justifyContent: "center",
+                          fontFamily: MONO, fontSize: 13, fontWeight: 700, color: "var(--color-accent-foreground)",
                         }}>#{v.rank}</div>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 14, fontWeight: 600, color: P.text.primary, fontFamily: FONT, marginBottom: 4 }}>
                             {vendorNames[v.vendor_id] || v.vendor_name || v.vendor_id}
                           </div>
-                          <ScoreBar score={v.total_score} isDark={isDark} />
+                          <ScoreBar score={v.total_score} />
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                           <RecBadge rec={v.recommendation} />
@@ -396,16 +392,16 @@ export default function ResultsPage() {
                                 <tr key={c.criterion_id} style={{ borderTop: `1px solid ${P.border.dim}` }}>
                                   <td style={{ fontSize: 12, color: P.text.primary, padding: "7px 8px", fontFamily: FONT }}>{c.criterion_name ?? c.criterion_id}</td>
                                   <td style={{ fontFamily: MONO, fontSize: 12, color: P.text.secondary, padding: "7px 8px" }}>{c.raw_score}/10</td>
-                                  <td style={{ fontFamily: MONO, fontSize: 12, color: "#00D4AA", padding: "7px 8px" }}>{c.weighted_contribution.toFixed(2)}</td>
+                                  <td style={{ fontFamily: MONO, fontSize: 12, color: "var(--color-accent)", padding: "7px 8px" }}>{c.weighted_contribution.toFixed(2)}</td>
                                   <td style={{ fontSize: 11, color: P.text.muted, padding: "7px 8px", fontFamily: FONT, fontStyle: "italic" }}>{c.score_rationale ?? "—"}</td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                           <button onClick={() => router.push(`/${runId}/override?vendor=${v.vendor_id}`)} style={{
-                            marginTop: 10, background: "transparent", border: `1px solid #F59E0B`,
+                            marginTop: 10, background: "transparent", border: `1px solid var(--color-warning)`,
                             borderRadius: 6, padding: "5px 12px", fontSize: 11,
-                            color: "#F59E0B", cursor: "pointer", fontFamily: FONT,
+                            color: "var(--color-warning)", cursor: "pointer", fontFamily: FONT,
                           }}>
                             Override this decision
                           </button>
@@ -424,8 +420,8 @@ export default function ResultsPage() {
                   <p style={{ fontSize: 13, color: P.text.muted, fontFamily: FONT }}>No vendors rejected.</p>
                 )}
                 {rejected.map(v => (
-                  <div key={v.vendor_id} style={{ background: "#EF444410", border: "1px solid #EF444430", borderRadius: 10, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#EF4444", fontFamily: FONT, marginBottom: 6 }}>
+                  <div key={v.vendor_id} style={{ background: "var(--color-error)10", border: "1px solid var(--color-error)30", borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-error)", fontFamily: FONT, marginBottom: 6 }}>
                       {vendorNames[v.vendor_id] || v.vendor_name || v.vendor_id}
                     </div>
                     <div style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT, marginBottom: 8 }}>
@@ -474,7 +470,7 @@ export default function ResultsPage() {
             {logOpen && (
               <div style={{ borderTop: `1px solid ${P.border.dim}`, padding: "8px 0" }}>
                 {agentLog.map((entry, i) => {
-                  const dotColour = entry.status === "done" ? "#10B981" : entry.status === "blocked" ? "#EF4444" : "#3B82F6";
+                  const dotColour = entry.status === "done" ? "var(--color-success)" : entry.status === "blocked" ? "var(--color-error)" : "var(--color-info)";
                   const isLast    = i === agentLog.length - 1;
                   const time      = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                   return (
@@ -529,7 +525,7 @@ export default function ResultsPage() {
                     {auditTrail.map((ev, i) => {
                       const isRun      = ev.event_type.startsWith("run.");
                       const isOverride = ev.event_type.startsWith("override.");
-                      const dotColour  = isOverride ? "#F59E0B" : ev.event_type.endsWith(".blocked") ? "#EF4444" : ev.event_type.endsWith(".completed") ? "#10B981" : "#3B82F6";
+                      const dotColour  = isOverride ? "var(--color-warning)" : ev.event_type.endsWith(".blocked") ? "var(--color-error)" : ev.event_type.endsWith(".completed") ? "var(--color-success)" : "var(--color-info)";
                       const time       = new Date(ev.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                       const date       = new Date(ev.ts).toLocaleDateString();
                       return (

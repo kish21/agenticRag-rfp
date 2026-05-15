@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS } from "@/lib/theme";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -27,17 +28,17 @@ interface Results {
 }
 
 function scoreColour(score: number) {
-  if (score >= 8) return "#10B981";
-  if (score >= 6) return "#00D4AA";
-  if (score >= 4) return "#F59E0B";
-  return "#EF4444";
+  if (score >= 8) return "var(--color-success)";
+  if (score >= 6) return "var(--color-info)";
+  if (score >= 4) return "var(--color-warning)";
+  return "var(--color-error)";
 }
 
 export default function ComparePage() {
   const { runId }          = useParams<{ runId: string }>();
   const router             = useRouter();
-  const { isDark, toggle } = useTheme();
-  const P                  = isDark ? PALETTE : PALETTE_LIGHT;
+  const { isDark } = useThemeContext();
+  const P          = isDark ? PALETTE : PALETTE_LIGHT;
 
   const [results,  setResults]  = useState<Results | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -52,12 +53,12 @@ export default function ComparePage() {
       .catch(() => { setError("Failed to load results."); setLoading(false); });
   }, [runId]);
 
-  const BG = isDark ? "#090C12" : "#F8FAFC";
+  const BG = "var(--bg-gradient)";
   const CARD = { background: P.bg.surface, border: `1px solid ${P.border.mid}`, borderRadius: TOKENS.radius.card };
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Results", href: `/${runId}/results` }, { label: "Compare" }]} />
+      <TopBar crumbs={[{ label: "Results", href: `/${runId}/results` }, { label: "Compare" }]} />
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "50vh" }}>
         <span style={{ color: P.text.muted, fontSize: 13 }}>Loading comparison…</span>
       </div>
@@ -66,9 +67,9 @@ export default function ComparePage() {
 
   if (!results || error) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle} crumbs={[{ label: "Results", href: `/${runId}/results` }, { label: "Compare" }]} />
+      <TopBar crumbs={[{ label: "Results", href: `/${runId}/results` }, { label: "Compare" }]} />
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "50vh" }}>
-        <span style={{ color: "#EF4444", fontSize: 13 }}>{error || "No results found."}</span>
+        <span style={{ color: "var(--color-error)", fontSize: 13 }}>{error || "No results found."}</span>
       </div>
     </div>
   );
@@ -91,8 +92,6 @@ export default function ComparePage() {
   return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
       <TopBar
-        isDark={isDark}
-        onToggle={toggle}
         crumbs={[
           { label: "Procurement", href: "/" },
           { label: runId.slice(0, 8) + "…" },
@@ -225,7 +224,7 @@ export default function ComparePage() {
                   ...CARD, padding: "12px 16px",
                   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
                 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#EF4444", fontFamily: FONT }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-error)", fontFamily: FONT }}>
                     {v.vendor_name || v.vendor_id}
                   </span>
                   <span style={{ fontSize: 11, color: P.text.muted, fontFamily: FONT }}>

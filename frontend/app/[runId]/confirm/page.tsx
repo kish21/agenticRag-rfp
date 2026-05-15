@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS } from "@/lib/theme";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -59,10 +60,10 @@ function SectionLabel({ children, isDark }: { children: React.ReactNode; isDark:
 
 function SourceLegend() {
   const items = [
-    { key: "org",  label: "Organisation", color: "#9CA3AF" },
-    { key: "dept", label: "Department",   color: "#F59E0B" },
-    { key: "rfp",  label: "From RFP",     color: "#00D4AA" },
-    { key: "user", label: "Added by you", color: "#3B82F6" },
+    { key: "org",  label: "Organisation", color: "var(--color-text-muted)"    },
+    { key: "dept", label: "Department",   color: "var(--color-warning)"       },
+    { key: "rfp",  label: "From RFP",     color: "var(--color-accent)"        },
+    { key: "user", label: "Added by you", color: "var(--color-info)"          },
   ];
   return (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
@@ -79,10 +80,10 @@ function SourceLegend() {
 function SourceBadge({ source, isLocked }: { source?: string; isLocked?: boolean }) {
   if (!source) return null;
   const map: Record<string, { label: string; bg: string; color: string; border: string }> = {
-    org:  { label: "Organisation", bg: "#6B728018", color: "#9CA3AF", border: "#6B728040" },
-    dept: { label: "Department",   bg: "#F59E0B18", color: "#F59E0B", border: "#F59E0B40" },
-    rfp:  { label: "From RFP",     bg: "#00D4AA18", color: "#00D4AA", border: "#00D4AA40" },
-    user: { label: "Added by you", bg: "#3B82F618", color: "#3B82F6", border: "#3B82F640" },
+    org:  { label: "Organisation", bg: "var(--color-text-muted)18",    color: "var(--color-text-muted)",    border: "var(--color-text-muted)40"    },
+    dept: { label: "Department",   bg: "var(--color-warning)18",       color: "var(--color-warning)",       border: "var(--color-warning)40"       },
+    rfp:  { label: "From RFP",     bg: "var(--color-accent)18",        color: "var(--color-accent)",        border: "var(--color-accent)40"        },
+    user: { label: "Added by you", bg: "var(--color-info)18",          color: "var(--color-info)",          border: "var(--color-info)40"          },
   };
   const style = map[source];
   if (!style) return null;
@@ -101,7 +102,7 @@ function WeightBar({ totalPct, isDark }: { totalPct: number; isDark: boolean }) 
   const P = isDark ? PALETTE : PALETTE_LIGHT;
   const over  = totalPct > 100;
   const exact = totalPct === 100;
-  const color = exact ? "#10B981" : over ? "#EF4444" : "#F59E0B";
+  const color = exact ? "var(--color-success)" : over ? "var(--color-error)" : "var(--color-warning)";
   const label = exact
     ? "Weights confirmed"
     : over
@@ -126,8 +127,8 @@ function WeightBar({ totalPct, isDark }: { totalPct: number; isDark: boolean }) 
 export default function ConfirmPage() {
   const { runId }      = useParams<{ runId: string }>();
   const router         = useRouter();
-  const { isDark, toggle } = useTheme();
-  const P              = isDark ? PALETTE : PALETTE_LIGHT;
+  const { isDark } = useThemeContext();
+  const P          = isDark ? PALETTE : PALETTE_LIGHT;
 
   const [setup,        setSetup]        = useState<EvaluationSetup | null>(null);
   const [loading,      setLoading]      = useState(true);
@@ -140,9 +141,7 @@ export default function ConfirmPage() {
   const [checks,    setChecks]    = useState<MandatoryCheck[]>([]);
   const [criteria,  setCriteria]  = useState<ScoringCriterion[]>([]);
 
-  const BG = isDark
-    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
-    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
+  const BG = "var(--bg-gradient)";
 
   const CARD = {
     background: P.bg.surface, borderRadius: TOKENS.radius.card,
@@ -276,7 +275,7 @@ export default function ConfirmPage() {
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
+      <TopBar
         crumbs={[{ label: "Procurement", href: "/" }, { label: "Confirm setup" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
         <span style={{ color: P.text.muted, fontSize: 13 }}>Loading evaluation setup…</span>
@@ -286,10 +285,10 @@ export default function ConfirmPage() {
 
   if (!setup) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
+      <TopBar
         crumbs={[{ label: "Procurement", href: "/" }, { label: "Confirm setup" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
-        <span style={{ color: "#EF4444", fontSize: 13 }}>{error || "Setup not found."}</span>
+        <span style={{ color: "var(--color-error)", fontSize: 13 }}>{error || "Setup not found."}</span>
       </div>
     </div>
   );
@@ -311,9 +310,9 @@ export default function ConfirmPage() {
       disabled={disabled}
       title={disabled ? "Locked — cannot delete" : "Delete"}
       style={{
-        background: "transparent", border: `1px solid ${disabled ? P.border.dim : "#EF444460"}`,
+        background: "transparent", border: `1px solid ${disabled ? "var(--color-border)" : "var(--color-error)60"}`,
         borderRadius: 6, padding: "5px 10px", fontSize: 12,
-        color: disabled ? P.text.muted : "#EF4444",
+        color: disabled ? "var(--color-text-muted)" : "var(--color-error)",
         cursor: disabled ? "not-allowed" : "pointer", flexShrink: 0,
       }}
     >
@@ -323,7 +322,7 @@ export default function ConfirmPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
+      <TopBar
         crumbs={[
           { label: "Procurement", href: "/" },
           { label: "New evaluation", href: "/procurement/upload" },
@@ -344,9 +343,9 @@ export default function ConfirmPage() {
               </p>
             </div>
             <span style={{
-              background: "#00D4AA18", border: "1px solid #00D4AA40",
+              background: "var(--color-accent)18", border: "1px solid var(--color-accent)40",
               borderRadius: 20, padding: "4px 12px",
-              fontSize: 11, color: "#00D4AA", fontWeight: 600, fontFamily: FONT, flexShrink: 0,
+              fontSize: 11, color: "var(--color-accent)", fontWeight: 600, fontFamily: FONT, flexShrink: 0,
             }}>
               Identity confirmed
             </span>
@@ -378,8 +377,8 @@ export default function ConfirmPage() {
                 Cancel
               </button>
               <button onClick={saveEdit} disabled={saving} style={{
-                background: saving ? P.border.mid : "#3B82F6",
-                color: saving ? P.text.muted : "#fff",
+                background: saving ? "var(--color-border)" : "var(--color-info)",
+                color: saving ? "var(--color-text-muted)" : "var(--color-accent-foreground)",
                 border: "none", borderRadius: TOKENS.radius.btn,
                 padding: "8px 16px", fontSize: 12, fontFamily: FONT, fontWeight: 600,
                 cursor: saving ? "not-allowed" : "pointer",
@@ -436,7 +435,7 @@ export default function ConfirmPage() {
                 ) : (
                   <>
                     <p style={{ fontSize: 12, color: P.text.muted, margin: "0 0 5px", fontFamily: FONT }}>{c.description}</p>
-                    <p style={{ fontSize: 12, color: "#10B981", margin: 0, fontFamily: FONT }}>✓ Passes when: {c.what_passes}</p>
+                    <p style={{ fontSize: 12, color: "var(--color-success)", margin: 0, fontFamily: FONT }}>✓ Passes when: {c.what_passes}</p>
                   </>
                 )}
               </div>
@@ -500,10 +499,10 @@ export default function ConfirmPage() {
                           )}
                         </div>
                         <div style={{ height: 4, borderRadius: 2, background: P.border.dim, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${pct}%`, background: "#00D4AA", borderRadius: 2 }} />
+                          <div style={{ height: "100%", width: `${pct}%`, background: "var(--color-accent)", borderRadius: 2 }} />
                         </div>
                       </div>
-                      <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: "#00D4AA", flexShrink: 0 }}>{pct}%</span>
+                      <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: "var(--color-accent)", flexShrink: 0 }}>{pct}%</span>
                     </div>
                   )}
                 </div>
@@ -524,7 +523,7 @@ export default function ConfirmPage() {
 
         {/* Error */}
         {error && (
-          <div style={{ background: "#EF444414", border: "1px solid #EF4444", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#EF4444", fontFamily: FONT }}>
+          <div style={{ background: "var(--color-error)14", border: "1px solid var(--color-error)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "var(--color-error)", fontFamily: FONT }}>
             {error}
           </div>
         )}
@@ -548,8 +547,8 @@ export default function ConfirmPage() {
             }
             style={{
               flex: 1,
-              background: (confirming || editMode || !weightOk) ? P.border.mid : "#00D4AA",
-              color: (confirming || editMode || !weightOk) ? P.text.muted : "#071510",
+              background: (confirming || editMode || !weightOk) ? "var(--color-border)" : "var(--color-accent)",
+              color: (confirming || editMode || !weightOk) ? "var(--color-text-muted)" : "var(--color-accent-foreground)",
               border: "none", borderRadius: TOKENS.radius.btn,
               padding: "10px 20px", fontSize: 13, fontFamily: FONT, fontWeight: 600,
               cursor: (confirming || editMode || !weightOk) ? "not-allowed" : "pointer",

@@ -1,27 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { COMPANY, FONT, PALETTE, PALETTE_LIGHT, TOKENS, TOPBAR_BG, TOPBAR_BG_LIGHT } from "@/lib/theme";
+import { useState, useEffect } from "react";
+import { COMPANY, TOKENS, type ThemeId, DEFAULT_THEME, THEMES, applyThemeVars } from "@/lib/theme";
+import { ThemePicker } from "./ThemePicker";
 
 export interface Crumb { label: string; href?: string }
 
 interface TopBarProps {
-  isDark:   boolean;
-  onToggle: () => void;
-  crumbs?:  Crumb[];
-  right?:   React.ReactNode;
+  isDark?:   boolean;     // kept for backwards compat — no longer drives colours
+  onToggle?: () => void;  // kept for backwards compat — no longer used
+  crumbs?:   Crumb[];
+  right?:    React.ReactNode;
 }
 
-export function TopBar({ isDark, onToggle, crumbs, right }: TopBarProps) {
-  const P      = isDark ? PALETTE : PALETTE_LIGHT;
-  const bg     = isDark ? TOPBAR_BG : TOPBAR_BG_LIGHT;
-  const border = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.07)";
-
+export function TopBar({ crumbs, right }: TopBarProps) {
   return (
     <header style={{
       position: "sticky", top: 0, zIndex: 30,
-      background: bg, backdropFilter: "blur(14px)",
-      borderBottom: `1px solid ${border}`,
+      background: "var(--topbar-bg)",
+      backdropFilter: "blur(14px)",
+      WebkitBackdropFilter: "blur(14px)",
+      borderBottom: "1px solid var(--topbar-border)",
       height: TOKENS.topbar.height,
       display: "flex", alignItems: "center", padding: "0 28px", gap: 10,
     }}>
@@ -29,7 +29,7 @@ export function TopBar({ isDark, onToggle, crumbs, right }: TopBarProps) {
       <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none", flexShrink: 0 }}>
         <div style={{
           width: 26, height: 26, borderRadius: 7, flexShrink: 0,
-          background: "linear-gradient(135deg, #00D4AA, #7C3AED)",
+          background: "linear-gradient(135deg, var(--color-accent), var(--color-info))",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -37,7 +37,11 @@ export function TopBar({ isDark, onToggle, crumbs, right }: TopBarProps) {
             <circle cx="6" cy="6" r="5" stroke="white" strokeWidth="0.85" opacity="0.35" />
           </svg>
         </div>
-        <span style={{ fontSize: 13, fontWeight: 600, color: P.text.primary, fontFamily: FONT }}>
+        <span style={{
+          fontSize: 13, fontWeight: 600,
+          color: "var(--color-text-primary)",
+          fontFamily: "var(--font-sans)",
+        }}>
           {COMPANY.platformName}
         </span>
       </Link>
@@ -45,17 +49,27 @@ export function TopBar({ isDark, onToggle, crumbs, right }: TopBarProps) {
       {/* Breadcrumbs */}
       {crumbs && crumbs.length > 0 && (
         <>
-          <span style={{ color: P.text.muted, fontSize: 13, flexShrink: 0 }}>·</span>
+          <span style={{ color: "var(--color-text-muted)", fontSize: 13, flexShrink: 0 }}>·</span>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             {crumbs.map((c, i) => (
               <span key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                {i > 0 && <span style={{ color: P.text.muted, fontSize: 11, opacity: 0.6 }}>›</span>}
+                {i > 0 && <span style={{ color: "var(--color-text-muted)", fontSize: 11, opacity: 0.6 }}>›</span>}
                 {c.href ? (
-                  <Link href={c.href} style={{ fontSize: 12, color: P.text.secondary, textDecoration: "none", fontFamily: FONT }}>
+                  <Link href={c.href} style={{
+                    fontSize: 12,
+                    color: "var(--color-text-secondary)",
+                    textDecoration: "none",
+                    fontFamily: "var(--font-sans)",
+                  }}>
                     {c.label}
                   </Link>
                 ) : (
-                  <span style={{ fontSize: 12, color: P.text.primary, fontFamily: FONT, fontWeight: 500 }}>
+                  <span style={{
+                    fontSize: 12,
+                    color: "var(--color-text-primary)",
+                    fontFamily: "var(--font-sans)",
+                    fontWeight: 500,
+                  }}>
                     {c.label}
                   </span>
                 )}
@@ -69,32 +83,35 @@ export function TopBar({ isDark, onToggle, crumbs, right }: TopBarProps) {
 
       {right}
 
-      <button onClick={onToggle} style={{
-        background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
-        border: `1px solid ${border}`, borderRadius: 7,
-        padding: "5px 11px", fontSize: 11, fontFamily: FONT,
-        color: P.text.secondary, cursor: "pointer", flexShrink: 0,
-      }}>
-        {isDark ? "☀ Light" : "☾ Dark"}
-      </button>
+      <ThemePicker />
     </header>
   );
 }
 
-// ── Theme hook — localStorage-backed, consistent key across all pages ──────────
+// ── Theme hook — backwards-compatible, now drives CSS variables ───────────────
 
-import { useState, useEffect } from "react";
+const STORAGE_KEY = "meridian-theme-v2";
 
 export function useTheme() {
-  const [isDark, setIsDark] = useState(true);
+  const [themeId, setThemeId] = useState<ThemeId>(DEFAULT_THEME);
+  const [isDark, setIsDark] = useState(THEMES[DEFAULT_THEME].isDark);
+
   useEffect(() => {
-    const saved = localStorage.getItem("meridian-theme");
-    if (saved !== null) setIsDark(saved === "dark");
+    const stored = localStorage.getItem(STORAGE_KEY) as ThemeId | null;
+    const id = stored && stored in THEMES ? stored : DEFAULT_THEME;
+    setThemeId(id);
+    setIsDark(THEMES[id].isDark);
+    applyThemeVars(id);
   }, []);
-  const toggle = () => setIsDark(d => {
-    const next = !d;
-    localStorage.setItem("meridian-theme", next ? "dark" : "light");
-    return next;
-  });
-  return { isDark, toggle };
+
+  function toggle() {
+    // Legacy toggle — cycles between slate (light) and midnight (dark)
+    const next: ThemeId = isDark ? "slate" : "midnight";
+    setThemeId(next);
+    setIsDark(!isDark);
+    applyThemeVars(next);
+    localStorage.setItem(STORAGE_KEY, next);
+  }
+
+  return { isDark, toggle, themeId };
 }

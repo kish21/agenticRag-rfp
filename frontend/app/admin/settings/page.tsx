@@ -98,14 +98,14 @@ export default function OrgSettingsPage() {
 
   if (!settings) {
     return (
-      <div style={{ padding: "2rem", fontFamily: "monospace", color: "#6B7280" }}>
+      <div style={{ padding: "2rem", fontFamily: "var(--font-mono)", color: "var(--color-text-muted)" }}>
         {error ?? "Loading…"}
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 720, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+    <div style={{ padding: "2rem", maxWidth: 720, fontFamily: "var(--font-sans)" }}>
       <h1 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: "1.5rem" }}>
         Org Settings — {settings.org_id}
       </h1>
@@ -178,17 +178,17 @@ export default function OrgSettingsPage() {
       </Section>
 
       {error && (
-        <p style={{ color: "#EF4444", marginBottom: "1rem", fontSize: "0.875rem" }}>{error}</p>
+        <p style={{ color: "var(--color-error)", marginBottom: "1rem", fontSize: "0.875rem" }}>{error}</p>
       )}
       {saved && (
-        <p style={{ color: "#10B981", marginBottom: "1rem", fontSize: "0.875rem" }}>Saved.</p>
+        <p style={{ color: "var(--color-success)", marginBottom: "1rem", fontSize: "0.875rem" }}>Saved.</p>
       )}
 
       <div style={{ display: "flex", gap: "0.75rem" }}>
-        <button onClick={handleSave} disabled={saving} style={{ ...BTN, background: "#7C3AED", color: "#fff" }}>
+        <button onClick={handleSave} disabled={saving} style={{ ...BTN, background: "var(--color-accent)", color: "var(--color-accent-foreground)" }}>
           {saving ? "Saving…" : "Save changes"}
         </button>
-        <button onClick={handleReset} disabled={resetting} style={{ ...BTN, background: "#F3F4F6", color: "#374151" }}>
+        <button onClick={handleReset} disabled={resetting} style={{ ...BTN, background: "var(--color-surface-hover)", color: "var(--color-text-secondary)" }}>
           {resetting ? "Resetting…" : "Reset to defaults"}
         </button>
       </div>
@@ -199,10 +199,10 @@ export default function OrgSettingsPage() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: "1.5rem" }}>
-      <h2 style={{ fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6B7280", marginBottom: "0.5rem" }}>
+      <h2 style={{ fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>
         {title}
       </h2>
-      <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "0.75rem 1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <div style={{ background: "var(--color-surface)", borderRadius: 8, padding: "0.75rem 1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
         {children}
       </div>
     </div>
@@ -212,7 +212,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
-      <span style={{ fontSize: "0.875rem", color: "#374151", minWidth: 200 }}>{label}</span>
+      <span style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)", minWidth: 200 }}>{label}</span>
       {children}
     </div>
   );
@@ -221,13 +221,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function BoolRow({ label, val, onChange }: { label: string; val: boolean; onChange: (v: boolean) => void }) {
   return (
     <Row label={label}>
-      <input type="checkbox" checked={val} onChange={(e) => onChange(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#7C3AED" }} />
+      <input type="checkbox" checked={val} onChange={(e) => onChange(e.target.checked)} style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }} />
     </Row>
   );
 }
 
 const INPUT: React.CSSProperties = {
-  border: "1px solid #E5E7EB",
+  border: "1px solid var(--color-border)",
   borderRadius: 6,
   padding: "0.25rem 0.5rem",
   fontSize: "0.875rem",

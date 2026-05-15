@@ -139,6 +139,61 @@ Wait for confirmation before starting.
 
 ---
 
+## FRONTEND DESIGN RULES — ENFORCE ON EVERY UI TASK
+
+### Stack
+- **Framework:** Next.js 16 App Router, React 19, Tailwind CSS v4
+- **Dev server:** `cd frontend && npm run dev` → http://localhost:3000
+- **Theme system:** CSS custom properties on `<html>` via `applyThemeVars()` in `frontend/lib/theme.ts`
+- **Font:** Plus Jakarta Sans (loaded via `next/font/google`, weights 300–800, variable `--font-jakarta`). Mono: JetBrains Mono (`--font-mono-loaded`). Constants: `FONT`, `DISPLAY`, `MONO` from `@/lib/theme`
+- **51 themes** selectable at runtime — never hardcode a hex colour that should theme
+
+### Reference Images
+- If a reference image is provided: match layout, spacing, typography, and color **exactly**. Do not improve or add to the design.
+- If no reference image: design from scratch using the guardrails below.
+- After writing UI code, describe what you expect to see. If a screenshot is taken, compare pixel-by-pixel: spacing, font weight, exact colors, border-radius, alignment. Fix mismatches.
+
+### Brand Assets
+- Check `frontend/public/` before designing. Use any logos, icons, or brand images found there.
+- No brand_assets folder exists yet — do not use placeholder images unless explicitly needed.
+- Platform name: **"Meridian AI Platform"** · Company: **"Meridian Financial Services"**
+- Colors come from the active theme CSS vars — never invent brand colors outside the theme system.
+
+### CSS Variable Rules — NEVER BREAK
+- **Never write a raw hex colour** in any component (e.g. `"#1A2540"`). Always use `var(--color-*)`.
+- **Never write a raw font string** (e.g. `"'IBM Plex Sans', sans-serif"`). Always use `FONT`, `DISPLAY`, or `MONO` from `@/lib/theme`, or `var(--font-sans)` / `var(--font-display)` / `var(--font-mono)`.
+- Inline styles that bypass CSS vars cannot respond to theme changes — they will look broken on non-default themes.
+- Exception: `AgentSwitcherRail` sidebar is intentionally hardcoded dark — do not change.
+
+### Typography Rules (matching top SaaS products: Linear, Stripe, Vercel)
+- **One font family only: Plus Jakarta Sans.** No Inter, Georgia, Times, IBM Plex, or system-ui as primary.
+- Headings use `DISPLAY` (`var(--font-display)`), `fontWeight: 800`, `letterSpacing: "-0.03em"`
+- Subheadings / section labels use `FONT`, `fontWeight: 600–700`, `letterSpacing: "-0.01em"`
+- Body text uses `FONT`, `fontWeight: 400–500`, `lineHeight: 1.6`
+- Data / timestamps / IDs use `MONO` (`var(--font-mono)`), `fontWeight: 400–500`
+- Never use the same weight for a heading and its subtitle — minimum 200 weight difference
+
+### Anti-Generic Design Guardrails
+- **Colors:** Never use default Tailwind palette names (indigo-500, blue-600, etc.). Use `var(--color-accent)`, `var(--color-success)`, etc.
+- **Shadows:** Never use flat `shadow-md`. Use themed shadows: `var(--shadow-sm)`, `var(--shadow-md)`, `var(--shadow-lg)`.
+- **Gradients:** Use `var(--bg-gradient)` for page backgrounds. Cards can use subtle accent-tinted gradients.
+- **Animations:** Only animate `transform` and `opacity`. Never `transition: all`. Use `var(--transition)` for duration.
+- **Interactive states:** Every clickable element needs hover + focus-visible + active states. Use `var(--color-surface-hover)` for hover backgrounds.
+- **Spacing:** Use consistent increments (4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56) — not arbitrary values.
+- **Depth / layering:** base (`var(--color-background)`) → elevated (`var(--color-surface)`) → floating (`var(--shadow-lg)` + border). Never all at same z-plane.
+- **Borders:** Use `var(--color-border)` for default, `var(--color-border-strong)` for emphasis. Radius from `var(--radius)`.
+- **Status colors:** Always semantic — `var(--color-success)` / `var(--color-warning)` / `var(--color-error)` / `var(--color-info)`.
+
+### Hard Rules
+- Do not mix `border` shorthand with `borderTop` / `borderLeft` etc. in React inline styles — React will warn and style breaks on re-render. Use all four sides explicitly.
+- Do not use `transition-all` or `transition: all` anywhere.
+- Do not hardcode dark/light mode logic per-component. Use `isDark` from `useThemeContext()` (not the legacy `useTheme()` from TopBar).
+- Do not load additional Google Fonts via `@import url(...)` in component CSS strings. Plus Jakarta Sans and JetBrains Mono are already loaded globally via `next/font`.
+- Do not add sections, features, or content not in the reference image.
+- Do not "improve" a reference design — match it exactly.
+
+---
+
 ## FILE OWNERSHIP MAP
 
 ```

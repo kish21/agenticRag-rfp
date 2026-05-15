@@ -346,7 +346,7 @@ function SlaCountdown({ deadline }: { deadline: string }) {
 
   const overdue = remaining === "OVERDUE";
   return (
-    <span style={{ fontSize: 11, fontFamily: "monospace", fontWeight: 700, color: overdue ? "#EF4444" : "#F59E0B", letterSpacing: "0.04em" }}>
+    <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700, color: overdue ? "#EF4444" : "#F59E0B", letterSpacing: "0.04em" }}>
       {overdue ? "⚠ OVERDUE" : `⏱ ${remaining}`}
     </span>
   );
@@ -356,9 +356,9 @@ function SlaCountdown({ deadline }: { deadline: string }) {
 
 function KpiCard({ label, value, accent }: { label: string; value: number; accent: string }) {
   return (
-    <div style={{ backgroundColor: "#111520", border: "1px solid #1E2438", borderTop: `1px solid ${accent}30`, borderRadius: 12, padding: "20px 24px", boxShadow: "0 2px 12px rgba(0,0,0,0.3)" }}>
-      <p style={{ fontSize: 11, color: "#4B5563", fontFamily: FONT, margin: "0 0 10px", letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</p>
-      <p style={{ fontSize: 36, fontWeight: 700, color: accent, fontFamily: FONT, margin: 0, lineHeight: 1, textShadow: `0 0 24px ${accent}40` }}>{value}</p>
+    <div style={{ backgroundColor: "var(--color-surface)", borderLeft: "1px solid var(--color-border)", borderRight: "1px solid var(--color-border)", borderBottom: "1px solid var(--color-border)", borderTop: `2px solid ${accent}`, borderRadius: 12, padding: "20px 24px", boxShadow: "var(--shadow-sm)" }}>
+      <p style={{ fontSize: 11, color: "var(--color-text-muted)", fontFamily: FONT, margin: "0 0 10px", letterSpacing: "0.07em", textTransform: "uppercase" }}>{label}</p>
+      <p style={{ fontSize: 36, fontWeight: 700, color: accent, fontFamily: FONT, margin: 0, lineHeight: 1 }}>{value}</p>
     </div>
   );
 }
@@ -378,8 +378,8 @@ function ApprovalRow({ run, onClick }: { run: EvalRun; onClick: () => void }) {
       style={{
         display: "flex", alignItems: "center", gap: 14,
         padding: "14px 16px",
-        backgroundColor: hovered ? "#161B2A" : "#111520",
-        border: `1px solid ${hovered ? "#2A3040" : "#1E2438"}`,
+        backgroundColor: hovered ? "var(--color-surface-hover)" : "var(--color-surface)",
+        border: `1px solid var(--color-border)`,
         borderLeft: `3px solid ${agentColour}`,
         borderRadius: 10, cursor: "pointer",
         transition: "all 140ms ease",
@@ -393,10 +393,10 @@ function ApprovalRow({ run, onClick }: { run: EvalRun; onClick: () => void }) {
 
       {/* Main info */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: "#E2E8F0", fontFamily: FONT, margin: "0 0 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)", fontFamily: FONT, margin: "0 0 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {run.rfp_title}
         </p>
-        <p style={{ fontSize: 11, color: "#4B5563", fontFamily: FONT, margin: 0 }}>
+        <p style={{ fontSize: 11, color: "var(--color-text-muted)", fontFamily: FONT, margin: 0 }}>
           <span style={{ color: agentColour, fontWeight: 500 }}>{run.department}</span>
           {" · "}Tier {run.approval_tier}
           {run.approver_role && ` — ${run.approver_role.replace(/_/g, " ")}`}
@@ -406,7 +406,7 @@ function ApprovalRow({ run, onClick }: { run: EvalRun; onClick: () => void }) {
       {/* Right side */}
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         {run.sla_deadline && <SlaCountdown deadline={run.sla_deadline} />}
-        <p style={{ fontSize: 11, color: "#374151", fontFamily: FONT, margin: "4px 0 0" }}>
+        <p style={{ fontSize: 11, color: "var(--color-text-muted)", fontFamily: FONT, margin: "4px 0 0" }}>
           {run.shortlisted_count} shortlisted
         </p>
       </div>
@@ -426,10 +426,10 @@ function RunRow({ run, onClick }: { run: EvalRun; onClick: () => void }) {
   const agentColour = AGENT_COLOUR[detectAgentType(run.department)];
 
   const STATUS_COLOUR: Record<EvalRun["status"], string> = {
-    running:          "#3B82F6",
-    pending_approval: "#F59E0B",
-    complete:         "#10B981",
-    blocked:          "#EF4444",
+    running:          "var(--color-info)",
+    pending_approval: "var(--color-warning)",
+    complete:         "var(--color-success)",
+    blocked:          "var(--color-error)",
   };
   const sc = STATUS_COLOUR[run.status];
 
@@ -440,16 +440,16 @@ function RunRow({ run, onClick }: { run: EvalRun; onClick: () => void }) {
       onMouseLeave={() => setHovered(false)}
       style={{
         display: "flex", alignItems: "center", gap: 14, padding: "12px 16px",
-        backgroundColor: hovered ? "#161B2A" : "transparent",
+        backgroundColor: hovered ? "var(--color-surface-hover)" : "transparent",
         border: "1px solid transparent",
-        borderBottom: "1px solid #181C28",
+        borderBottom: "1px solid var(--color-border)",
         cursor: "pointer", transition: "background-color 120ms",
       }}
     >
       <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: agentColour, flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 13, fontWeight: 500, color: "#CBD5E1", fontFamily: FONT, margin: "0 0 3px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.rfp_title}</p>
-        <p style={{ fontSize: 11, color: "#374151", fontFamily: FONT, margin: 0 }}>{run.department} · {run.vendor_count} vendors</p>
+        <p style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", fontFamily: FONT, margin: "0 0 3px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.rfp_title}</p>
+        <p style={{ fontSize: 11, color: "var(--color-text-muted)", fontFamily: FONT, margin: 0 }}>{run.department} · {run.vendor_count} vendors</p>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
         {run.status === "running" && (
@@ -467,9 +467,9 @@ function RunRow({ run, onClick }: { run: EvalRun; onClick: () => void }) {
 
 function SectionCard({ title, accent, children }: { title: React.ReactNode; accent: string; children: React.ReactNode }) {
   return (
-    <div style={{ backgroundColor: "#0D1018", border: "1px solid #181C28", borderTop: `1px solid ${accent}40`, borderRadius: 14, overflow: "hidden" }}>
-      <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #181C28" }}>
-        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#94A3B8", fontFamily: FONT, display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", borderTop: `2px solid ${accent}`, borderRadius: 14, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+      <div style={{ padding: "14px 20px 12px", borderBottom: "1px solid var(--color-border)" }}>
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "var(--color-text-secondary)", fontFamily: FONT, display: "flex", alignItems: "center", gap: 8 }}>
           {title}
         </p>
       </div>
@@ -536,26 +536,25 @@ export default function DashboardPage() {
         <header style={{
           height: 60, position: "sticky", top: 0, zIndex: 40,
           backgroundColor: TOPBAR_BG, backdropFilter: "blur(12px)",
-          borderBottom: "1px solid #181C28",
+          borderBottom: "1px solid var(--topbar-border)",
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "0 36px", flexShrink: 0, gap: 16,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: FONT }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-muted)", letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: FONT }}>
               {COMPANY.platformName}
             </span>
-            {/* Breadcrumb when drilled into an agent */}
             {drilledAgent && (
               <>
-                <span style={{ color: "#2D3344", fontSize: 13 }}>›</span>
+                <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>›</span>
                 <span style={{ fontSize: 12, color: AGENT_COLOUR[drilledAgent.type], fontWeight: 600, fontFamily: FONT }}>
                   {drilledAgent.name}
                 </span>
                 <button
                   onClick={() => setActiveSection("overview")}
-                  style={{ marginLeft: 8, fontSize: 11, color: "#4B5563", fontFamily: FONT, background: "none", border: "1px solid #1E2438", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}
+                  style={{ marginLeft: 8, fontSize: 11, color: "var(--color-text-muted)", fontFamily: FONT, background: "none", border: "1px solid var(--color-border)", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}
                 >
-                  ← Back to overview
+                  ← Back
                 </button>
               </>
             )}
@@ -564,13 +563,13 @@ export default function DashboardPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <button
               onClick={() => router.push("/procurement/upload")}
-              style={{ fontSize: 12, fontWeight: 600, color: "#00D4AA", fontFamily: FONT, background: "none", border: "1px solid #00D4AA40", borderRadius: 8, padding: "7px 16px", cursor: "pointer", letterSpacing: "0.02em", transition: "all 140ms" }}
+              style={{ fontSize: 12, fontWeight: 600, color: "var(--color-accent)", fontFamily: FONT, background: "none", border: "1px solid var(--color-border-strong)", borderRadius: 8, padding: "7px 16px", cursor: "pointer", letterSpacing: "0.02em", transition: "background var(--transition), border-color var(--transition)" }}
             >
               + New Evaluation
             </button>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 13, color: "#CBD5E1", fontWeight: 600, lineHeight: 1.3 }}>M. Fisher</div>
-              <div style={{ fontSize: 11, color: "#374151", lineHeight: 1.3 }}>CFO · {COMPANY.shortName}</div>
+              <div style={{ fontSize: 13, color: "var(--color-text-secondary)", fontWeight: 600, lineHeight: 1.3 }}>M. Fisher</div>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.3 }}>CFO · {COMPANY.shortName}</div>
             </div>
             <div style={{ width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg, #312E81, #4C1D95)", border: "1.5px solid #4338CA", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#C4B5FD", flexShrink: 0, fontFamily: FONT }}>
               MF
@@ -583,44 +582,44 @@ export default function DashboardPage() {
 
           {/* Page heading */}
           <div style={{ marginBottom: 40 }}>
-            <p style={{ fontSize: 11, fontWeight: 600, color: "#374151", letterSpacing: "0.16em", textTransform: "uppercase", margin: "0 0 10px", fontFamily: FONT }}>
+            <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-text-muted)", letterSpacing: "0.16em", textTransform: "uppercase", margin: "0 0 10px", fontFamily: FONT }}>
               Company overview
             </p>
-            <h1 style={{ fontSize: 38, fontWeight: 400, color: "#F8FAFC", fontFamily: SERIF, margin: "0 0 0", letterSpacing: "-0.02em", lineHeight: 1 }}>
+            <h1 style={{ fontSize: 38, fontWeight: 800, color: "var(--color-text-primary)", fontFamily: FONT, margin: 0, letterSpacing: "-0.03em", lineHeight: 1 }}>
               {COMPANY.name}
             </h1>
           </div>
 
           {/* ── Department pill strip ── */}
-          <div style={{ marginBottom: 36, padding: "22px 24px", backgroundColor: "#0D1018", border: "1px solid #181C28", borderRadius: 14 }}>
+          <div style={{ marginBottom: 36, padding: "22px 24px", backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 14, boxShadow: "var(--shadow-sm)" }}>
             <DepartmentPillStrip onDrillDown={handleDrillDown} />
           </div>
 
           {/* Thin rule */}
-          <div style={{ height: 1, background: "linear-gradient(90deg, #1E2438 0%, transparent 100%)", marginBottom: 36 }} />
+          <div style={{ height: 1, background: "linear-gradient(90deg, var(--color-border) 0%, transparent 100%)", marginBottom: 36 }} />
 
           {/* ── KPI tiles ── */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 36 }}>
-            <KpiCard label="Active evaluations" value={active.length}  accent="#3B82F6" />
-            <KpiCard label="Pending approval"   value={pending.length} accent="#F59E0B" />
-            <KpiCard label="Total runs"         value={runs.length}    accent="#475569" />
+            <KpiCard label="Active evaluations" value={active.length}  accent="var(--color-info)" />
+            <KpiCard label="Pending approval"   value={pending.length} accent="var(--color-warning)" />
+            <KpiCard label="Total runs"         value={runs.length}    accent="var(--color-accent)" />
           </div>
 
           {/* ── Pending approvals — cross-agent ── */}
           {(pending.length > 0 || !loading) && (
             <div style={{ marginBottom: 24 }}>
               <SectionCard
-                accent="#F59E0B"
+                accent="var(--color-warning)"
                 title={
                   <>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#F59E0B", display: "inline-block", boxShadow: "0 0 6px #F59E0BAA" }} />
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: "var(--color-warning)", display: "inline-block" }} />
                     Pending approval
-                    {pending.length > 0 && <span style={{ fontSize: 11, color: "#4B5563", fontWeight: 400 }}>— {pending.length} across all agents</span>}
+                    {pending.length > 0 && <span style={{ fontSize: 11, color: "var(--color-text-muted)", fontWeight: 400 }}>— {pending.length} across all agents</span>}
                   </>
                 }
               >
                 {pending.length === 0 ? (
-                  <p style={{ fontSize: 12, color: "#2D3344", fontFamily: FONT, padding: "16px 20px", margin: 0 }}>No approvals pending.</p>
+                  <p style={{ fontSize: 12, color: "var(--color-text-muted)", fontFamily: FONT, padding: "16px 20px", margin: 0 }}>No approvals pending.</p>
                 ) : (
                   <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
                     {pending.map(run => (
@@ -635,7 +634,7 @@ export default function DashboardPage() {
           {/* ── Active runs ── */}
           {active.length > 0 && (
             <div style={{ marginBottom: 24 }}>
-              <SectionCard accent="#3B82F6" title={<><span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#3B82F6", display: "inline-block" }} />Active runs</>}>
+              <SectionCard accent="var(--color-info)" title={<><span style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: "var(--color-info)", display: "inline-block" }} />Active runs</>}>
                 {active.map(run => (
                   <RunRow key={run.run_id} run={run} onClick={() => router.push(`/${run.run_id}/progress`)} />
                 ))}
@@ -645,7 +644,7 @@ export default function DashboardPage() {
 
           {/* ── All runs ── */}
           {!loading && rest.length > 0 && (
-            <SectionCard accent="#1E2438" title="All runs">
+            <SectionCard accent="var(--color-border-strong)" title="All runs">
               {rest.map(run => (
                 <RunRow key={run.run_id} run={run} onClick={() => router.push(`/${run.run_id}/results`)} />
               ))}
@@ -653,12 +652,12 @@ export default function DashboardPage() {
           )}
 
           {loading && (
-            <p style={{ textAlign: "center", color: "#2D3344", fontSize: 13, fontFamily: FONT, marginTop: 40 }}>Loading…</p>
+            <p style={{ textAlign: "center", color: "var(--color-text-muted)", fontSize: 13, fontFamily: FONT, marginTop: 40 }}>Loading…</p>
           )}
           {!loading && runs.length === 0 && (
             <div style={{ textAlign: "center", padding: "64px 0" }}>
-              <p style={{ fontSize: 15, color: "#2D3344", fontFamily: FONT, marginBottom: 8 }}>No evaluation runs yet.</p>
-              <p style={{ fontSize: 12, color: "#1E2438", fontFamily: FONT }}>Start one with &ldquo;New Evaluation&rdquo; above.</p>
+              <p style={{ fontSize: 15, color: "var(--color-text-secondary)", fontFamily: FONT, marginBottom: 8 }}>No evaluation runs yet.</p>
+              <p style={{ fontSize: 12, color: "var(--color-text-muted)", fontFamily: FONT }}>Start one with &ldquo;New Evaluation&rdquo; above.</p>
             </div>
           )}
 

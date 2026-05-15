@@ -2,7 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS } from "@/lib/theme";
 
 const API         = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -119,7 +120,7 @@ function VendorDropZone({ entries, onAdd, onRemove, onRename, isDark }: {
   isDark: boolean;
 }) {
   const P     = isDark ? PALETTE : PALETTE_LIGHT;
-  const accent = "#8B5CF6";
+  const accent = "var(--color-accent)";
   const [over, setOver] = useState(false);
   const ref   = useRef<HTMLInputElement>(null);
 
@@ -196,7 +197,7 @@ function VendorDropZone({ entries, onAdd, onRemove, onRename, isDark }: {
 }
 
 function UploadPageInner() {
-  const { isDark, toggle } = useTheme();
+  const { isDark } = useThemeContext();
   const P            = isDark ? PALETTE : PALETTE_LIGHT;
   const router       = useRouter();
   const searchParams = useSearchParams();
@@ -215,12 +216,7 @@ function UploadPageInner() {
   const [loading,       setLoading]       = useState(false);
   const [error,         setError]         = useState("");
 
-  const BG = isDark
-    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
-    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
-
   const ready = rfp.length === 1 && vendors.length >= 1 && dept.trim().length > 0 && rfpTitle.trim().length > 0;
-  const TEAL  = "#00D4AA";
 
   async function submit() {
     if (!ready || loading) return;
@@ -268,13 +264,12 @@ function UploadPageInner() {
   ];
 
   return (
-    <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
-        crumbs={[{ label: "Procurement", href: "/" }, { label: "New evaluation" }]} />
+    <div style={{ minHeight: "100vh", background: "var(--bg-gradient)", fontFamily: FONT }}>
+      <TopBar crumbs={[{ label: "Procurement", href: "/" }, { label: "New evaluation" }]} />
 
       <main style={{ maxWidth: 920, margin: "0 auto", padding: "36px 28px 80px" }}>
         <div style={{ marginBottom: 28 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: P.text.primary, margin: "0 0 6px", fontFamily: FONT }}>
+          <h1 style={{ fontSize: 26, fontWeight: 800, color: "var(--color-text-primary)", margin: "0 0 6px", fontFamily: FONT, letterSpacing: "-0.025em" }}>
             New RFP evaluation
           </h1>
           <p style={{ fontSize: 13, color: P.text.muted, margin: 0 }}>
@@ -346,7 +341,7 @@ function UploadPageInner() {
             <DropZone label="RFP Document (1 file)" hint="The original RFP issued to vendors — PDF or DOCX"
               multiple={false} files={rfp}
               onAdd={f => setRfp(f)} onRemove={i => setRfp(fs => fs.filter((_, j) => j !== i))}
-              isDark={isDark} accent={TEAL} />
+              isDark={isDark} accent="var(--color-accent)" />
 
             <VendorDropZone
               entries={vendors}
@@ -357,16 +352,16 @@ function UploadPageInner() {
 
             {error && (
               <div style={{
-                background: "#EF444414", border: "1px solid #EF4444",
+                background: "var(--color-error)14", border: "1px solid var(--color-error)",
                 borderRadius: TOKENS.radius.btn, padding: "10px 14px",
-                fontSize: 13, color: "#EF4444", fontFamily: FONT,
+                fontSize: 13, color: "var(--color-error)", fontFamily: FONT,
               }}>{error}</div>
             )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <button onClick={submit} disabled={!ready || loading} style={{
-                background: ready && !loading ? TEAL : P.border.mid,
-                color: ready && !loading ? "#071510" : P.text.muted,
+                background: ready && !loading ? "var(--color-accent)" : "var(--color-border)",
+                color: ready && !loading ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
                 border: "none", borderRadius: TOKENS.radius.btn,
                 padding: "11px 28px", fontSize: 13, fontFamily: FONT, fontWeight: 600,
                 cursor: ready && !loading ? "pointer" : "not-allowed",
@@ -410,7 +405,7 @@ function UploadPageInner() {
                 ["04", "Results — ranked shortlist, every score evidenced"],
               ].map(([n, s], i) => (
                 <div key={i} style={{ display: "flex", gap: 10, marginBottom: 9 }}>
-                  <span style={{ fontFamily: MONO, fontSize: 11, color: TEAL, flexShrink: 0 }}>{n}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--color-accent)", flexShrink: 0 }}>{n}</span>
                   <span style={{ fontSize: 12, color: P.text.secondary, fontFamily: FONT }}>{s}</span>
                 </div>
               ))}

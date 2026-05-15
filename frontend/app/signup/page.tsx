@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { COMPANY, FONT, MONO, PALETTE, PALETTE_LIGHT, TOKENS } from "@/lib/theme";
-import { useTheme } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function SignupPage() {
   const router             = useRouter();
-  const { isDark, toggle } = useTheme();
-  const P                  = isDark ? PALETTE : PALETTE_LIGHT;
+  const { isDark } = useThemeContext();
+  const P          = isDark ? PALETTE : PALETTE_LIGHT;
 
   const [step,     setStep]     = useState<1 | 2>(1);
   const [orgName,  setOrgName]  = useState("");
@@ -21,13 +21,11 @@ export default function SignupPage() {
   const [error,    setError]    = useState("");
   const [loading,  setLoading]  = useState(false);
 
-  const BG = isDark
-    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
-    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
+  const BG = "var(--bg-gradient)";
 
   const inputStyle: React.CSSProperties = {
     width: "100%", padding: "10px 12px",
-    background: isDark ? "#0D1117" : "#FFFFFF",
+    background: "var(--color-background)",
     border: `1px solid ${P.border.mid}`,
     borderRadius: 8,
     color: P.text.primary,
@@ -80,7 +78,7 @@ export default function SignupPage() {
       <div style={{
         height: 52, display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 24px", borderBottom: `1px solid ${P.border.dim}`,
-        background: isDark ? "#090C1480" : "#FAFAF980", backdropFilter: "blur(12px)",
+        background: "var(--topbar-bg)", backdropFilter: "blur(12px)",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
@@ -91,11 +89,9 @@ export default function SignupPage() {
           }}>M</div>
           <span style={{ fontSize: 14, fontWeight: 700, color: P.text.primary }}>{COMPANY.platformName}</span>
         </div>
-        <button onClick={toggle} style={{
-          background: "none", border: `1px solid ${P.border.dim}`, borderRadius: 6,
-          padding: "4px 10px", fontSize: 11, color: P.text.muted, cursor: "pointer",
-          fontFamily: FONT,
-        }}>{isDark ? "Light" : "Dark"}</button>
+        <span style={{ fontSize: 11, color: "var(--color-text-muted)", fontFamily: FONT }}>
+          {COMPANY.platformName}
+        </span>
       </div>
 
       {/* Card */}
@@ -111,7 +107,7 @@ export default function SignupPage() {
             {[1, 2].map(n => (
               <div key={n} style={{
                 flex: 1, height: 3, borderRadius: 2,
-                background: n <= step ? "#00D4AA" : P.border.dim,
+                background: n <= step ? "var(--color-accent)" : "var(--color-border)",
                 transition: "background 300ms",
               }} />
             ))}
@@ -152,14 +148,14 @@ export default function SignupPage() {
 
               {error && (
                 <div style={{
-                  background: "#EF444414", border: "1px solid #EF4444",
+                  background: "var(--color-error)14", border: "1px solid var(--color-error)",
                   borderRadius: 6, padding: "10px 12px",
-                  fontSize: 12, color: "#EF4444", fontFamily: FONT,
+                  fontSize: 12, color: "var(--color-error)", fontFamily: FONT,
                 }}>{error}</div>
               )}
 
               <button type="submit" style={{
-                background: "#00D4AA", color: "#071510", border: "none",
+                background: "var(--color-accent)", color: "var(--color-accent-foreground)", border: "none",
                 borderRadius: TOKENS.radius.btn, padding: "11px",
                 fontSize: 14, fontFamily: FONT, fontWeight: 700,
                 cursor: "pointer", width: "100%", marginTop: 4,
@@ -170,10 +166,10 @@ export default function SignupPage() {
           ) : (
             <form onSubmit={handleSignup} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{
-                background: isDark ? "#00D4AA10" : "#00D4AA18",
-                border: "1px solid #00D4AA40",
+                background: "var(--color-accent)18",
+                border: "1px solid var(--color-accent)40",
                 borderRadius: 6, padding: "8px 12px",
-                fontSize: 12, color: "#00D4AA", fontFamily: FONT,
+                fontSize: 12, color: "var(--color-accent)", fontFamily: FONT,
               }}>
                 Organisation: <strong>{orgName}</strong>
                 <span
@@ -214,15 +210,15 @@ export default function SignupPage() {
 
               {error && (
                 <div style={{
-                  background: "#EF444414", border: "1px solid #EF4444",
+                  background: "var(--color-error)14", border: "1px solid var(--color-error)",
                   borderRadius: 6, padding: "10px 12px",
-                  fontSize: 12, color: "#EF4444", fontFamily: FONT,
+                  fontSize: 12, color: "var(--color-error)", fontFamily: FONT,
                 }}>{error}</div>
               )}
 
               <button type="submit" disabled={loading} style={{
-                background: loading ? "#00D4AA80" : "#00D4AA",
-                color: "#071510", border: "none",
+                background: loading ? "var(--color-accent-hover)" : "var(--color-accent)",
+                color: "var(--color-accent-foreground)", border: "none",
                 borderRadius: TOKENS.radius.btn, padding: "11px",
                 fontSize: 14, fontFamily: FONT, fontWeight: 700,
                 cursor: loading ? "not-allowed" : "pointer", width: "100%", marginTop: 4,
@@ -236,7 +232,7 @@ export default function SignupPage() {
             Already have an account?{" "}
             <span
               onClick={() => router.push("/login")}
-              style={{ color: "#00D4AA", cursor: "pointer", fontWeight: 600 }}
+              style={{ color: "var(--color-accent)", cursor: "pointer", fontWeight: 600 }}
             >
               Sign in
             </span>

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { TopBar, useTheme } from "@/components/TopBar";
+import { TopBar } from "@/components/TopBar";
+import { useThemeContext } from "@/components/ThemeProvider";
 import { PALETTE, PALETTE_LIGHT, FONT, MONO, TOKENS } from "@/lib/theme";
 
 const API            = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -21,8 +22,8 @@ export default function OverridePage() {
   const { runId }          = useParams<{ runId: string }>();
   const searchParams       = useSearchParams();
   const router             = useRouter();
-  const { isDark, toggle } = useTheme();
-  const P                  = isDark ? PALETTE : PALETTE_LIGHT;
+  const { isDark } = useThemeContext();
+  const P          = isDark ? PALETTE : PALETTE_LIGHT;
 
   const vendorId = searchParams.get("vendor") ?? "";
 
@@ -33,9 +34,7 @@ export default function OverridePage() {
   const [error,      setError]      = useState("");
   const [success,    setSuccess]    = useState(false);
 
-  const BG = isDark
-    ? "radial-gradient(ellipse 90% 60% at 50% 0%, #111828 0%, #090C14 65%)"
-    : "linear-gradient(160deg, #ede9e0 0%, #fafaf9 55%)";
+  const BG = "var(--bg-gradient)";
 
   useEffect(() => {
     if (!vendorId) return;
@@ -89,17 +88,16 @@ export default function OverridePage() {
 
   if (success) return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
-        crumbs={[{ label: "Procurement", href: "/" }, { label: "Override" }]} />
+      <TopBar crumbs={[{ label: "Procurement", href: "/" }, { label: "Override" }]} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
         <div style={{ ...CARD, textAlign: "center", maxWidth: 400, padding: "40px 32px" }}>
           <div style={{ fontSize: 40, marginBottom: 14 }}>✓</div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#10B981", margin: "0 0 8px", fontFamily: FONT }}>Override recorded</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--color-success)", margin: "0 0 8px", fontFamily: FONT }}>Override recorded</h2>
           <p style={{ fontSize: 13, color: P.text.muted, margin: "0 0 20px", fontFamily: FONT }}>
             Saved with full audit trail — identity, timestamp, and reason logged.
           </p>
           <button onClick={() => router.push(`/${runId}/results`)} style={{
-            background: "#00D4AA", color: "#071510", border: "none",
+            background: "var(--color-accent)", color: "var(--color-accent-foreground)", border: "none",
             borderRadius: TOKENS.radius.btn, padding: "10px 24px",
             fontSize: 13, fontFamily: FONT, fontWeight: 600, cursor: "pointer", width: "100%",
           }}>
@@ -112,7 +110,7 @@ export default function OverridePage() {
 
   return (
     <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT }}>
-      <TopBar isDark={isDark} onToggle={toggle}
+      <TopBar
         crumbs={[
           { label: "Procurement", href: "/" },
           { label: "Results", href: `/${runId}/results` },
@@ -133,9 +131,9 @@ export default function OverridePage() {
               </p>
             </div>
             <span style={{
-              background: "#F59E0B18", border: "1px solid #F59E0B40",
+              background: "var(--color-warning)18", border: "1px solid var(--color-warning)40",
               borderRadius: 20, padding: "4px 12px", fontSize: 11,
-              color: "#F59E0B", fontWeight: 600, fontFamily: FONT, flexShrink: 0,
+              color: "var(--color-warning)", fontWeight: 600, fontFamily: FONT, flexShrink: 0,
             }}>
               Audit required
             </span>
@@ -154,9 +152,9 @@ export default function OverridePage() {
               </span>
               <span style={{
                 fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 12,
-                background: decision.decision_type === "shortlisted" ? "#10B98118" : "#EF444418",
-                color:      decision.decision_type === "shortlisted" ? "#10B981"   : "#EF4444",
-                border:     `1px solid ${decision.decision_type === "shortlisted" ? "#10B98140" : "#EF444440"}`,
+                background: decision.decision_type === "shortlisted" ? "var(--color-success)18" : "var(--color-error)18",
+                color:      decision.decision_type === "shortlisted" ? "var(--color-success)"   : "var(--color-error)",
+                border:     `1px solid ${decision.decision_type === "shortlisted" ? "var(--color-success)40" : "var(--color-error)40"}`,
                 fontFamily: FONT,
               }}>
                 {decision.decision_type === "shortlisted"
@@ -185,7 +183,7 @@ export default function OverridePage() {
             )}
             {decision.rejection_reasons && decision.rejection_reasons.length > 0 && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#EF4444", marginBottom: 6, fontFamily: FONT }}>Rejection reasons:</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-error)", marginBottom: 6, fontFamily: FONT }}>Rejection reasons:</div>
                 {decision.rejection_reasons.map((r, i) => (
                   <div key={i} style={{ fontSize: 12, color: P.text.secondary, fontFamily: FONT, marginBottom: 4 }}>• {r}</div>
                 ))}
@@ -220,13 +218,13 @@ export default function OverridePage() {
                     <div key={v.vendor_id} style={{
                       display: "flex", alignItems: "center", gap: 10, marginBottom: 6,
                       padding: "6px 10px", borderRadius: 6,
-                      background: v.vendor_id === vendorId ? "#10B98112" : P.bg.elevated,
-                      border: `1px solid ${v.vendor_id === vendorId ? "#10B98140" : P.border.dim}`,
+                      background: v.vendor_id === vendorId ? "var(--color-success)12" : "var(--color-surface-hover)",
+                      border: `1px solid ${v.vendor_id === vendorId ? "var(--color-success)40" : "var(--color-border)"}`,
                     }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#10B981", fontFamily: FONT, minWidth: 24 }}>#{i + 1}</span>
-                      <span style={{ fontSize: 13, color: P.text.primary, fontFamily: FONT, flex: 1 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "var(--color-success)", fontFamily: FONT, minWidth: 24 }}>#{i + 1}</span>
+                      <span style={{ fontSize: 13, color: "var(--color-text-primary)", fontFamily: FONT, flex: 1 }}>
                         {v.vendor_name || v.vendor_id}
-                        {v.vendor_id === vendorId && <span style={{ fontSize: 10, color: "#10B981", marginLeft: 6 }}>← overridden</span>}
+                        {v.vendor_id === vendorId && <span style={{ fontSize: 10, color: "var(--color-success)", marginLeft: 6 }}>← overridden</span>}
                       </span>
                       {v.total_score !== undefined && (
                         <span style={{ fontSize: 12, color: P.text.muted, fontFamily: FONT }}>{v.total_score.toFixed(1)}</span>
@@ -254,22 +252,22 @@ export default function OverridePage() {
               style={{
                 width: "100%", fontFamily: FONT, fontSize: 13,
                 padding: "10px 12px", borderRadius: 8,
-                border: `1px solid ${reasonOk ? "#10B981" : P.border.mid}`,
+                border: `1px solid ${reasonOk ? "var(--color-success)" : "var(--color-border)"}`,
                 background: P.bg.elevated, color: P.text.primary,
                 outline: "none", resize: "vertical", boxSizing: "border-box",
                 transition: "border-color 160ms",
               }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-              <span style={{ fontSize: 11, color: reasonOk ? "#10B981" : P.text.muted, fontFamily: FONT }}>
+              <span style={{ fontSize: 11, color: reasonOk ? "var(--color-success)" : "var(--color-text-muted)", fontFamily: FONT }}>
                 {reasonLen} / {MIN_REASON_LEN} minimum characters
               </span>
-              {reasonOk && <span style={{ fontSize: 11, color: "#10B981", fontFamily: FONT }}>✓ Length meets requirement</span>}
+              {reasonOk && <span style={{ fontSize: 11, color: "var(--color-success)", fontFamily: FONT }}>✓ Length meets requirement</span>}
             </div>
           </div>
 
           {error && (
-            <div style={{ background: "#EF444414", border: "1px solid #EF4444", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#EF4444", fontFamily: FONT }}>
+            <div style={{ background: "var(--color-error)14", border: "1px solid var(--color-error)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "var(--color-error)", fontFamily: FONT }}>
               {error}
             </div>
           )}
@@ -283,8 +281,8 @@ export default function OverridePage() {
               Cancel
             </button>
             <button type="submit" disabled={submitting || !reasonOk} style={{
-              flex: 1, background: submitting || !reasonOk ? P.border.mid : "#F59E0B",
-              color: submitting || !reasonOk ? P.text.muted : "#1A0A00",
+              flex: 1, background: submitting || !reasonOk ? "var(--color-border)" : "var(--color-warning)",
+              color: submitting || !reasonOk ? "var(--color-text-muted)" : "#1A0A00",
               border: "none", borderRadius: TOKENS.radius.btn,
               padding: "10px 20px", fontSize: 13, fontFamily: FONT, fontWeight: 600,
               cursor: submitting || !reasonOk ? "not-allowed" : "pointer",
