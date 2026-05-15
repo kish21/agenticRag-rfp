@@ -20,7 +20,7 @@ Sarah runs a large, decentralised organisation where each regional MD has signif
 
 ### Frustrations
 - "I found out we signed three separate contracts with the same IT vendor last quarter — different prices, different terms. No one told me."
-- "When the auditors came, we couldn't find the rationale for a £2M vendor decision from 18 months ago."
+- "When the auditors came, we couldn't find the rationale for a $2M vendor decision from 18 months ago."
 - "My regional MDs make vendor decisions in isolation. I have no idea what our total exposure to Vendor X is."
 
 ### What She Needs from the Platform
@@ -72,7 +72,7 @@ James manages 40–60 RFP evaluations per year across IT, facilities, legal serv
 **Organisation:** NHS Trust, 500-bed hospital
 
 ### Context
-Priya runs a department of 80 people and manages a technology vendor budget of £3.2M per year. She is not a procurement expert — she relies on her Procurement Manager to run evaluations. She needs to make approval decisions quickly and confidently, based on a summary she can trust. She is accountable to the Trust Board for every technology vendor decision.
+Priya runs a department of 80 people and manages a technology vendor budget of $3.2M per year. She is not a procurement expert — she relies on her Procurement Manager to run evaluations. She needs to make approval decisions quickly and confidently, based on a summary she can trust. She is accountable to the Trust Board for every technology vendor decision.
 
 ### Goals
 - Review a vendor recommendation in under 15 minutes and make an approval decision

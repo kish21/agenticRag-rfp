@@ -248,7 +248,7 @@ Truncates all PostgreSQL fact/run tables, deletes all Qdrant collections, re-see
 |---|---|
 | Ingestion | Table-aware PDF parsing (pdfplumber/pymupdf4llm) — biggest source of extraction failures |
 | Extraction | Structured output via `tool_use` API — eliminates JSON parsing fragility |
-| Decision | Configurable approval tiers per org/dept (move hardcoded £100K/£500K to `org_settings`) |
+| Decision | Configurable approval tiers per org/dept (move hardcoded $100K/$500K to `org_settings`) |
 | Explanation | Citation footnotes with page numbers in PDF report |
 
 ### Tier 2 — After First Customer
