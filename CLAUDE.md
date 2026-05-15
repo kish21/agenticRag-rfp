@@ -9,7 +9,7 @@
 
 **Product:** Enterprise Agentic AI Platform — RFP Evaluation Agent (first agent)
 **Architecture:** 9-agent multi-agent system with structured outputs and critic guardrails
-**Tech stack finalised:** LangGraph + LlamaIndex + Qdrant + Cohere Rerank + ColBERT + PostgreSQL + FastAPI + Modal + LangSmith + LangFuse + Next.js
+**Tech stack finalised:** LangGraph + LlamaIndex + Qdrant + BGE CrossEncoder reranker (swappable to Cohere/ColBERT) + PostgreSQL + FastAPI + Modal + LangSmith + LangFuse + Next.js
 
 ---
 
@@ -18,7 +18,7 @@
 ```
 1. Planner Agent       — decomposes evaluation into typed task DAG            [Skill 02]
 2. Ingestion Agent     — LlamaIndex → Qdrant, triggers Extraction at ingestion [Skill 03]
-3. Retrieval Agent     — hybrid search + Cohere Rerank v3 + HyDE               [Skill 03b]
+3. Retrieval Agent     — hybrid search + BGE CrossEncoder reranker + HyDE       [Skill 03b]
 4. Extraction Agent    — structured facts → PostgreSQL immediately              [Skill 04]
 5. Evaluation Agent    — reads PostgreSQL facts, NOT Qdrant chunks              [Skill 05]
 6. Comparator Agent    — SQL join cross-vendor, rank stability tested           [Skill 05]

@@ -49,9 +49,9 @@ class Settings(BaseSettings):
     # Options: cohere | bge | colbert | none
     # cohere  — Cohere Rerank API (paid, best quality)
     # bge     — BAAI/bge-reranker-v2-m3 (local, no API key)
-    # colbert — colbert-ir/colbertv2.0 via ragatouille (local)
+    # colbert — colbert-ir/colbertv2.0 via sentence-transformers CrossEncoder (local)
     # none    — fall back to vector score order (no reranking)
-    reranker_provider: str = "cohere"
+    reranker_provider: str = "bge"
 
     # Cohere
     cohere_api_key: str = ""
