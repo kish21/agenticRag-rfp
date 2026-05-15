@@ -129,7 +129,8 @@ The approval tier (contract value routing) is separate from RBAC role:
 |---|---|---|
 | < $100K | `department_head` | `org_settings.approval_tier_1_threshold` |
 | $100K – $500K | `regional_director` | `org_settings.approval_tier_2_threshold` |
-| > $500K | `cfo` | `org_settings.approval_tier_3_threshold` |
+| $500K – $1M | `cfo` | `org_settings.approval_tier_3_threshold` |
+| > $1M | `board` | `org_settings.approval_tier_4_threshold` |
 
 These thresholds are configurable per org via admin API. They are not hardcoded.
 

@@ -23,7 +23,7 @@ from app.agents.critic import critic_after_decision
 # tier: int, approver_role: str, max_value: float|None, sla_hours: int
 _DEFAULT_TIERS = [
     {"tier": 1, "approver_role": "department_head",  "max_value": 100_000,  "sla_hours": 24},
-    {"tier": 2, "approver_role": "procurement_lead",  "max_value": 500_000,  "sla_hours": 48},
+    {"tier": 2, "approver_role": "regional_director",   "max_value": 500_000,  "sla_hours": 48},
     {"tier": 3, "approver_role": "cfo",               "max_value": 1_000_000, "sla_hours": 72},
     {"tier": 4, "approver_role": "board",             "max_value": None,      "sla_hours": 120},
 ]

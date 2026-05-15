@@ -167,7 +167,8 @@ This document maps how RFP evaluations are conducted today across enterprise dep
    Routes to approval tier based on contract value
    Under $100K → Department Head
    $100K–$500K → Regional Director
-   Over $500K → CFO
+   $500K–$1M → CFO
+   Over $1M → Board
    ↓ < 30 seconds
 
 8. EXPLANATION AGENT

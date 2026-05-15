@@ -36,7 +36,7 @@ LLM_PROVIDER=modal         # Qwen 2.5 72B AWQ via vLLM — no per-token cost
 | Provider | Required Keys | Model Used |
 |---|---|---|
 | openai | `OPENAI_API_KEY` | `OPENAI_MODEL=gpt-4o` |
-| anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL=claude-opus-4-7` |
+| anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL=claude-sonnet-4-20250514` |
 | openrouter | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` | `OPENROUTER_MODEL=<any>` |
 | ollama | None (local) | `OLLAMA_MODEL=qwen2.5:72b`, `OLLAMA_BASE_URL=http://localhost:11434` |
 | azure | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION` | `AZURE_OPENAI_DEPLOYMENT=<deployment-name>` |

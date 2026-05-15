@@ -177,13 +177,13 @@ Update four fields above. Add one line to daily_build_log.md.
 
 ---
 
-## VERIFIED PACKAGE VERSIONS — April 2026 (grounded from PyPI)
+## VERIFIED PACKAGE VERSIONS — May 2026 (grounded from requirements.txt)
 
 ```
 openai==2.33.0          langchain==1.2.16       langgraph==1.1.10
-langsmith==0.7.37       langfuse==4.5.1         llama-index-core==0.12.6
-qdrant-client==1.14.2   cohere==5.21.1          sentence-transformers==4.1.0
-fastapi==0.136.1        pydantic==2.11.3        sqlalchemy==2.0.40
+langsmith==0.8.0        langfuse==4.5.1         llama-index-core==0.14.21
+qdrant-client==1.17.1   cohere==5.21.1          sentence-transformers==4.1.0
+fastapi==0.136.1        pydantic==2.13.3        sqlalchemy==2.0.40
 uvicorn[standard]==0.34.3  psycopg2-binary==2.9.10  httpx==0.28.1
 ```
 
