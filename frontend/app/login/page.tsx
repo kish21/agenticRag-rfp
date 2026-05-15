@@ -88,6 +88,7 @@ export default function LoginPage() {
                 Email
               </label>
               <input
+                suppressHydrationWarning
                 type="email" required autoFocus
                 value={email} onChange={e => setEmail(e.target.value)}
                 placeholder="you@company.com"
@@ -109,6 +110,7 @@ export default function LoginPage() {
                 Password
               </label>
               <input
+                suppressHydrationWarning
                 type="password" required
                 value={password} onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••"

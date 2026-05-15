@@ -127,6 +127,7 @@ export default function SignupPage() {
               <div>
                 <label style={labelStyle}>ORGANISATION NAME</label>
                 <input
+                  suppressHydrationWarning
                   type="text" required autoFocus
                   value={orgName} onChange={e => setOrgName(e.target.value)}
                   placeholder="Acme Financial Group"
@@ -181,6 +182,7 @@ export default function SignupPage() {
               <div>
                 <label style={labelStyle}>EMAIL</label>
                 <input
+                  suppressHydrationWarning
                   type="email" required autoFocus
                   value={email} onChange={e => setEmail(e.target.value)}
                   placeholder="you@company.com"
@@ -191,6 +193,7 @@ export default function SignupPage() {
               <div>
                 <label style={labelStyle}>PASSWORD</label>
                 <input
+                  suppressHydrationWarning
                   type="password" required
                   value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="At least 8 characters"
@@ -201,6 +204,7 @@ export default function SignupPage() {
               <div>
                 <label style={labelStyle}>CONFIRM PASSWORD</label>
                 <input
+                  suppressHydrationWarning
                   type="password" required
                   value={confirm} onChange={e => setConfirm(e.target.value)}
                   placeholder="••••••••"
