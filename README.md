@@ -31,6 +31,21 @@ This platform replaces the manual, siloed process with a 9-agent AI pipeline tha
 
 ---
 
+## Documentation
+
+Full product lifecycle documentation — 32 documents across 6 phases:
+
+| Phase | Documents |
+|---|---|
+| [**Strategy**](docs/product/phase1_strategy/) | [Business Case](docs/product/phase1_strategy/01_business_case.md) · [Stakeholder Map](docs/product/phase1_strategy/02_stakeholder_map.md) · [Current State Process](docs/product/phase1_strategy/03_current_state_process.md) · [User Personas](docs/product/phase1_strategy/04_user_personas.md) · [Competitive Analysis](docs/product/phase1_strategy/05_competitive_analysis.md) |
+| [**Requirements**](docs/product/phase2_requirements/) | [PRD](docs/product/phase2_requirements/01_prd.md) · [Functional Requirements](docs/product/phase2_requirements/02_functional_requirements.md) · [Non-Functional Requirements](docs/product/phase2_requirements/03_non_functional_requirements.md) · [OKRs](docs/product/phase2_requirements/04_okrs.md) · [KRAs](docs/product/phase2_requirements/05_kras.md) · [Data Requirements](docs/product/phase2_requirements/06_data_requirements.md) |
+| [**Architecture**](docs/product/phase3_architecture/) | [System Architecture](docs/product/phase3_architecture/01_system_architecture.md) · [Agent Tech Stack](docs/product/phase3_architecture/02_agent_tech_stack.md) · [Configuration Guide](docs/product/phase3_architecture/03_configuration_guide.md) · [Security Model](docs/product/phase3_architecture/04_security_trust_model.md) · [5 ADRs](docs/product/phase3_architecture/adrs/) |
+| [**Build**](docs/product/phase4_build/) | [Evaluation Framework](docs/product/phase4_build/01_evaluation_framework.md) · [Prompt Registry](docs/product/phase4_build/02_prompt_registry.md) · [Observability Plan](docs/product/phase4_build/03_observability_plan.md) · [Test Plan](docs/product/phase4_build/04_test_plan.md) |
+| [**Deployment**](docs/product/phase5_deployment/) | [Deployment Runbook](docs/product/phase5_deployment/01_deployment_runbook.md) · [Incident Response](docs/product/phase5_deployment/02_incident_response.md) · [AI Governance](docs/product/phase5_deployment/03_ai_governance.md) · [RBAC Design](docs/product/phase5_deployment/04_rbac_design.md) · [Multi-Cloud Guide](docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md) |
+| [**Post-Launch**](docs/product/phase6_post_launch/) | [Retrospective](docs/product/phase6_post_launch/01_retrospective.md) · [Product Roadmap](docs/product/phase6_post_launch/02_product_roadmap.md) · [Capacity Planning](docs/product/phase6_post_launch/03_capacity_planning.md) · [Technical Assessment](docs/product/phase6_post_launch/04_project_evaluation.md) |
+
+---
+
 ## Architecture
 
 ```
@@ -86,8 +101,8 @@ This platform replaces the manual, siloed process with a 9-agent AI pipeline tha
 | Category | Technology |
 |---|---|
 | **Orchestration** | LangGraph 1.1.10 |
-| **Document parsing** | LlamaIndex 0.12.6 (HierarchicalNodeParser + SentenceWindowNodeParser) |
-| **Vector store** | Qdrant 1.14 — dense + sparse (BM25), Reciprocal Rank Fusion |
+| **Document parsing** | LlamaIndex 0.14.21 (HierarchicalNodeParser + SentenceWindowNodeParser) |
+| **Vector store** | Qdrant 1.17 — dense + sparse (BM25), Reciprocal Rank Fusion |
 | **Reranker** | BAAI/bge-reranker-v2-m3 (local CrossEncoder) — swappable to Cohere |
 | **Retrieval** | HyDE + query rewriting + hybrid search |
 | **Structured storage** | PostgreSQL 15 + SQLAlchemy 2.0 + Row-Level Security |
@@ -95,7 +110,7 @@ This platform replaces the manual, siloed process with a 9-agent AI pipeline tha
 | **Embeddings** | Configurable — OpenAI text-embedding-3-large, Azure, local BGE, Modal A10G |
 | **Burst compute** | Modal (PDF OCR on CPU, embeddings on A10G, Qwen 2.5 72B AWQ on A100) |
 | **API** | FastAPI 0.136 + Uvicorn |
-| **Schema validation** | Pydantic 2.11 throughout — every agent output is a typed model |
+| **Schema validation** | Pydantic 2.13 throughout — every agent output is a typed model |
 | **Frontend** | Next.js |
 | **Observability** | LangSmith (LLM tracing) + LangFuse (agent logging) — swappable |
 | **Auth** | JWT with org_id scoping |
@@ -162,21 +177,6 @@ Step-by-step CLI deployment guides for all platforms:
 | Amazon Web Services (ECS Fargate) | [docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md#profile-3--amazon-web-services-aws](docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md) |
 | Google Cloud Platform (Cloud Run) | [docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md#profile-4--google-cloud-platform-gcp](docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md) |
 | Air-gapped / On-premises (Ollama, no internet) | [docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md#profile-5--air-gapped--on-premises](docs/product/phase5_deployment/05_multi_cloud_deployment_guide.md) |
-
----
-
-## Documentation
-
-Full product lifecycle documentation — 32 documents across 6 phases — is in [`docs/product/`](docs/product/INDEX.md):
-
-| Phase | Contents |
-|---|---|
-| Strategy | Business case, stakeholder map, user personas, competitive analysis |
-| Requirements | PRD, functional & non-functional requirements, OKRs, KRAs, data requirements |
-| Architecture | System architecture, agent tech stack, configuration guide, security model, 5 ADRs |
-| Build | Evaluation framework, prompt registry, observability plan, test plan |
-| Deployment | Deployment runbook, incident response, AI governance, RBAC design, multi-cloud guide |
-| Post-Launch | Retrospective, product roadmap, capacity planning, technical assessment |
 
 ---
 
