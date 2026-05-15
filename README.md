@@ -31,6 +31,36 @@ This platform replaces the manual, siloed process with a 9-agent AI pipeline tha
 
 ---
 
+## Build Status
+
+| Area | Component | Status |
+|---|---|---|
+| **Agent Pipeline** | All 9 agents (Planner → Ingestion → Retrieval → Extraction → Evaluation → Comparator → Decision → Explanation → Critic) | ✅ Built |
+| | Critic topology — wired after every agent, enforced at graph compile time | ✅ Built |
+| | Provider abstraction — LLM, embedding, reranker, observability via `.env` | ✅ Built |
+| | Grounding enforcement + whitespace normalisation fix | ✅ Built |
+| | Human override with immutable audit trail | ✅ Built |
+| | Rate limiter with exponential backoff | ✅ Built |
+| | Per-org settings (org_settings) with 60s TTL cache | ✅ Built |
+| **Storage** | Qdrant hybrid search — dense + sparse BM25 + Reciprocal Rank Fusion | ✅ Built |
+| | PostgreSQL structured facts + Row-Level Security | ✅ Built |
+| | Full lineage: decision → fact → source chunk (source_chunk_id) | ✅ Built |
+| **Frontend** | CEO spend dashboard — active RFPs, committed spend, duplicate alerts, pricing anomalies | 🚧 Partial |
+| | Procurement UI — upload, trigger evaluation, review extractions, apply overrides | 🚧 Partial |
+| | Admin console — tenant management, RBAC, org settings | 🚧 Partial |
+| | Real-time WebSocket push (currently polling refresh) | 📋 Planned |
+| | Mobile-responsive layout | 📋 Planned |
+| **Deployment** | Local dev — Docker Compose (Qdrant + PostgreSQL) | ✅ Built |
+| | Modal serverless GPU — PDF OCR, batch embeddings, Qwen 2.5 72B on A100 | ✅ Built |
+| | Cloud deployment — Azure / AWS / GCP / Air-gapped (runbooks written, not yet executed) | 📋 Planned |
+| | CI/CD pipeline | 📋 Planned |
+| **Quality** | Contract tests + checkpoint runner | ✅ Built |
+| | Unit and integration test suite | 🚧 Partial |
+| | Held-out retrieval and extraction benchmarks (annotated ground truth) | 📋 Planned |
+| | Load testing (locust / k6) | 📋 Planned |
+
+---
+
 ## Documentation
 
 Full product lifecycle documentation — 32 documents across 6 phases:
