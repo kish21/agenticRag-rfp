@@ -11,6 +11,7 @@ Supported providers:
   modal       — Qwen 2.5 72B via vLLM on Modal A100 (OpenAI-compatible endpoint)
                 Set MODAL_LLM_ENDPOINT after: modal deploy app_modal.py --env rag
 """
+import time
 from typing import Optional
 from langsmith import traceable
 from app.config import settings
@@ -128,6 +129,9 @@ async def call_llm(
     provider = settings.llm_provider.lower()
     client = get_llm_client()
 
+    from app.core.cost_tracker import record_llm_call
+    model_name = get_model_name()
+
     if provider == "anthropic":
         system_msg = next(
             (m["content"] for m in messages if m["role"] == "system"), None
@@ -135,11 +139,18 @@ async def call_llm(
         user_msgs = [m for m in messages if m["role"] != "system"]
 
         async def _call():
+            t0 = time.monotonic()
             resp = await client.messages.create(
-                model=get_model_name(),
+                model=model_name,
                 max_tokens=max_tokens,
                 system=system_msg or "You are a helpful assistant.",
                 messages=user_msgs,
+            )
+            record_llm_call(
+                model=model_name,
+                prompt_tokens=resp.usage.input_tokens,
+                completion_tokens=resp.usage.output_tokens,
+                latency_ms=int((time.monotonic() - t0) * 1000),
             )
             return resp.content[0].text
 
@@ -156,7 +167,15 @@ async def call_llm(
             kwargs["response_format"] = response_format
 
         async def _call():
+            t0 = time.monotonic()
             resp = await client.chat.completions.create(**kwargs)
+            if resp.usage:
+                record_llm_call(
+                    model=model_name,
+                    prompt_tokens=resp.usage.prompt_tokens,
+                    completion_tokens=resp.usage.completion_tokens,
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                )
             return resp.choices[0].message.content
 
         return await call_with_backoff(_call)
@@ -164,7 +183,7 @@ async def call_llm(
     else:
         # OpenAI, OpenRouter, Ollama, Modal — all use chat.completions.create
         kwargs = dict(
-            model=get_model_name(),
+            model=model_name,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -175,7 +194,15 @@ async def call_llm(
             kwargs["response_format"] = response_format
 
         async def _call():
+            t0 = time.monotonic()
             resp = await client.chat.completions.create(**kwargs)
+            if resp.usage:
+                record_llm_call(
+                    model=model_name,
+                    prompt_tokens=resp.usage.prompt_tokens,
+                    completion_tokens=resp.usage.completion_tokens,
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                )
             return resp.choices[0].message.content
 
         return await call_with_backoff(_call)

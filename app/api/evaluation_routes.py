@@ -635,6 +635,9 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         audit(org_id=org_id, run_id=run_id, event_type="run.blocked",
               actor="system", detail={"agent": agent, "error": str(err)})
 
+    from app.core.cost_tracker import set_run_context, get_run_cost as _get_cost, clear_run_cost
+    _cost_ctx = set_run_context(run_id=run_id, agent="pipeline")
+    _cost_ctx.__enter__()
     try:
         # Load everything from DB — no memory store
         engine = get_engine()
@@ -821,6 +824,25 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         import traceback
         _fail("pipeline", exc)
         print(f"[pipeline error] run={run_id}: {traceback.format_exc()}")
+    finally:
+        _cost_ctx.__exit__(None, None, None)
+        # Persist cost totals to DB for historical access
+        acc = _get_cost(run_id)
+        if acc is not None:
+            try:
+                _eng = get_engine()
+                with _eng.begin() as _conn:
+                    _conn.execute(
+                        sa.text("""
+                            UPDATE evaluation_runs
+                            SET llm_cost_usd = :cost, llm_tokens_total = :tokens
+                            WHERE run_id = CAST(:rid AS uuid)
+                        """),
+                        {"cost": acc.total_cost_usd, "tokens": acc.total_tokens, "rid": run_id},
+                    )
+            except Exception:
+                pass
+            clear_run_cost(run_id)
 
 
 # ── SSE stream ─────────────────────────────────────────────────────────────────
@@ -1060,4 +1082,37 @@ async def get_audit_trail(run_id: str, user: TokenData = Depends(get_current_use
             }
             for r in rows
         ],
+    }
+
+
+# ── GET /{runId}/cost ─────────────────────────────────────────────────────────
+
+@router.get("/{run_id}/cost")
+async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_current_user)):
+    """Return LLM cost and token usage for a run (live if in-progress, persisted if completed)."""
+    _db_get_run(run_id, user.org_id)   # 404/403 guard
+
+    from app.core.cost_tracker import get_run_cost as _get_cost
+    acc = _get_cost(run_id)
+    if acc is not None:
+        return {**acc.summary(), "source": "live"}
+
+    # Run not in memory — return persisted totals from DB
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text("""
+                SELECT llm_cost_usd, llm_tokens_total
+                FROM evaluation_runs
+                WHERE run_id = CAST(:rid AS uuid)
+                  AND org_id = CAST(:oid AS uuid)
+            """),
+            {"rid": run_id, "oid": user.org_id},
+        ).fetchone()
+    return {
+        "run_id": run_id,
+        "total_cost_usd": float(row[0]) if row[0] is not None else None,
+        "total_tokens": row[1],
+        "by_agent": {},
+        "source": "persisted",
     }
