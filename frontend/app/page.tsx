@@ -261,7 +261,7 @@ export default function HomePage() {
           {/* Error */}
           {error && (
             <div style={{ padding: "32px 20px" }}>
-              <p style={{ fontFamily: FONT, fontSize: 14, color: "var(--color-error)" }}>{error}</p>
+              <p role="alert" style={{ fontFamily: FONT, fontSize: 14, color: "var(--color-error)" }}>{error}</p>
             </div>
           )}
 
