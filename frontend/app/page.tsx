@@ -7,7 +7,7 @@ import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { ThemePicker } from "@/components/ThemePicker";
 import { useBreakpoint } from "@/lib/hooks";
-import { api, getToken, getTokenPayload, clearToken } from "@/lib/api";
+import { api, getUserInfo, clearUserInfo, isLoggedIn } from "@/lib/api";
 
 interface EvalRun {
   run_id: string;
@@ -51,10 +51,10 @@ export default function HomePage() {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!getToken()) { router.push("/login"); return; }
+    if (!isLoggedIn()) { router.push("/login"); return; }
 
-    const payload = getTokenPayload();
-    if (payload) setUserName(String(payload.sub ?? payload.email ?? ""));
+    const userInfo = getUserInfo();
+    if (userInfo) setUserName(userInfo.email);
 
     api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
       on401: () => router.push("/login"),
@@ -64,8 +64,9 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   }, [router]);
 
-  function signOut() {
-    clearToken();
+  async function signOut() {
+    await api.post("/api/v1/auth/logout").catch(() => {});
+    clearUserInfo();
     router.push("/login");
   }
 

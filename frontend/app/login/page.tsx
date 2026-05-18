@@ -6,7 +6,7 @@ import Link from "next/link";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
-import { api, setToken, getToken } from "@/lib/api";
+import { api, setUserInfo, isLoggedIn } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,7 +21,7 @@ export default function LoginPage() {
   const [focusedField, setFocusedField] = useState<"email" | "password" | null>(null);
 
   useEffect(() => {
-    if (getToken()) router.push("/");
+    if (isLoggedIn()) router.push("/");
   }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -29,12 +29,12 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const data = await api.postForm<{ access_token: string }>(
+      // Backend sets HttpOnly cookie; response body has role/org_id for display
+      const data = await api.post<{ role: string; org_id: string }>(
         "/api/v1/auth/token",
-        { username: email, password },
-        { skipAuth: true }
+        { body: { email, password } }
       );
-      setToken(data.access_token);
+      setUserInfo({ email, role: data.role, org_id: data.org_id });
       router.push("/");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Invalid email or password.");

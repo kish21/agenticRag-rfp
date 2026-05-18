@@ -1,40 +1,49 @@
 /**
  * Centralized API client for Meridian AI Platform.
  *
- * All requests to /api/v1/* go through here.
- * Handles: auth token injection, 401 redirect, JSON parsing, error normalization.
+ * Auth: HttpOnly cookie `meridian_session` set by the backend on login.
+ * The browser sends it automatically with every same-origin request.
+ * No JWT is stored in JavaScript — XSS cannot steal it.
+ *
+ * For displaying user info (email, role) the login/signup response body
+ * is stored as `meridian_user` in localStorage — this is non-sensitive.
  *
  * Usage:
  *   import { api } from "@/lib/api"
  *   const data = await api.get("/api/v1/evaluate/list")
- *   const result = await api.post("/api/v1/evaluate/start", { body: formData })
+ *   await api.post("/api/v1/evaluate/start", { body: { ... } })
  */
 
 const LOGIN_PATH = "/login";
 
-// ── Token helpers ────────────────────────────────────────────────────────────
+// ── User info helpers (non-sensitive display data only) ──────────────────────
 
-export function getToken(): string | null {
+export interface UserInfo {
+  email: string;
+  role: string;
+  org_id: string;
+}
+
+export function getUserInfo(): UserInfo | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("access_token");
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem("access_token", token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem("access_token");
-}
-
-export function getTokenPayload(): Record<string, unknown> | null {
-  const token = getToken();
-  if (!token) return null;
   try {
-    return JSON.parse(atob(token.split(".")[1]));
+    const raw = localStorage.getItem("meridian_user");
+    return raw ? (JSON.parse(raw) as UserInfo) : null;
   } catch {
     return null;
   }
+}
+
+export function setUserInfo(info: UserInfo): void {
+  localStorage.setItem("meridian_user", JSON.stringify(info));
+}
+
+export function clearUserInfo(): void {
+  localStorage.removeItem("meridian_user");
+}
+
+export function isLoggedIn(): boolean {
+  return getUserInfo() !== null;
 }
 
 // ── API error ────────────────────────────────────────────────────────────────
@@ -54,9 +63,7 @@ export class ApiError extends Error {
 
 interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
-  /** Skip attaching the Authorization header (used for login/signup) */
-  skipAuth?: boolean;
-  /** Called when a 401 is received — defaults to window.location redirect */
+  /** Called when a 401 is received — defaults to redirect to /login */
   on401?: () => void;
 }
 
@@ -64,15 +71,9 @@ async function request<T = unknown>(
   url: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { body, skipAuth, on401, ...init } = options;
+  const { body, on401, ...init } = options;
 
   const headers = new Headers(init.headers);
-
-  // Attach auth token unless explicitly skipped
-  if (!skipAuth) {
-    const token = getToken();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-  }
 
   // Serialize body
   let serializedBody: BodyInit | undefined;
@@ -87,11 +88,12 @@ async function request<T = unknown>(
     ...init,
     headers,
     body: serializedBody,
+    credentials: "same-origin",   // sends HttpOnly cookie automatically
   });
 
-  // Handle 401 — redirect to login
+  // Handle 401 — session expired or not logged in
   if (res.status === 401) {
-    clearToken();
+    clearUserInfo();
     if (on401) {
       on401();
     } else if (typeof window !== "undefined") {
@@ -107,7 +109,7 @@ async function request<T = unknown>(
 
   if (!res.ok) {
     const message =
-      (isJson && typeof data === "object" && data !== null && "detail" in data)
+      isJson && typeof data === "object" && data !== null && "detail" in data
         ? String((data as { detail: unknown }).detail)
         : `Request failed (${res.status})`;
     throw new ApiError(res.status, message, data);
@@ -139,7 +141,7 @@ export const api = {
     return request<T>(url, { ...options, method: "DELETE" });
   },
 
-  /** POST with application/x-www-form-urlencoded — used for OAuth2 token endpoint */
+  /** POST with application/x-www-form-urlencoded */
   postForm<T = unknown>(url: string, params: Record<string, string>, options?: Omit<RequestOptions, "body">) {
     return request<T>(url, {
       ...options,

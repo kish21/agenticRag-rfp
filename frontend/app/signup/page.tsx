@@ -6,7 +6,7 @@ import Link from "next/link";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
-import { api } from "@/lib/api";
+import { api, setUserInfo } from "@/lib/api";
 
 const INDUSTRIES = [
   "Financial Services",
@@ -56,11 +56,13 @@ export default function SignupPage() {
 
     setLoading(true);
     try {
-      await api.post("/api/v1/auth/signup", {
-        body: { org_name: orgName, industry, email, password },
-        skipAuth: true,
-      });
-      router.push("/login?registered=1");
+      // Backend sets HttpOnly cookie; response body has role/org_id for display
+      const data = await api.post<{ role: string; org_id: string }>(
+        "/api/v1/auth/signup",
+        { body: { org_name: orgName, industry, email, password } }
+      );
+      setUserInfo({ email, role: data.role, org_id: data.org_id });
+      router.push("/");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Registration failed. Please try again.");
     } finally {
