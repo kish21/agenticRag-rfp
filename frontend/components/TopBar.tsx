@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
-import { COMPANY, TOKENS, type ThemeId, DEFAULT_THEME, THEMES, applyThemeVars } from "@/lib/theme";
+import { COMPANY, TOKENS } from "@/lib/theme";
 import { ThemePicker } from "./ThemePicker";
 
 export interface Crumb { label: string; href?: string }
@@ -88,30 +87,3 @@ export function TopBar({ crumbs, right }: TopBarProps) {
   );
 }
 
-// ── Theme hook — backwards-compatible, now drives CSS variables ───────────────
-
-const STORAGE_KEY = "meridian-theme-v2";
-
-export function useTheme() {
-  const [themeId, setThemeId] = useState<ThemeId>(DEFAULT_THEME);
-  const [isDark, setIsDark] = useState(THEMES[DEFAULT_THEME].isDark);
-
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as ThemeId | null;
-    const id = stored && stored in THEMES ? stored : DEFAULT_THEME;
-    setThemeId(id);
-    setIsDark(THEMES[id].isDark);
-    applyThemeVars(id);
-  }, []);
-
-  function toggle() {
-    // Legacy toggle — cycles between slate (light) and midnight (dark)
-    const next: ThemeId = isDark ? "slate" : "midnight";
-    setThemeId(next);
-    setIsDark(!isDark);
-    applyThemeVars(next);
-    localStorage.setItem(STORAGE_KEY, next);
-  }
-
-  return { isDark, toggle, themeId };
-}
