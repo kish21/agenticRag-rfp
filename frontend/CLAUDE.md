@@ -157,3 +157,64 @@ Before writing code, answer these:
 | Informational       | `var(--color-info)`    |
 
 Never use raw green/red/yellow for status states.
+
+---
+
+## Page Delivery Checklist — MUST PASS BEFORE MARKING ANY PAGE DONE
+
+Run this before committing every page. Every box must be ticked.
+
+```
+□ frontend-design skill invoked before writing code
+□ anti-ai-ui audit passed (all 12 checklist items clean)
+□ useBreakpoint imported and used from @/lib/hooks
+□ mobile layout tested at 375px — no overflow, no cramped content
+□ tablet layout tested at 768px — correct collapse behaviour
+□ all <input> elements have an associated <label> with htmlFor
+□ error states rendered with role="alert" and var(--color-error)
+□ loading state shown for every async fetch (spinner or "Loading…")
+□ auth guard present on protected pages (redirect to /login if no token)
+□ no raw hex colours outside intentional hardcoded dark panels
+□ no Tailwind palette names (blue-600, indigo-500, etc.)
+□ no transition:all — only transform/opacity animated
+□ python frontend_drift_detector.py exits 0 on this file
+□ python frontend_checkpoint_runner.py run ROUTES passes for this page
+```
+
+---
+
+## Checkpoint & Drift Detection
+
+Two automated quality tools mirror the backend checkpoint system:
+
+```bash
+python frontend_drift_detector.py              # scan all files for violations
+python frontend_checkpoint_runner.py status    # show all 40 checkpoint states
+python frontend_checkpoint_runner.py run       # run all checks
+python frontend_checkpoint_runner.py run AUTH  # run a single category
+```
+
+**Categories:** BUILD · ROUTES · THEME · RESPONSIVE · AUTH · FORMS · A11Y · DOMAIN · SECURITY · PERF
+
+Run both after every page delivery and before every git commit.
+
+---
+
+## User Roles — Enterprise RFP Governance
+
+Three roles exist in the JWT payload. The UI must respect them:
+
+| Role | Display name | Access |
+|---|---|---|
+| `procurement_manager` | Procurement | Full workflow — upload, evaluate, approve, override |
+| `executive` | Executive | Read-only — results, compare, reports only |
+| `org_admin` | Admin | Org settings, user management, no evaluation workflow |
+
+### Rules
+- **TopBar** must show the current user's email and role badge
+- **Executive** visiting `/procurement/upload` → redirect to `/` with an info message
+- **Admin-only routes** (`/admin/*`) must check `role === "org_admin"` before rendering content
+- JWT payload structure: `{ sub: email, role: "procurement_manager"|"executive"|"org_admin", org_id: "..." }`
+- Parse role from token: `JSON.parse(atob(token.split('.')[1])).role`
+
+### Phase — implement role guards after all core pages are built
