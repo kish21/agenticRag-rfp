@@ -11,6 +11,23 @@
 
 ---
 
+## Responsive Design — MANDATORY ON EVERY PAGE
+
+- **Every page** must import and use `useBreakpoint()` from `@/lib/hooks`
+- **Breakpoints** (defined in `lib/hooks.ts`):
+  - `mobile` → < 640px
+  - `tablet` → 640px – 1023px
+  - `desktop` → ≥ 1024px
+- **Split-panel layouts** (login, signup, any two-column layout) must collapse to single-column on `mobile` and `tablet` — left panel hidden entirely
+- **Never** use a fixed pixel width > 360px without a mobile fallback
+- **Padding tokens** by breakpoint:
+  - desktop: `48px 32px`
+  - tablet: `32px 24px`
+  - mobile: `24px 20px`
+- **Compact logo header** replaces the left brand panel on mobile/tablet — use the inline logo pattern from login/signup
+
+---
+
 ## Stack
 
 - **Framework:** Next.js 16 App Router, React 19, Tailwind CSS v4

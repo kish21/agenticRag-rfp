@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
+import { useBreakpoint } from "@/lib/hooks";
 
 const INDUSTRIES = [
   "Financial Services",
@@ -25,6 +26,8 @@ type Step = 1 | 2;
 export default function SignupPage() {
   const router = useRouter();
   const { isDark } = useThemeContext();
+  const bp = useBreakpoint();
+  const isDesktop = bp === "desktop";
 
   const [step, setStep] = useState<Step>(1);
   const [orgName, setOrgName] = useState("");
@@ -106,11 +109,11 @@ export default function SignupPage() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", fontFamily: FONT }}>
 
-      {/* ── Left: Brand panel — same as Login for continuity */}
-      <div
+      {/* ── Left: Brand panel — desktop only */}
+      {isDesktop && <div
         style={{
           width: "45%",
-          minWidth: 340,
+          minWidth: 380,
           backgroundColor: "#090E1A",
           display: "flex",
           flexDirection: "column",
@@ -206,17 +209,37 @@ export default function SignupPage() {
             SOC 2 · ISO 27001 · GDPR
           </p>
         </div>
-      </div>
+      </div>}
 
-      {/* ── Right: Form panel */}
+      {/* ── Right / full-width form panel */}
       <div
         style={{
           flex: 1, display: "flex", flexDirection: "column",
           justifyContent: "center", alignItems: "center",
-          background: "var(--bg-gradient)", padding: "48px 32px",
+          background: "var(--bg-gradient)",
+          padding: isDesktop ? "48px 32px" : bp === "tablet" ? "32px 24px" : "24px 20px",
         }}
       >
-        <div style={{ width: "100%", maxWidth: 380 }}>
+        <div style={{ width: "100%", maxWidth: isDesktop ? 380 : 440 }}>
+
+          {/* Compact logo — mobile/tablet only */}
+          {!isDesktop && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 40 }}>
+              <div
+                style={{
+                  width: 28, height: 28,
+                  border: "1.5px solid var(--color-accent)",
+                  borderRadius: 5,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <div style={{ width: 10, height: 10, backgroundColor: "var(--color-accent)", borderRadius: 2 }} />
+              </div>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 14, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--color-text-primary)" }}>
+                Meridian AI
+              </span>
+            </div>
+          )}
 
           {/* Step indicator — two thin bars, not numbered circles */}
           <div style={{ display: "flex", gap: 6, marginBottom: 32 }}>
