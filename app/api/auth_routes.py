@@ -7,17 +7,35 @@ POST /api/v1/auth/verify — verify token (used by frontend)
 POST /api/v1/auth/invite — company_admin invites a team member
 GET  /api/v1/auth/me     — current user record from DB
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Response, status, Depends
 from pydantic import BaseModel, EmailStr
 import sqlalchemy as sa
 from app.core.auth import (
     verify_password, create_access_token,
     hash_password, Token, TokenData,
 )
-from app.core.dependencies import get_current_user, get_db
+from app.core.dependencies import get_current_user, get_db, COOKIE_NAME
 from app.config import settings
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+COOKIE_MAX_AGE = settings.jwt_expiry_minutes * 60
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,        # set to True in production behind HTTPS
+        path="/",
+        max_age=COOKIE_MAX_AGE,
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(key=COOKIE_NAME, path="/")
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -70,7 +88,7 @@ def _get_user_by_email(conn, email: str) -> dict | None:
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def signup(req: SignupRequest, db=Depends(get_db)):
+async def signup(req: SignupRequest, response: Response, db=Depends(get_db)):
     """
     Create a new organisation and its first owner user in one transaction.
     Returns a JWT for the new owner.
@@ -129,16 +147,18 @@ async def signup(req: SignupRequest, db=Depends(get_db)):
             {"org_id": org_id},
         )
 
-    return create_access_token(
+    token = create_access_token(
         email=req.email,
         org_id=org_id,
         role="company_admin",
         dept_id=None,
     )
+    _set_auth_cookie(response, token.access_token)
+    return token
 
 
 @router.post("/token", response_model=Token)
-async def login(req: LoginRequest, db=Depends(get_db)):
+async def login(req: LoginRequest, response: Response, db=Depends(get_db)):
     """Exchange email + password for a JWT token."""
     user = _get_user_by_email(db, req.email)
 
@@ -158,12 +178,14 @@ async def login(req: LoginRequest, db=Depends(get_db)):
     if not user["is_active"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
-    return create_access_token(
+    token = create_access_token(
         email=user["email"],
         org_id=user["org_id"],
         role=user["role"],
         dept_id=user["dept_id"],
     )
+    _set_auth_cookie(response, token.access_token)
+    return token
 
 
 def _ensure_dev_user(db) -> None:
@@ -207,6 +229,13 @@ def _ensure_dev_user(db) -> None:
             """),
             {"org_id": org_id},
         )
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    """Clears the HttpOnly session cookie."""
+    _clear_auth_cookie(response)
+    return {"message": "Logged out"}
 
 
 @router.post("/verify")

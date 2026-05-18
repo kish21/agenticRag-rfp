@@ -11,31 +11,49 @@ Usage in route:
         ...
 """
 from typing import Generator
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from app.core.auth import decode_token, TokenData
 from app.db.fact_store import get_engine
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
+COOKIE_NAME = "meridian_session"
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> TokenData:
     """
-    Extracts and validates the bearer token from the Authorization header.
-    Returns TokenData with org_id and role verified.
-    Raises 401 if token is missing, invalid, or expired.
+    Resolves the current user from either:
+      1. HttpOnly cookie  `meridian_session` (browser clients)
+      2. Authorization: Bearer <token> header (API clients / Postman)
+    Raises 401 if neither is present or the token is invalid/expired.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    token: str | None = None
+
+    # 1 — cookie (preferred, set by browser)
+    cookie_token = request.cookies.get(COOKIE_NAME)
+    if cookie_token:
+        token = cookie_token
+
+    # 2 — Authorization header fallback (API clients)
+    if token is None and credentials:
+        token = credentials.credentials
+
+    if token is None:
+        raise credentials_exception
+
     try:
-        token_data = decode_token(credentials.credentials)
-        return token_data
+        return decode_token(token)
     except JWTError:
         raise credentials_exception
 
@@ -48,17 +66,21 @@ def get_db() -> Generator:
 
 
 async def get_current_user_optional(
-    credentials: HTTPAuthorizationCredentials = Depends(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(
         HTTPBearer(auto_error=False)
-    )
+    ),
 ) -> TokenData | None:
     """
     Same as get_current_user but returns None if no token provided.
     Used for endpoints that work with or without auth (e.g. health check).
     """
-    if not credentials:
+    token: str | None = request.cookies.get(COOKIE_NAME)
+    if token is None and credentials:
+        token = credentials.credentials
+    if token is None:
         return None
     try:
-        return decode_token(credentials.credentials)
+        return decode_token(token)
     except JWTError:
         return None

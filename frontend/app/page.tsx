@@ -7,6 +7,7 @@ import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { ThemePicker } from "@/components/ThemePicker";
 import { useBreakpoint } from "@/lib/hooks";
+import { api, getUserInfo, clearUserInfo, isLoggedIn } from "@/lib/api";
 
 interface EvalRun {
   run_id: string;
@@ -50,29 +51,22 @@ export default function HomePage() {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) { router.push("/login"); return; }
+    if (!isLoggedIn()) { router.push("/login"); return; }
 
-    try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      setUserName(payload.sub ?? payload.email ?? "");
-    } catch { /* ignore */ }
+    const userInfo = getUserInfo();
+    if (userInfo) setUserName(userInfo.email);
 
-    fetch("/api/v1/evaluate/list", {
-      headers: { Authorization: `Bearer ${token}` },
+    api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
+      on401: () => router.push("/login"),
     })
-      .then((r) => {
-        if (r.status === 401) { router.push("/login"); return null; }
-        if (!r.ok) throw new Error("Failed to load evaluations");
-        return r.json();
-      })
-      .then((data) => { if (data) setRuns(data.runs ?? data ?? []); })
+      .then((data) => setRuns(Array.isArray(data) ? data : (data.runs ?? [])))
       .catch(() => setError("Could not load evaluations. Is the backend running?"))
       .finally(() => setLoading(false));
   }, [router]);
 
-  function signOut() {
-    localStorage.removeItem("access_token");
+  async function signOut() {
+    await api.post("/api/v1/auth/logout").catch(() => {});
+    clearUserInfo();
     router.push("/login");
   }
 

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
+import { api, setUserInfo, isLoggedIn } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,8 +21,7 @@ export default function LoginPage() {
   const [focusedField, setFocusedField] = useState<"email" | "password" | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (token) router.push("/");
+    if (isLoggedIn()) router.push("/");
   }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -29,21 +29,15 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/auth/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ username: email, password }).toString(),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.detail ?? "Invalid email or password.");
-        return;
-      }
-      const data = await res.json();
-      localStorage.setItem("access_token", data.access_token);
+      // Backend sets HttpOnly cookie; response body has role/org_id for display
+      const data = await api.post<{ role: string; org_id: string }>(
+        "/api/v1/auth/token",
+        { body: { email, password } }
+      );
+      setUserInfo({ email, role: data.role, org_id: data.org_id });
       router.push("/");
-    } catch {
-      setError("Unable to reach the server. Please try again.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Invalid email or password.");
     } finally {
       setLoading(false);
     }
