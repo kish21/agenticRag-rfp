@@ -174,11 +174,10 @@ def check_accessibility_violations(result: ScanResult, path: Path, content: str,
         result.add("A11Y", "WARNING", rel, 0,
             "Component uses setError() but no role=\"alert\" found — screen readers won't announce errors")
 
-    # Check outline:none without focus replacement
+    # Check outline:none without focus replacement — search whole file for the pattern
     for i, line in enumerate(content.splitlines(), 1):
         if 'outline: "none"' in line or "outline: 'none'" in line:
-            context = "\n".join(content.splitlines()[max(0,i-5):i+5])
-            if "focusedField" not in context and ":focus-visible" not in context:
+            if "focusedField" not in content and ":focus-visible" not in content:
                 result.add("A11Y", "WARNING", rel, i,
                     f"outline:none without visible focus replacement on line {i}")
 

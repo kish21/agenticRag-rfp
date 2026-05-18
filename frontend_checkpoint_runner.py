@@ -443,11 +443,14 @@ if __name__ == "__main__":
 
     elif args[0] == "run":
         if len(args) > 1:
-            key = args[1].upper()
-            if key not in CATEGORIES:
-                print(f"Unknown category: {key}. Choose from: {', '.join(CATEGORIES)}")
-                sys.exit(1)
-            cats = {key: CATEGORIES[key]}
+            # Support multiple categories: python frontend_checkpoint_runner.py run BUILD AUTH FORMS
+            cats = {}
+            for key in args[1:]:
+                key = key.upper()
+                if key not in CATEGORIES:
+                    print(f"Unknown category: {key}. Choose from: {', '.join(CATEGORIES)}")
+                    sys.exit(1)
+                cats[key] = CATEGORIES[key]
         else:
             cats = CATEGORIES
 

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { ThemePicker } from "@/components/ThemePicker";
+import { useBreakpoint } from "@/lib/hooks";
 
 interface EvalRun {
   run_id: string;
@@ -39,6 +40,8 @@ function formatDate(iso: string) {
 export default function HomePage() {
   const router = useRouter();
   const { isDark } = useThemeContext();
+  const bp = useBreakpoint();
+  const isMobile = bp === "mobile";
 
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
