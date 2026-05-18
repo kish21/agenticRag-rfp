@@ -10,6 +10,19 @@ from app.api.org_settings_routes import router as org_settings_router
 from app.api.middleware import AuthMiddleware
 
 
+def _run_migrations() -> None:
+    """Apply any pending Alembic migrations on startup."""
+    try:
+        from alembic.config import Config
+        from alembic import command
+        import os
+        cfg = Config(os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic.ini"))
+        command.upgrade(cfg, "head")
+        print("[startup] Alembic migrations: up to date")
+    except Exception as exc:
+        print(f"[startup] Alembic migration warning: {exc}")
+
+
 def _mark_orphaned_runs() -> None:
     """On startup, any run still 'running' was orphaned by a previous crash/restart."""
     try:
@@ -35,6 +48,7 @@ def _mark_orphaned_runs() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _run_migrations()
     _mark_orphaned_runs()
     yield
 
