@@ -7,6 +7,7 @@ import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { ThemePicker } from "@/components/ThemePicker";
 import { useBreakpoint } from "@/lib/hooks";
+import { api, getToken, getTokenPayload, clearToken } from "@/lib/api";
 
 interface EvalRun {
   run_id: string;
@@ -50,29 +51,21 @@ export default function HomePage() {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) { router.push("/login"); return; }
+    if (!getToken()) { router.push("/login"); return; }
 
-    try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      setUserName(payload.sub ?? payload.email ?? "");
-    } catch { /* ignore */ }
+    const payload = getTokenPayload();
+    if (payload) setUserName(String(payload.sub ?? payload.email ?? ""));
 
-    fetch("/api/v1/evaluate/list", {
-      headers: { Authorization: `Bearer ${token}` },
+    api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
+      on401: () => router.push("/login"),
     })
-      .then((r) => {
-        if (r.status === 401) { router.push("/login"); return null; }
-        if (!r.ok) throw new Error("Failed to load evaluations");
-        return r.json();
-      })
-      .then((data) => { if (data) setRuns(data.runs ?? data ?? []); })
+      .then((data) => setRuns(Array.isArray(data) ? data : (data.runs ?? [])))
       .catch(() => setError("Could not load evaluations. Is the backend running?"))
       .finally(() => setLoading(false));
   }, [router]);
 
   function signOut() {
-    localStorage.removeItem("access_token");
+    clearToken();
     router.push("/login");
   }
 
@@ -267,7 +260,7 @@ export default function HomePage() {
           {/* Error */}
           {error && (
             <div style={{ padding: "32px 20px" }}>
-              <p style={{ fontFamily: FONT, fontSize: 14, color: "var(--color-error)" }}>{error}</p>
+              <p role="alert" style={{ fontFamily: FONT, fontSize: 14, color: "var(--color-error)" }}>{error}</p>
             </div>
           )}
 

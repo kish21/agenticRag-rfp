@@ -6,6 +6,7 @@ import Link from "next/link";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
+import { api } from "@/lib/api";
 
 const INDUSTRIES = [
   "Financial Services",
@@ -55,21 +56,13 @@ export default function SignupPage() {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_name: orgName, industry, email, password }),
+      await api.post("/api/v1/auth/signup", {
+        body: { org_name: orgName, industry, email, password },
+        skipAuth: true,
       });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.detail ?? "Registration failed. Please try again.");
-        return;
-      }
-
       router.push("/login?registered=1");
-    } catch {
-      setError("Unable to reach the server. Please try again.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Registration failed. Please try again.");
     } finally {
       setLoading(false);
     }
