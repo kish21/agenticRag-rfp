@@ -228,7 +228,7 @@ export default function HomePage() {
   // ── Auth + initial load ────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!isLoggedIn()) { router.push("/login"); return; }
+    // if (!isLoggedIn()) { router.push("/login"); return; }
     const info = getUserInfo();
     setUserInfo(info);
     api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
