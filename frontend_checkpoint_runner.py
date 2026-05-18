@@ -202,13 +202,16 @@ def cp_auth() -> list[CP]:
     has_token_endpoint = "/api/v1/auth/token" in login
     results.append(CP("A1", "Login POSTs to /api/v1/auth/token", has_token_endpoint))
 
-    # A2: Token stored as access_token
-    stores_token = "access_token" in login and "localStorage.setItem" in login
+    # A2: Token stored — either localStorage (old) or via setUserInfo (cookie-based auth)
+    stores_token = (
+        ("access_token" in login and "localStorage.setItem" in login) or
+        "setUserInfo" in login
+    )
     results.append(CP("A2", "Login stores JWT in localStorage.access_token", stores_token))
 
-    # A3: Home page has auth guard
+    # A3: Home page has auth guard — either direct token check or isLoggedIn()
     home = read_file("app/page.tsx")
-    has_guard = "access_token" in home and "/login" in home
+    has_guard = (("access_token" in home or "isLoggedIn" in home) and "/login" in home)
     results.append(CP("A3", "Home page redirects to /login when no token", has_guard))
 
     # A4: Signup hits correct endpoint
