@@ -46,6 +46,12 @@ interface EvalResults {
   vendors?: VendorScore[];
 }
 
+interface ChatMessage {
+  role: "user" | "assistant";
+  text: string;
+  suggestedCriteria?: string[];
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const AGENTS = [
@@ -217,7 +223,16 @@ export default function HomePage() {
 
   // Chat
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatFocused, setChatFocused] = useState(false);
+  const [chatFile, setChatFile] = useState<File | null>(null);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatFileDragging, setChatFileDragging] = useState(false);
+
+  // Saved success criteria
+  const [savedCriteria, setSavedCriteria] = useState<string[]>([]);
+  const [criteriaEditMode, setCriteriaEditMode] = useState(false);
+  const [savedConfirm, setSavedConfirm] = useState<string | null>(null);
 
   // Refs
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -237,6 +252,9 @@ export default function HomePage() {
       .then(data => setRuns(Array.isArray(data) ? data : (data.runs ?? [])))
       .catch(() => {})
       .finally(() => setLoading(false));
+    api.get<{ criteria: string[] }>("/api/v1/chat/criteria")
+      .then(data => setSavedCriteria(data.criteria ?? []))
+      .catch(() => {});
   }, [router]);
 
   // ── SSE stream while running ───────────────────────────────────────────────
@@ -363,15 +381,48 @@ export default function HomePage() {
     setVendors(p => p.map(v => v.id === id ? { ...v, ...patch } : v));
   }
 
-  function handleChat(e: React.FormEvent) {
+  async function handleChat(e: React.FormEvent) {
     e.preventDefault();
     if (!chatInput.trim()) return;
     const msg = chatInput.trim();
+    const attachedFile = chatFile;
     setChatInput("");
+    setChatFile(null);
+    const ta = document.getElementById("chat-textarea") as HTMLTextAreaElement | null;
+    if (ta) { ta.style.height = "auto"; }
     setChatMessages(prev => [...prev, { role: "user", text: msg }]);
-    setTimeout(() => {
-      setChatMessages(prev => [...prev, { role: "assistant", text: "Chat endpoint integration coming soon." }]);
-    }, 400);
+    setChatLoading(true);
+
+    const form = new FormData();
+    form.append("message", msg);
+    if (attachedFile) form.append("file", attachedFile);
+
+    try {
+      const res = await api.post<{ answer: string; suggested_criteria: string[] }>(
+        "/api/v1/chat/document", { body: form }
+      );
+      setChatMessages(prev => [...prev, {
+        role: "assistant",
+        text: res.answer,
+        suggestedCriteria: res.suggested_criteria?.length ? res.suggested_criteria : undefined,
+      }]);
+    } catch {
+      setChatMessages(prev => [...prev, { role: "assistant", text: "Sorry, something went wrong. Please try again." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
+  async function handleSaveCriteria(criteria: string[]) {
+    try {
+      await api.post("/api/v1/chat/criteria", { body: { criteria } });
+      setSavedCriteria(criteria);
+      setSavedConfirm("Criteria saved");
+      setTimeout(() => setSavedConfirm(null), 3000);
+    } catch {
+      setSavedConfirm("Failed to save");
+      setTimeout(() => setSavedConfirm(null), 3000);
+    }
   }
 
   // ── Background colours ────────────────────────────────────────────────────
@@ -385,9 +436,11 @@ export default function HomePage() {
     const total     = runs.length;
     const running   = runs.filter(r => r.status === "running").length;
     const completed = runs.filter(r => r.status === "completed").length;
+    const hasChatMessages = chatMessages.length > 0;
 
     return (
       <div style={{ maxWidth: 680 }}>
+        {!hasChatMessages && (<>
         {/* Hero greeting */}
         <div style={{ marginBottom: 48 }}>
           <h1 style={{
@@ -467,6 +520,215 @@ export default function HomePage() {
           Start new evaluation
         </button>
 
+        {/* Saved success criteria */}
+        {savedCriteria.length > 0 && (
+          <div style={{ marginBottom: 40 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <p style={{
+                fontFamily: FONT, fontWeight: 600, fontSize: 10,
+                letterSpacing: "0.1em", textTransform: "uppercase",
+                color: "var(--color-text-muted)",
+              }}>Your success criteria</p>
+              <button
+                type="button"
+                onClick={() => setCriteriaEditMode(v => !v)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)",
+                  padding: "2px 8px",
+                  borderRadius: "var(--radius)",
+                  transition: "color 150ms ease-out",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = "var(--color-accent)"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+              >
+                {criteriaEditMode ? "Done" : "Edit"}
+              </button>
+            </div>
+            {criteriaEditMode ? (
+              <div style={{
+                backgroundColor: "var(--color-surface)",
+                borderTop: "1px solid var(--color-border)",
+                borderBottom: "1px solid var(--color-border)",
+                borderLeft: "1px solid var(--color-border)",
+                borderRight: "1px solid var(--color-border)",
+                borderRadius: "var(--radius)",
+                padding: "12px 16px",
+                boxShadow: "var(--shadow-sm)",
+              }}>
+                {savedCriteria.map((c, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <input
+                      type="text"
+                      value={c}
+                      onChange={e => {
+                        const next = [...savedCriteria];
+                        next[i] = e.target.value;
+                        setSavedCriteria(next);
+                      }}
+                      style={{ ...inputCss, flex: 1, fontSize: 13 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = savedCriteria.filter((_, j) => j !== i);
+                        setSavedCriteria(next);
+                      }}
+                      aria-label="Remove criterion"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        color: "var(--color-error)", fontSize: 16, padding: "0 4px",
+                        flexShrink: 0,
+                      }}
+                    >×</button>
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setSavedCriteria(prev => [...prev, ""])}
+                    style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      fontFamily: FONT, fontSize: 12, color: "var(--color-accent)",
+                      padding: 0,
+                    }}
+                  >+ Add criterion</button>
+                  <button
+                    type="button"
+                    onClick={() => { handleSaveCriteria(savedCriteria); setCriteriaEditMode(false); }}
+                    style={{
+                      marginLeft: "auto",
+                      padding: "6px 16px",
+                      backgroundColor: "var(--color-accent)",
+                      color: "var(--color-accent-foreground)",
+                      border: "none", borderRadius: "var(--radius)",
+                      fontFamily: FONT, fontWeight: 600, fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >Save changes</button>
+                </div>
+              </div>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {savedCriteria.map((c, i) => (
+                  <li key={i} style={{
+                    display: "flex", alignItems: "flex-start", gap: 8,
+                    fontFamily: FONT, fontSize: 13, color: "var(--color-text-secondary)",
+                    lineHeight: 1.6, marginBottom: 4,
+                  }}>
+                    <span style={{ color: "var(--color-accent)", flexShrink: 0, marginTop: 1 }}>•</span>
+                    {c}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {savedConfirm && (
+              <p style={{
+                fontFamily: FONT, fontSize: 11, color: "var(--color-success)",
+                marginTop: 6,
+              }}>{savedConfirm} ✓</p>
+            )}
+          </div>
+        )}
+
+        </>)}
+
+        {/* Chat thread — visible on welcome page when messages exist */}
+        {chatMessages.length > 0 && (
+          <div style={{ marginBottom: 32 }}>
+            <p style={{
+              fontFamily: FONT, fontWeight: 600, fontSize: 10,
+              letterSpacing: "0.1em", textTransform: "uppercase",
+              color: "var(--color-text-muted)", marginBottom: 12,
+            }}>Chat history</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {chatMessages.map((msg, i) => (
+                <div key={i} style={{
+                  display: "flex",
+                  justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+                }}>
+                  <div style={{
+                    maxWidth: "80%",
+                    padding: "10px 14px",
+                    backgroundColor: msg.role === "user" ? "var(--color-accent)" : "var(--color-surface)",
+                    color: msg.role === "user" ? "var(--color-accent-foreground)" : "var(--color-text-primary)",
+                    borderRadius: msg.role === "user" ? "12px 12px 4px 12px" : "4px 12px 12px 12px",
+                    borderTop: msg.role === "assistant" ? "1px solid var(--color-border)" : "none",
+                    borderBottom: msg.role === "assistant" ? "1px solid var(--color-border)" : "none",
+                    borderLeft: msg.role === "assistant" ? "1px solid var(--color-border)" : "none",
+                    borderRight: msg.role === "assistant" ? "1px solid var(--color-border)" : "none",
+                    boxShadow: msg.role === "assistant" ? "var(--shadow-sm)" : "none",
+                    fontFamily: FONT, fontSize: 13, lineHeight: 1.65,
+                  }}>
+                    <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p>
+                    {/* Save criteria button */}
+                    {msg.role === "assistant" && msg.suggestedCriteria && msg.suggestedCriteria.length > 0 && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--color-border)" }}>
+                        <p style={{
+                          fontFamily: FONT, fontWeight: 600, fontSize: 10,
+                          letterSpacing: "0.08em", textTransform: "uppercase",
+                          color: "var(--color-text-muted)", marginBottom: 6,
+                        }}>Suggested criteria</p>
+                        <ul style={{ listStyle: "none", padding: 0, margin: "0 0 10px 0" }}>
+                          {msg.suggestedCriteria.map((c, j) => (
+                            <li key={j} style={{
+                              fontFamily: FONT, fontSize: 12,
+                              color: "var(--color-text-secondary)",
+                              lineHeight: 1.6, paddingLeft: 12,
+                              position: "relative",
+                            }}>
+                              <span style={{ position: "absolute", left: 0, color: "var(--color-accent)" }}>•</span>
+                              {c}
+                            </li>
+                          ))}
+                        </ul>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveCriteria(msg.suggestedCriteria!)}
+                          style={{
+                            padding: "5px 12px",
+                            backgroundColor: "var(--color-accent)",
+                            color: "var(--color-accent-foreground)",
+                            border: "none", borderRadius: "var(--radius)",
+                            fontFamily: FONT, fontWeight: 600, fontSize: 11,
+                            cursor: "pointer",
+                          }}
+                        >Save as my criteria</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {chatLoading && (
+                <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                  <div style={{
+                    padding: "10px 14px",
+                    backgroundColor: "var(--color-surface)",
+                    borderTop: "1px solid var(--color-border)",
+                    borderBottom: "1px solid var(--color-border)",
+                    borderLeft: "1px solid var(--color-border)",
+                    borderRight: "1px solid var(--color-border)",
+                    borderRadius: "4px 12px 12px 12px",
+                    boxShadow: "var(--shadow-sm)",
+                    display: "flex", gap: 4, alignItems: "center",
+                  }}>
+                    {[0, 1, 2].map(j => (
+                      <span key={j} style={{
+                        width: 6, height: 6, borderRadius: "50%",
+                        backgroundColor: "var(--color-text-muted)",
+                        animation: "meridian-dot-pulse 1.2s ease-in-out infinite",
+                        animationDelay: `${j * 200}ms`,
+                        display: "inline-block",
+                      }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!hasChatMessages && (<>
         {/* Recent evaluations table */}
         {total > 0 && (
           <>
@@ -549,6 +811,7 @@ export default function HomePage() {
             </p>
           </div>
         )}
+        </>)}
       </div>
     );
   }
@@ -1055,9 +1318,11 @@ export default function HomePage() {
 
   // ── Chat box ───────────────────────────────────────────────────────────────
 
-  const chatPlaceholder = canvasPage === "results"
-    ? "Ask about the results — e.g. Why was Vendor B rejected?"
-    : "Ask a question or drop a document to analyse…";
+  const chatPlaceholder = chatFile
+    ? `Ask about ${chatFile.name} — e.g. "What are our SLA thresholds?"`
+    : canvasPage === "results"
+      ? "Ask about the results — e.g. Why was Vendor B rejected?"
+      : "Ask a question or drop a document to analyse…";
 
   // ── Right panel ───────────────────────────────────────────────────────────
 
@@ -1392,16 +1657,15 @@ export default function HomePage() {
 
             {/* Chat box — pinned bottom, hides when running */}
             <div style={{
-              height: chatVisible ? 112 : 0,
+              maxHeight: chatVisible ? 220 : 0,
               opacity: chatVisible ? 1 : 0,
               overflow: "hidden",
-              transition: "height 250ms ease-out, opacity 200ms ease-out",
+              transition: "max-height 300ms ease-out, opacity 200ms ease-out",
               flexShrink: 0,
             }}>
               <div style={{
-                height: 112,
                 borderTop: "1px solid var(--color-border)",
-                backgroundColor: "var(--color-surface)",
+                backgroundColor: "var(--color-background)",
                 padding: "12px 20px 16px",
               }}>
                 {chatMessages.length > 0 && (
@@ -1413,50 +1677,167 @@ export default function HomePage() {
                     {chatMessages[chatMessages.length - 1].text}
                   </p>
                 )}
-                <form onSubmit={handleChat} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <label htmlFor="chat-input" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>
+                {/* Chat card */}
+                <form
+                  onSubmit={handleChat}
+                  onDragOver={e => { e.preventDefault(); setChatFileDragging(true); }}
+                  onDragLeave={() => setChatFileDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setChatFileDragging(false);
+                    const f = e.dataTransfer.files[0];
+                    if (f) setChatFile(f);
+                  }}
+                  style={{
+                    backgroundColor: chatFileDragging ? "var(--color-surface-hover)" : "var(--color-surface)",
+                    borderRadius: 14,
+                    boxShadow: chatFocused ? "var(--shadow-lg)" : "var(--shadow-md)",
+                    borderTop: `1px solid ${chatFileDragging ? "var(--color-accent)" : chatFocused ? "var(--color-accent)" : "var(--color-border)"}`,
+                    borderBottom: `1px solid ${chatFileDragging ? "var(--color-accent)" : chatFocused ? "var(--color-accent)" : "var(--color-border)"}`,
+                    borderLeft: `1px solid ${chatFileDragging ? "var(--color-accent)" : chatFocused ? "var(--color-accent)" : "var(--color-border)"}`,
+                    borderRight: `1px solid ${chatFileDragging ? "var(--color-accent)" : chatFocused ? "var(--color-accent)" : "var(--color-border)"}`,
+                    transition: "border-color 150ms ease-out, box-shadow 150ms ease-out, background-color 150ms ease-out",
+                  }}
+                >
+                  <label htmlFor="chat-textarea" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>
                     Chat message
                   </label>
-                  <input
-                    id="chat-input"
-                    type="text"
+                  {/* File chip */}
+                  {chatFile && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "8px 16px 0",
+                    }}>
+                      <div style={{
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        padding: "3px 8px 3px 10px",
+                        backgroundColor: "var(--color-surface-hover)",
+                        borderTop: "1px solid var(--color-border)",
+                        borderBottom: "1px solid var(--color-border)",
+                        borderLeft: "1px solid var(--color-border)",
+                        borderRight: "1px solid var(--color-border)",
+                        borderRadius: 6,
+                      }}>
+                        <span style={{ fontSize: 12 }}>📄</span>
+                        <span style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-primary)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {chatFile.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setChatFile(null)}
+                          aria-label="Remove attached file"
+                          style={{
+                            background: "none", border: "none", cursor: "pointer",
+                            color: "var(--color-text-muted)", fontSize: 14,
+                            padding: "0 2px", lineHeight: 1,
+                            flexShrink: 0,
+                          }}
+                        >×</button>
+                      </div>
+                    </div>
+                  )}
+                  <textarea
+                    id="chat-textarea"
+                    rows={1}
                     value={chatInput}
                     onChange={e => setChatInput(e.target.value)}
+                    onInput={e => {
+                      const el = e.currentTarget;
+                      el.style.height = "auto";
+                      el.style.height = Math.min(el.scrollHeight, 120) + "px";
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleChat(e as unknown as React.FormEvent);
+                      }
+                    }}
+                    onFocus={() => setChatFocused(true)}
+                    onBlur={() => setChatFocused(false)}
                     placeholder={chatPlaceholder}
                     suppressHydrationWarning
                     style={{
-                      flex: 1, padding: "8px 12px",
-                      backgroundColor: "var(--color-background)",
-                      borderTop: "1px solid var(--color-border)",
-                      borderBottom: "1px solid var(--color-border)",
-                      borderLeft: "1px solid var(--color-border)",
-                      borderRight: "1px solid var(--color-border)",
-                      borderRadius: "var(--radius)",
-                      fontFamily: FONT, fontSize: 13,
-                      color: "var(--color-text-primary)",
-                      transition: "border-color 150ms ease-out",
-                    }}
-                    onFocus={e => { e.currentTarget.style.borderColor = "var(--color-accent)"; }}
-                    onBlur={e => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!chatInput.trim()}
-                    aria-label="Send message"
-                    style={{
-                      width: 36, height: 36, flexShrink: 0,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      backgroundColor: chatInput.trim() ? "var(--color-accent)" : "var(--color-surface-hover)",
+                      display: "block",
+                      width: "100%",
+                      minHeight: 44,
+                      maxHeight: 120,
+                      padding: "12px 16px 0",
+                      backgroundColor: "transparent",
                       borderTop: "none", borderBottom: "none",
                       borderLeft: "none", borderRight: "none",
-                      borderRadius: "var(--radius)", fontSize: 15,
-                      cursor: chatInput.trim() ? "pointer" : "default",
-                      color: chatInput.trim() ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
-                      transition: "background-color 150ms ease-out",
+                      borderRadius: "14px 14px 0 0",
+                      fontFamily: FONT, fontSize: 14, lineHeight: 1.6,
+                      color: "var(--color-text-primary)",
+                      resize: "none",
+                      overflow: "auto",
+                      outline: "none",
+                      boxSizing: "border-box",
                     }}
-                  >
-                    ↑
-                  </button>
+                  />
+                  {/* Bottom action row */}
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "6px 10px 10px",
+                  }}>
+                    {/* Attachment button */}
+                    <button
+                      type="button"
+                      aria-label="Attach file"
+                      style={{
+                        width: 28, height: 28, flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        backgroundColor: "transparent",
+                        borderTop: "none", borderBottom: "none",
+                        borderLeft: "none", borderRight: "none",
+                        borderRadius: 6,
+                        color: "var(--color-text-muted)",
+                        cursor: "pointer",
+                        transition: "color 150ms ease-out, opacity 150ms ease-out",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = "var(--color-text-primary)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+
+                    {/* Keyboard hint — hidden on mobile */}
+                    {!isNarrow && bp === "desktop" && (
+                      <span style={{
+                        fontFamily: FONT, fontSize: 11,
+                        color: "var(--color-text-muted)",
+                        userSelect: "none",
+                      }}>
+                        ⏎ send &nbsp;·&nbsp; ⇧⏎ new line
+                      </span>
+                    )}
+
+                    {/* Send button */}
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim()}
+                      aria-label="Send message"
+                      style={{
+                        width: 32, height: 32, flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        backgroundColor: chatInput.trim() ? "var(--color-accent)" : "var(--color-surface-hover)",
+                        borderTop: "none", borderBottom: "none",
+                        borderLeft: "none", borderRight: "none",
+                        borderRadius: "50%",
+                        cursor: chatInput.trim() ? "pointer" : "default",
+                        color: chatInput.trim() ? "var(--color-accent-foreground)" : "var(--color-text-muted)",
+                        transition: "background-color 150ms ease-out, opacity 150ms ease-out",
+                        opacity: chatInput.trim() ? 1 : 0.5,
+                      }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>
