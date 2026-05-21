@@ -7,6 +7,7 @@ import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
 import { api, getUserInfo, clearUserInfo, isLoggedIn, type UserInfo } from "@/lib/api";
+import { NewEvaluationForm } from "@/components/NewEvaluationForm";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,12 +26,6 @@ interface AgentEvent {
   agent: string;
   status: "pending" | "running" | "done" | "blocked";
   message: string;
-}
-
-interface VendorSlot {
-  id: string;
-  name: string;
-  file: File | null;
 }
 
 interface VendorScore {
@@ -81,13 +76,9 @@ const STATUS_DOT: Record<string, string> = {
   blocked:   "var(--color-error)",
 };
 
-const DEPARTMENTS = ["Procurement", "Finance", "Legal", "IT", "Operations", "HR", "Marketing"];
-
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
-
-function mkId() { return Math.random().toString(36).slice(2, 8); }
 
 function greet(email: string) {
   const name = email.split("@")[0].replace(/[._-]/g, " ");
@@ -97,15 +88,6 @@ function greet(email: string) {
 }
 
 // ── Shared style helpers (CSS vars only — no raw hex) ─────────────────────────
-
-const labelCss: React.CSSProperties = {
-  display: "block",
-  fontFamily: FONT,
-  fontSize: 11, fontWeight: 600,
-  letterSpacing: "0.07em", textTransform: "uppercase",
-  color: "var(--color-text-muted)",
-  marginBottom: 8,
-};
 
 const inputCss: React.CSSProperties = {
   width: "100%", boxSizing: "border-box",
@@ -120,69 +102,6 @@ const inputCss: React.CSSProperties = {
   color: "var(--color-text-primary)",
   transition: "border-color 150ms ease-out",
 };
-
-// ── FileDropZone ──────────────────────────────────────────────────────────────
-
-function FileDropZone({
-  file, onFile, placeholder, compact = false,
-}: {
-  file: File | null;
-  onFile: (f: File) => void;
-  placeholder: string;
-  compact?: boolean;
-}) {
-  const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault(); setDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (f && (f.type.includes("pdf") || f.name.endsWith(".docx"))) onFile(f);
-  }
-
-  const borderStyle = dragging ? "1px solid var(--color-accent)" : "1px dashed var(--color-border)";
-
-  return (
-    <div
-      onClick={() => inputRef.current?.click()}
-      onDragOver={e => { e.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
-      aria-label={placeholder}
-      style={{
-        padding: compact ? "10px 12px" : "20px 16px",
-        backgroundColor: dragging ? "var(--color-surface-hover)" : "var(--color-background)",
-        borderTop: borderStyle, borderBottom: borderStyle,
-        borderLeft: borderStyle, borderRight: borderStyle,
-        borderRadius: "var(--radius)", cursor: "pointer", textAlign: "center",
-        transition: "background-color 150ms ease-out, border-color 150ms ease-out",
-      }}
-    >
-      {file ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
-          <span style={{ fontSize: 14 }}>📄</span>
-          <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-primary)", fontWeight: 500 }}>
-            {file.name}
-          </p>
-          <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-text-muted)" }}>
-            ({(file.size / 1024).toFixed(0)} KB)
-          </span>
-        </div>
-      ) : (
-        <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.5 }}>
-          {placeholder}<br /><span style={{ fontSize: 11 }}>PDF or DOCX</span>
-        </p>
-      )}
-      <input
-        ref={inputRef} type="file" accept=".pdf,.docx" style={{ display: "none" }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }}
-      />
-    </div>
-  );
-}
 
 // ── Main shell ────────────────────────────────────────────────────────────────
 
@@ -205,14 +124,6 @@ export default function HomePage() {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-
-  // Upload form
-  const [rfpTitle, setRfpTitle] = useState("");
-  const [department, setDepartment] = useState("");
-  const [rfpFile, setRfpFile] = useState<File | null>(null);
-  const [vendors, setVendors] = useState<VendorSlot[]>([{ id: mkId(), name: "", file: null }]);
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState("");
 
   // Progress + agent log
   const [agentStatuses, setAgentStatuses] = useState<Record<string, { status: string; message: string }>>({});
@@ -243,7 +154,7 @@ export default function HomePage() {
   // ── Auth + initial load ────────────────────────────────────────────────────
 
   useEffect(() => {
-    // if (!isLoggedIn()) { router.push("/login"); return; }
+    if (!isLoggedIn()) { router.push("/login"); return; }
     const info = getUserInfo();
     setUserInfo(info);
     api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
@@ -307,7 +218,6 @@ export default function HomePage() {
 
   function startNewEval() {
     setCanvasPage("upload-form");
-    setFormError("");
     if (isNarrow) setSidebarOpen(false);
   }
 
@@ -331,54 +241,19 @@ export default function HomePage() {
     if (isNarrow) setSidebarOpen(false);
   }
 
-  async function handleUploadSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setFormError("");
-    if (!rfpTitle.trim()) { setFormError("RFP title is required."); return; }
-    if (!department) { setFormError("Department is required."); return; }
-    if (!rfpFile) { setFormError("RFP document is required."); return; }
-    if (vendors.some(v => !v.name.trim() || !v.file)) {
-      setFormError("Each vendor must have a name and a proposal document."); return;
-    }
-    setSubmitting(true);
-
-    const fd = new FormData();
-    fd.append("rfp_title", rfpTitle.trim());
-    fd.append("department", department);
-    fd.append("rfp_file", rfpFile);
-    vendors.forEach(v => {
-      fd.append("vendor_names", v.name.trim());
-      fd.append("vendor_files", v.file!);
-    });
-
-    try {
-      const res = await api.post<{ run_id: string }>("/api/v1/evaluate/start", {
-        body: fd,
-        on401: () => router.push("/login"),
-      });
-      setActiveRunId(res.run_id);
-      setAgentStatuses({});
-      setAgentEvents([]);
-      setResults(null);
-      setShellState("running");
-      setCanvasPage("progress");
-      setRightExpanded(true);
-      setRuns(prev => [{
-        run_id: res.run_id, rfp_title: rfpTitle.trim(),
-        status: "running", vendor_count: vendors.length,
-        created_at: new Date().toISOString(),
-      }, ...prev]);
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to start evaluation. Try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function addVendor() { if (vendors.length < 10) setVendors(p => [...p, { id: mkId(), name: "", file: null }]); }
-  function removeVendor(id: string) { setVendors(p => p.filter(v => v.id !== id)); }
-  function updateVendor(id: string, patch: Partial<VendorSlot>) {
-    setVendors(p => p.map(v => v.id === id ? { ...v, ...patch } : v));
+  function handleEvalSuccess(runId: string, rfpTitle: string, vendorCount: number) {
+    setActiveRunId(runId);
+    setAgentStatuses({});
+    setAgentEvents([]);
+    setResults(null);
+    setShellState("running");
+    setCanvasPage("progress");
+    setRightExpanded(true);
+    setRuns(prev => [{
+      run_id: runId, rfp_title: rfpTitle,
+      status: "running", vendor_count: vendorCount,
+      created_at: new Date().toISOString(),
+    }, ...prev]);
   }
 
   async function handleChat(e: React.FormEvent) {
@@ -818,188 +693,11 @@ export default function HomePage() {
 
   function renderUploadForm() {
     return (
-      <div style={{ maxWidth: 620 }}>
-        <button
-          type="button" onClick={() => setCanvasPage("welcome")}
-          style={{
-            background: "none", border: "none", cursor: "pointer",
-            fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)",
-            padding: 0, marginBottom: 20,
-            display: "flex", alignItems: "center", gap: 4,
-            transition: "color 150ms ease-out",
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = "var(--color-text-primary)"; }}
-          onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
-        >
-          ← Back
-        </button>
-
-        <h1 style={{
-          fontFamily: DISPLAY, fontWeight: 800,
-          fontSize: isMobile ? 24 : 32,
-          letterSpacing: "-0.03em", lineHeight: 1.0,
-          color: "var(--color-text-primary)", marginBottom: 8,
-        }}>
-          New RFP evaluation
-        </h1>
-        <p style={{ fontFamily: FONT, fontSize: 14, color: "var(--color-text-muted)", lineHeight: 1.65, marginBottom: 32 }}>
-          Upload your RFP and vendor proposals. Nine specialised agents will evaluate and rank each vendor.
-        </p>
-
-        <form onSubmit={handleUploadSubmit} noValidate>
-          {formError && (
-            <div role="alert" style={{
-              marginBottom: 20, padding: "10px 14px",
-              backgroundColor: "var(--color-surface)",
-              borderTop: "1px solid var(--color-error)",
-              borderBottom: "1px solid var(--color-error)",
-              borderLeft: "3px solid var(--color-error)",
-              borderRight: "1px solid var(--color-error)",
-              borderRadius: "var(--radius)",
-              fontFamily: FONT, fontSize: 13, color: "var(--color-error)",
-            }}>
-              {formError}
-            </div>
-          )}
-
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-            gap: 16, marginBottom: 20,
-          }}>
-            <div>
-              <label htmlFor="rfp-title" style={labelCss}>RFP Title *</label>
-              <input
-                id="rfp-title" type="text" value={rfpTitle}
-                onChange={e => setRfpTitle(e.target.value)}
-                placeholder="e.g. Cloud Infrastructure 2026"
-                required suppressHydrationWarning style={inputCss}
-                onFocus={e => { e.currentTarget.style.borderColor = "var(--color-accent)"; }}
-                onBlur={e => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
-              />
-            </div>
-            <div>
-              <label htmlFor="department" style={labelCss}>Department *</label>
-              <select
-                id="department" value={department}
-                onChange={e => setDepartment(e.target.value)}
-                required style={{ ...inputCss, cursor: "pointer" }}
-                onFocus={e => { e.currentTarget.style.borderColor = "var(--color-accent)"; }}
-                onBlur={e => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
-              >
-                <option value="">Select…</option>
-                {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 24 }}>
-            <label style={labelCss}>RFP Document *</label>
-            <FileDropZone file={rfpFile} onFile={setRfpFile} placeholder="Drop RFP PDF or DOCX here, or click to browse" />
-          </div>
-
-          <div style={{ marginBottom: 28 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <p style={labelCss}>Vendor Proposals *</p>
-              {vendors.length < 10 && (
-                <button
-                  type="button" onClick={addVendor}
-                  style={{
-                    background: "none", border: "none", cursor: "pointer",
-                    fontFamily: FONT, fontSize: 12, fontWeight: 500,
-                    color: "var(--color-accent)", padding: 0,
-                    transition: "opacity 150ms ease-out",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.opacity = "0.7"; }}
-                  onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
-                >
-                  + Add vendor
-                </button>
-              )}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {vendors.map((vendor, idx) => (
-                <div key={vendor.id} style={{
-                  padding: "14px 16px",
-                  backgroundColor: "var(--color-surface)",
-                  borderTop: "1px solid var(--color-border)",
-                  borderBottom: "1px solid var(--color-border)",
-                  borderLeft: "1px solid var(--color-border)",
-                  borderRight: "1px solid var(--color-border)",
-                  borderRadius: "var(--radius)",
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                    <p style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--color-text-muted)" }}>
-                      Vendor {idx + 1}
-                    </p>
-                    {vendors.length > 1 && (
-                      <button
-                        type="button" onClick={() => removeVendor(vendor.id)}
-                        style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)",
-                          padding: 0, transition: "color 150ms ease-out",
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.color = "var(--color-error)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <label htmlFor={`vname-${vendor.id}`} style={{ ...labelCss, marginBottom: 6 }}>Vendor name</label>
-                  <input
-                    id={`vname-${vendor.id}`} type="text" value={vendor.name}
-                    onChange={e => updateVendor(vendor.id, { name: e.target.value })}
-                    placeholder="Company name"
-                    suppressHydrationWarning style={{ ...inputCss, marginBottom: 10 }}
-                    onFocus={e => { e.currentTarget.style.borderColor = "var(--color-accent)"; }}
-                    onBlur={e => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
-                  />
-                  <label style={{ ...labelCss, marginBottom: 6 }}>Proposal document</label>
-                  <FileDropZone
-                    file={vendor.file}
-                    onFile={f => updateVendor(vendor.id, { file: f })}
-                    placeholder="Drop vendor proposal"
-                    compact
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <button
-            type="submit" disabled={submitting}
-            style={{
-              width: "100%", padding: "12px 24px",
-              backgroundColor: submitting ? "var(--color-surface)" : "var(--color-accent)",
-              color: submitting ? "var(--color-text-muted)" : "var(--color-accent-foreground)",
-              borderTop: "1px solid var(--color-border)",
-              borderBottom: "1px solid var(--color-border)",
-              borderLeft: "1px solid var(--color-border)",
-              borderRight: "1px solid var(--color-border)",
-              borderRadius: "var(--radius)",
-              fontFamily: FONT, fontWeight: 600, fontSize: 14,
-              cursor: submitting ? "not-allowed" : "pointer",
-              transition: "opacity 150ms ease-out",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            }}
-          >
-            {submitting && (
-              <div style={{
-                width: 14, height: 14,
-                borderTop: "2px solid var(--color-text-muted)",
-                borderBottom: "2px solid transparent",
-                borderLeft: "2px solid transparent",
-                borderRight: "2px solid transparent",
-                borderRadius: "50%",
-                animation: "meridian-spin 0.7s linear infinite",
-              }} />
-            )}
-            {submitting ? "Starting evaluation…" : "Start evaluation →"}
-          </button>
-        </form>
-      </div>
+      <NewEvaluationForm
+        onBack={() => setCanvasPage("welcome")}
+        onSuccess={handleEvalSuccess}
+        onAuth401={() => router.push("/login")}
+      />
     );
   }
 
