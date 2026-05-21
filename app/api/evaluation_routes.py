@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from app.core.dependencies import get_current_user
 from app.core.auth import TokenData, decode_token
 from app.core.audit import audit
+from app.core.rbac import require_run_access, require_admin_role, log_access
 from app.core.output_models import (
     AuditOverride, EvaluationSetup, MandatoryCheck,
     ScoringCriterion, ExtractionTarget, RetrievalOutput,
@@ -58,7 +59,7 @@ def _db_get_run(run_id: str, org_id: str) -> dict:
                        status, vendor_ids, contract_value,
                        agent_events, agent_log, decision_output,
                        created_at, completed_at,
-                       vendor_names
+                       vendor_names, created_by_email, creator_dept_id
                 FROM evaluation_runs
                 WHERE run_id = CAST(:rid AS uuid)
                   AND org_id = CAST(:oid AS uuid)
@@ -308,25 +309,27 @@ async def start_evaluation(
                 INSERT INTO evaluation_runs
                     (run_id, org_id, rfp_id, setup_id, rfp_title, department,
                      rfp_filename, rfp_bytes, status, vendor_ids, contract_value,
-                     vendor_names)
+                     vendor_names, created_by_email, creator_dept_id)
                 VALUES
                     (CAST(:run_id AS uuid), CAST(:org_id AS uuid), :rfp_id, :setup_id,
                      :rfp_title, :department, :rfp_filename, :rfp_bytes,
                      'pending_confirm', :vendor_ids, :contract_value,
-                     CAST(:vendor_names AS jsonb))
+                     CAST(:vendor_names AS jsonb), :created_by_email, :creator_dept_id)
             """),
             {
-                "run_id":       run_id,
-                "org_id":       user.org_id,
-                "rfp_id":       rfp_id,
-                "setup_id":     setup_id,
-                "rfp_title":    rfp_title,
-                "department":   department,
-                "rfp_filename": rfp_file.filename or "rfp.pdf",
-                "rfp_bytes":    rfp_bytes,
-                "vendor_ids":   vendor_list,
-                "contract_value": contract_value,
-                "vendor_names": vendor_names if vendor_names.strip() else "{}",
+                "run_id":           run_id,
+                "org_id":           user.org_id,
+                "rfp_id":           rfp_id,
+                "setup_id":         setup_id,
+                "rfp_title":        rfp_title,
+                "department":       department,
+                "rfp_filename":     rfp_file.filename or "rfp.pdf",
+                "rfp_bytes":        rfp_bytes,
+                "vendor_ids":       vendor_list,
+                "contract_value":   contract_value,
+                "vendor_names":     vendor_names if vendor_names.strip() else "{}",
+                "created_by_email": user.email,
+                "creator_dept_id":  user.dept_id,
             },
         )
         # Store each vendor file in vendor_documents
@@ -375,24 +378,42 @@ async def start_evaluation(
 
 @router.get("/list")
 async def list_runs(user: TokenData = Depends(get_current_user)):
-    """Dashboard: returns all evaluation runs for the caller's org."""
+    """Dashboard: returns evaluation runs the caller is allowed to see."""
     engine = get_engine()
+
+    # department_user sees only their own runs; all other roles see the full org
+    if user.role == "department_user":
+        query = sa.text("""
+            SELECT
+                r.run_id::text, r.rfp_id, r.status, r.created_at,
+                r.approval_tier, r.contract_value,
+                r.rfp_title, r.department,
+                array_length(r.vendor_ids, 1) AS vendor_count,
+                r.decision_output
+            FROM evaluation_runs r
+            WHERE r.org_id = CAST(:oid AS uuid)
+              AND r.created_by_email = :email
+            ORDER BY r.created_at DESC
+            LIMIT 100
+        """)
+        params = {"oid": user.org_id, "email": user.email}
+    else:
+        query = sa.text("""
+            SELECT
+                r.run_id::text, r.rfp_id, r.status, r.created_at,
+                r.approval_tier, r.contract_value,
+                r.rfp_title, r.department,
+                array_length(r.vendor_ids, 1) AS vendor_count,
+                r.decision_output
+            FROM evaluation_runs r
+            WHERE r.org_id = CAST(:oid AS uuid)
+            ORDER BY r.created_at DESC
+            LIMIT 100
+        """)
+        params = {"oid": user.org_id}
+
     with engine.connect() as conn:
-        rows = conn.execute(
-            sa.text("""
-                SELECT
-                    r.run_id::text, r.rfp_id, r.status, r.created_at,
-                    r.approval_tier, r.contract_value,
-                    r.rfp_title, r.department,
-                    array_length(r.vendor_ids, 1) AS vendor_count,
-                    r.decision_output
-                FROM evaluation_runs r
-                WHERE r.org_id = CAST(:oid AS uuid)
-                ORDER BY r.created_at DESC
-                LIMIT 100
-            """),
-            {"oid": user.org_id},
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
 
     runs = []
     for row in rows:
@@ -423,6 +444,8 @@ async def list_runs(user: TokenData = Depends(get_current_user)):
 async def get_setup(run_id: str, user: TokenData = Depends(get_current_user)):
     """Confirm page: returns the EvaluationSetup for this run."""
     run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+    log_access(run_id, user.org_id, user.email, "view_setup")
     setup = _db_get_setup(run["setup_id"])
     if not setup:
         raise HTTPException(status_code=404, detail="Setup not found")
@@ -445,6 +468,7 @@ async def update_setup(
 ):
     """Customer edits criteria on confirm page before pipeline starts."""
     run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
     if run["status"] not in ("pending", "pending_confirm"):
         raise HTTPException(
             409,
@@ -589,6 +613,7 @@ async def confirm_run(
 ):
     """Confirm page: user approved. Updates status and starts the pipeline."""
     run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
     if run["status"] not in ("pending_confirm",):
         raise HTTPException(status_code=409, detail=f"Run already in status: {run['status']}")
 
@@ -918,6 +943,8 @@ async def run_stream_alias(run_id: str, token: str = ""):
 @router.get("/{run_id}/results")
 async def get_results(run_id: str, user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+    log_access(run_id, user.org_id, user.email, "view_results")
     decision = run.get("decision_output")
     return {
         "run_id":       run_id,
@@ -936,6 +963,7 @@ async def get_results(run_id: str, user: TokenData = Depends(get_current_user)):
 async def get_vendor_decision(run_id: str, vendor: str,
                                user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
     decision = run.get("decision_output") or {}
 
     for v in decision.get("shortlisted_vendors", []):
@@ -965,6 +993,7 @@ class OverrideRequest(BaseModel):
 async def submit_override(run_id: str, body: OverrideRequest,
                            user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
+    require_admin_role(user)  # override requires department_admin or above
     decision = run.get("decision_output") or {}
 
     original: dict = {}
@@ -1056,7 +1085,8 @@ async def re_evaluate(
 @router.get("/{run_id}/audit")
 async def get_audit_trail(run_id: str, user: TokenData = Depends(get_current_user)):
     """Return the full append-only audit trail for a run, ordered by time."""
-    _db_get_run(run_id, user.org_id)   # 404/403 guard
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -1090,7 +1120,8 @@ async def get_audit_trail(run_id: str, user: TokenData = Depends(get_current_use
 @router.get("/{run_id}/cost")
 async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_current_user)):
     """Return LLM cost and token usage for a run (live if in-progress, persisted if completed)."""
-    _db_get_run(run_id, user.org_id)   # 404/403 guard
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
 
     from app.core.cost_tracker import get_run_cost as _get_cost
     acc = _get_cost(run_id)

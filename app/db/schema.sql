@@ -70,8 +70,27 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     decision_output  JSONB,
     vendor_names     JSONB DEFAULT '{}',
     created_at       TIMESTAMPTZ DEFAULT now(),
-    completed_at     TIMESTAMPTZ
+    completed_at     TIMESTAMPTZ,
+    created_by_email TEXT,          -- email of the user who started this run (RBAC)
+    creator_dept_id  TEXT           -- dept_id from JWT at creation time (RBAC)
 );
+
+-- ── Access audit log ───────────────────────────────────────────────────
+-- Records who viewed or acted on a run. Append-only, RLS-protected.
+
+CREATE TABLE IF NOT EXISTS access_audit_log (
+    log_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id       UUID NOT NULL,
+    run_id       UUID REFERENCES evaluation_runs(run_id) ON DELETE SET NULL,
+    accessed_by  TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    created_at   TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_access_audit_log_run_id ON access_audit_log(run_id);
+CREATE INDEX IF NOT EXISTS ix_access_audit_log_org_id ON access_audit_log(org_id);
+
+ALTER TABLE access_audit_log ENABLE ROW LEVEL SECURITY;
 
 -- ── Vendor documents ──────────────────────────────────────────────────
 

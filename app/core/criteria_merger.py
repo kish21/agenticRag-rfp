@@ -4,10 +4,33 @@ criteria into one EvaluationSetup.
 All LLM calls use call_llm() — never OpenAI directly.
 """
 import json
+import re
 import uuid
 from app.db.fact_store import get_engine
 from app.core.llm_provider import call_llm
 import sqlalchemy as sa
+
+# Common suffixes the LLM appends that don't change the meaning of a check.
+# Stripping these lets "ISO 27001" match "ISO 27001 Certification Requirement".
+_NOISE_SUFFIXES = (
+    " certification", " compliance", " requirement", " requirements",
+    " check", " verification", " policy", " standard", " standards",
+    " insurance", " cover", " coverage",
+)
+
+
+def _normalize_name(name: str) -> str:
+    """
+    Lowercase + strip noise suffixes + collapse punctuation/whitespace.
+    Used as the dedup key so 'ISO 27001' and 'ISO 27001 Certification'
+    collapse to the same key and don't both survive into the setup.
+    """
+    n = name.lower().strip()
+    for suffix in _NOISE_SUFFIXES:
+        if n.endswith(suffix):
+            n = n[: -len(suffix)].strip()
+    n = re.sub(r"[^a-z0-9\s]", " ", n)
+    return re.sub(r"\s+", " ", n).strip()
 
 
 def get_org_criteria(org_id: str) -> list[dict]:
@@ -142,7 +165,7 @@ def merge_criteria(
 
     # 1. Org criteria (highest priority, may be locked)
     for c in org_criteria:
-        name_key = c["name"].lower()
+        name_key = _normalize_name(c["name"])
         if c["check_type"] == "mandatory":
             tid = c["template_id"][:8].upper()
             mandatory_checks.append({
@@ -173,7 +196,7 @@ def merge_criteria(
 
     # 2. Dept criteria (skip duplicates)
     for c in dept_criteria:
-        name_key = c["name"].lower()
+        name_key = _normalize_name(c["name"])
         if c["check_type"] == "mandatory":
             if name_key not in mandatory_names:
                 tid = c["template_id"][:8].upper()
@@ -206,7 +229,7 @@ def merge_criteria(
 
     # 3. RFP-extracted criteria (skip duplicates)
     for c in rfp_criteria.get("mandatory_checks", []):
-        name_key = c["name"].lower()
+        name_key = _normalize_name(c["name"])
         if name_key not in mandatory_names:
             mc_id = str(uuid.uuid4())[:8].upper()
             mandatory_checks.append({
@@ -222,7 +245,7 @@ def merge_criteria(
             mandatory_names.add(name_key)
 
     for c in rfp_criteria.get("scoring_criteria", []):
-        name_key = c["name"].lower()
+        name_key = _normalize_name(c["name"])
         if name_key not in scoring_names:
             sc_id = str(uuid.uuid4())[:8].upper()
             scoring_criteria.append({
