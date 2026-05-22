@@ -76,13 +76,14 @@ const ROLE_DISPLAY: Record<string, string> = {
 };
 
 const STATUS_DOT: Record<string, string> = {
-  completed: "var(--color-success)",
-  running:   "var(--color-info)",
-  pending:   "var(--color-warning)",
-  failed:    "var(--color-error)",
-  draft:     "var(--color-text-muted)",
-  done:      "var(--color-success)",
-  blocked:   "var(--color-error)",
+  completed:   "var(--color-success)",
+  running:     "var(--color-info)",
+  pending:     "var(--color-warning)",
+  failed:      "var(--color-error)",
+  interrupted: "var(--color-warning)",
+  draft:       "var(--color-text-muted)",
+  done:        "var(--color-success)",
+  blocked:     "var(--color-error)",
 };
 
 function fmtDate(iso: string) {
@@ -290,6 +291,9 @@ export default function HomePage() {
     } else if (run.status === "pending_confirm") {
       setConfirmRunId(run.run_id);
       setCanvasPage("confirm");
+    } else if (run.status === "interrupted" || run.status === "failed") {
+      setShellState("completed");
+      setCanvasPage("results");
     } else {
       setCanvasPage("welcome");
     }
