@@ -271,9 +271,11 @@ export default function HomePage() {
   // ── Dev log SSE ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!activeRunId) return;
-    const runParam = `run_id=${activeRunId}`;
-    const es = new EventSource(`/api/v1/logs/stream?${runParam}`, { withCredentials: true });
+    if (!isDevRole) return;
+    const url = activeRunId
+      ? `/api/v1/logs/stream?run_id=${activeRunId}`
+      : `/api/v1/logs/stream`;
+    const es = new EventSource(url, { withCredentials: true });
     devEsRef.current = es;
     es.onopen    = () => setDevLogConnected(true);
     es.onerror   = () => setDevLogConnected(false);
@@ -286,7 +288,7 @@ export default function HomePage() {
       } catch { /* skip */ }
     };
     return () => { es.close(); devEsRef.current = null; setDevLogConnected(false); };
-  }, [activeRunId]);
+  }, [isDevRole, activeRunId]);
 
   // ── Results fetch ──────────────────────────────────────────────────────────
 
@@ -365,6 +367,7 @@ export default function HomePage() {
     setConfirmRunId(runId);
     setAgentStatuses({});
     setAgentEvents([]);
+    setDevLogEntries([]);
     setResults(null);
     setCanvasPage("confirm");
     setRuns(prev => [{
