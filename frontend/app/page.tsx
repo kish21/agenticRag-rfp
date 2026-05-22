@@ -59,14 +59,14 @@ interface ChatSession {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const AGENTS = [
-  "PlannerAgent", "IngestionAgent", "RetrievalAgent", "ExtractionAgent",
-  "EvaluationAgent", "ComparatorAgent", "DecisionAgent", "ExplanationAgent", "CriticAgent",
+  "planner", "ingestion", "retrieval", "extraction",
+  "evaluation", "comparator", "decision", "explanation", "critic",
 ];
 
 const AGENT_LABELS: Record<string, string> = {
-  PlannerAgent: "Planner", IngestionAgent: "Ingestion", RetrievalAgent: "Retrieval",
-  ExtractionAgent: "Extraction", EvaluationAgent: "Evaluation", ComparatorAgent: "Comparator",
-  DecisionAgent: "Decision", ExplanationAgent: "Explanation", CriticAgent: "Critic",
+  planner: "Planner", ingestion: "Ingestion", retrieval: "Retrieval",
+  extraction: "Extraction", evaluation: "Evaluation", comparator: "Comparator",
+  decision: "Decision", explanation: "Explanation", critic: "Critic",
 };
 
 const ROLE_DISPLAY: Record<string, string> = {
@@ -246,7 +246,7 @@ export default function HomePage() {
         if (agentEv.agent) {
           setAgentEvents(prev => [...prev, agentEv]);
           setAgentStatuses(prev => ({ ...prev, [agentEv.agent]: { status: agentEv.status, message: agentEv.message } }));
-          if (agentEv.agent === "ExplanationAgent" && agentEv.status === "done") {
+          if (agentEv.agent === "explanation" && agentEv.status === "done") {
             setShellState("completed");
             setCanvasPage("results");
             es.close();
