@@ -871,52 +871,94 @@ export default function HomePage() {
         }}>
           {AGENTS.map((agent, i) => {
             const s = agentStatuses[agent];
-            const status     = s?.status ?? "pending";
-            const message    = s?.message ?? "Waiting…";
-            const isActive   = status === "running";
-            const isDone     = status === "done";
-            const isBlocked  = status === "blocked";
+            const status    = s?.status ?? "pending";
+            const message   = s?.message;
+            const isActive  = status === "running";
+            const isDone    = status === "done";
+            const isBlocked = status === "blocked";
+            const isPending = !isActive && !isDone && !isBlocked;
+
+            const statusLabel = isBlocked ? "Blocked"
+              : isDone    ? "Complete"
+              : isActive  ? "Running"
+              : "Not started";
+
+            const statusColor = isBlocked ? "var(--color-error)"
+              : isDone   ? "var(--color-success)"
+              : isActive ? "var(--color-info)"
+              : "var(--color-text-muted)";
 
             return (
               <div key={agent} style={{
-                display: "flex", alignItems: "flex-start", gap: 12,
-                padding: "12px 16px",
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "13px 16px",
                 borderBottom: i < AGENTS.length - 1 ? "1px solid var(--color-border)" : "none",
                 backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
-                borderLeft: isActive ? "2px solid var(--color-info)" : "2px solid transparent",
+                borderLeft: isActive ? "3px solid var(--color-info)"
+                  : isDone  ? "3px solid var(--color-success)"
+                  : isBlocked ? "3px solid var(--color-error)"
+                  : "3px solid transparent",
                 transition: "background-color 150ms ease-out",
-                ...(isActive ? { animation: "meridian-pulse-border 2s ease-in-out infinite" } : {}),
               }}>
-                <div style={{
-                  width: 7, height: 7, borderRadius: "50%",
-                  flexShrink: 0, marginTop: 5,
-                  backgroundColor: isBlocked ? "var(--color-error)"
-                    : isDone ? "var(--color-success)"
-                    : isActive ? "var(--color-info)"
-                    : "var(--color-border)",
-                  ...(isActive ? { animation: "meridian-dot-pulse 1.5s ease-in-out infinite" } : {}),
-                }} />
+                {/* Icon column */}
+                <div style={{ width: 18, height: 18, flexShrink: 0, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {isActive && (
+                    <div style={{
+                      width: 16, height: 16, borderRadius: "50%",
+                      borderTop: "2px solid var(--color-info)",
+                      borderBottom: "2px solid transparent",
+                      borderLeft: "2px solid transparent",
+                      borderRight: "2px solid transparent",
+                      animation: "meridian-spin 0.7s linear infinite",
+                    }} />
+                  )}
+                  {isDone && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="7" fill="var(--color-success)" fillOpacity="0.15" stroke="var(--color-success)" strokeWidth="1.5"/>
+                      <path d="M5 8l2 2 4-4" stroke="var(--color-success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                  {isBlocked && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="7" fill="var(--color-error)" fillOpacity="0.15" stroke="var(--color-error)" strokeWidth="1.5"/>
+                      <path d="M8 5v3.5M8 11h.01" stroke="var(--color-error)" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                  )}
+                  {isPending && (
+                    <div style={{
+                      width: 8, height: 8, borderRadius: "50%",
+                      border: "1.5px solid var(--color-border)",
+                      backgroundColor: "transparent",
+                    }} />
+                  )}
+                </div>
+
+                {/* Text column */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <p style={{
-                      fontFamily: FONT, fontWeight: 600, fontSize: 13,
-                      color: isDone ? "var(--color-text-secondary)" : "var(--color-text-primary)",
+                      fontFamily: FONT, fontWeight: isActive ? 700 : isDone ? 500 : 500,
+                      fontSize: 13,
+                      color: isPending ? "var(--color-text-muted)"
+                        : isDone ? "var(--color-text-secondary)"
+                        : "var(--color-text-primary)",
                     }}>
                       {AGENT_LABELS[agent] ?? agent}
                     </p>
                     <span style={{
                       fontFamily: MONO, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase",
-                      color: isBlocked ? "var(--color-error)"
-                        : isDone ? "var(--color-success)"
-                        : isActive ? "var(--color-info)"
-                        : "var(--color-text-muted)",
+                      fontWeight: isActive ? 700 : 400,
+                      color: statusColor,
+                      whiteSpace: "nowrap",
                     }}>
-                      {status}
+                      {statusLabel}
                     </span>
                   </div>
-                  <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.5, marginTop: 2 }}>
-                    {message}
-                  </p>
+                  {(isActive || isDone || isBlocked) && message && (
+                    <p style={{ fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.5, marginTop: 2 }}>
+                      {message}
+                    </p>
+                  )}
                 </div>
               </div>
             );

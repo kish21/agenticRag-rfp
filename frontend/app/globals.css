@@ -113,3 +113,12 @@ tr.hoverable:hover th {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+@keyframes meridian-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes meridian-canvas-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
