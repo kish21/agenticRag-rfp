@@ -1011,15 +1011,41 @@ async def get_results(run_id: str, user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
     log_access(run_id, user.org_id, user.email, "view_results")
-    decision = run.get("decision_output")
+    decision = run.get("decision_output") or {}
+
+    # Build flat vendors list for the frontend rankings view
+    vendors = []
+    for v in decision.get("shortlisted_vendors", []):
+        vendors.append({
+            "vendor_name": v.get("vendor_name", v.get("vendor_id", "Unknown")),
+            "decision":    "shortlisted",
+            "total_score": v.get("total_score", 0),
+            "summary":     v.get("recommendation", ""),
+        })
+    for v in decision.get("rejected_vendors", []):
+        vendors.append({
+            "vendor_name": v.get("vendor_name", v.get("vendor_id", "Unknown")),
+            "decision":    "rejected",
+            "total_score": 0,
+            "summary":     "; ".join(v.get("rejection_reasons", [])),
+        })
+
+    approval_routing = decision.get("approval_routing") or {}
+
     return {
-        "run_id":       run_id,
-        "status":       run.get("status"),
-        "rfp_title":    run.get("rfp_title", ""),
-        "department":   run.get("department", ""),
-        "decision":     decision,
-        "agent_log":    run.get("agent_log") or [],
-        "vendor_names": run.get("vendor_names") or {},
+        "run_id":        run_id,
+        "status":        run.get("status"),
+        "rfp_title":     run.get("rfp_title", ""),
+        "department":    run.get("department", ""),
+        "vendors":       vendors,
+        "recommendation": (
+            decision.get("shortlisted_vendors", [{}])[0].get("recommendation", "")
+            if decision.get("shortlisted_vendors") else ""
+        ),
+        "approval_tier": approval_routing.get("approval_tier"),
+        "decision":      decision,
+        "agent_log":     run.get("agent_log") or [],
+        "vendor_names":  run.get("vendor_names") or {},
     }
 
 
