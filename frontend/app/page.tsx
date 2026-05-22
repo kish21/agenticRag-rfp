@@ -226,23 +226,36 @@ export default function HomePage() {
   useEffect(() => {
     if (shellState !== "running" || !activeRunId) return;
     const base = process.env.NEXT_PUBLIC_API_SSE_URL ?? "";
-    const es = new EventSource(`${base}/api/v1/evaluate/${activeRunId}/stream`, { withCredentials: true });
+    const es = new EventSource(`${base}/api/v1/evaluate/${activeRunId}/status`, { withCredentials: true });
     esRef.current = es;
 
     es.onmessage = e => {
       try {
-        const ev: AgentEvent = JSON.parse(e.data);
-        setAgentEvents(prev => [...prev, ev]);
-        setAgentStatuses(prev => ({ ...prev, [ev.agent]: { status: ev.status, message: ev.message } }));
-        if (ev.agent === "ExplanationAgent" && ev.status === "done") {
+        const ev = JSON.parse(e.data) as Record<string, unknown>;
+        // heartbeat — keep-alive, ignore
+        if (ev.type === "heartbeat") return;
+        // done — pipeline finished (complete/blocked/failed/interrupted)
+        if (ev.type === "done") {
           setShellState("completed");
           setCanvasPage("results");
           es.close();
+          return;
+        }
+        // agent event
+        const agentEv = ev as unknown as AgentEvent;
+        if (agentEv.agent) {
+          setAgentEvents(prev => [...prev, agentEv]);
+          setAgentStatuses(prev => ({ ...prev, [agentEv.agent]: { status: agentEv.status, message: agentEv.message } }));
+          if (agentEv.agent === "ExplanationAgent" && agentEv.status === "done") {
+            setShellState("completed");
+            setCanvasPage("results");
+            es.close();
+          }
         }
       } catch { /* malformed event — skip */ }
     };
 
-    es.onerror = () => es.close();
+    es.onerror = (e) => { console.error("[SSE] stream error", e); es.close(); };
     return () => { es.close(); esRef.current = null; };
   }, [shellState, activeRunId]);
 
