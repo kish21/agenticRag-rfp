@@ -101,9 +101,9 @@ Before anything else in Skill 04:
 ## SESSION START — MANDATORY BEFORE ANY CODE
 
 ```bash
-python checkpoint_runner.py status
-python drift_detector.py
-python contract_tests.py
+python tools/checkpoint_runner.py status
+python tools/drift_detector.py
+python tools/contract_tests.py
 ```
 
 Then state: "I will build [FILE] to pass checkpoint [SKILL-CPxx]"
@@ -224,11 +224,11 @@ Skill 09: app/core/agent_registry.py, app/api/admin_routes.py
 ## SESSION END — MANDATORY
 
 ```bash
-python checkpoint_runner.py status
-python drift_detector.py
+python tools/checkpoint_runner.py status
+python tools/drift_detector.py
 ```
 
-Update four fields above. Add one line to daily_build_log.md.
+Update four fields above. Add one line to .claude/daily_build_log.md.
 
 ---
 

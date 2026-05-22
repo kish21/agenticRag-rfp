@@ -15,9 +15,9 @@ import sys, os, json, subprocess, time, traceback, tempfile, re
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).parent
-BUILD_STATE_FILE = ROOT / "build_state.json"
-LOG_FILE = ROOT / "checkpoint_log.md"
+ROOT = Path(__file__).parent.parent
+BUILD_STATE_FILE = ROOT / ".claude" / "build_state.json"
+LOG_FILE = ROOT / ".claude" / "checkpoint_log.md"
 
 
 def load_state() -> dict:
