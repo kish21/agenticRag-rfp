@@ -7,6 +7,7 @@ from app.api.admin_routes import router as admin_router
 from app.api.evaluation_routes import router as eval_router
 from app.api.tenant_routes import router as tenant_router
 from app.api.org_settings_routes import router as org_settings_router
+from app.api.chat_routes import router as chat_router
 from app.api.middleware import AuthMiddleware
 
 
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(eval_router)
     app.include_router(tenant_router)
     app.include_router(org_settings_router)
+    app.include_router(chat_router)
 
     @app.get("/health")
     async def health():

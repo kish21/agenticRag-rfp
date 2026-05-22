@@ -6,19 +6,25 @@ import { FONT, MONO } from "@/lib/theme";
 interface FileDropZoneProps {
   file: File | null;
   onFile: (f: File) => void;
+  onClear?: () => void;
   placeholder: string;
   compact?: boolean;
+  accept?: string;
 }
 
-export function FileDropZone({ file, onFile, placeholder, compact = false }: FileDropZoneProps) {
+export function FileDropZone({ file, onFile, onClear, placeholder, compact = false, accept = ".pdf,.docx" }: FileDropZoneProps) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const acceptedExts = accept.split(",").map(s => s.trim().replace(/^\./, "").toLowerCase());
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragging(false);
     const f = e.dataTransfer.files[0];
-    if (f && (f.type.includes("pdf") || f.name.endsWith(".docx"))) onFile(f);
+    if (!f) return;
+    const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+    if (acceptedExts.some(a => ext === a || f.type.includes(a))) onFile(f);
   }
 
   const borderStyle = dragging ? "1px solid var(--color-accent)" : "1px dashed var(--color-border)";
@@ -51,6 +57,21 @@ export function FileDropZone({ file, onFile, placeholder, compact = false }: Fil
           <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-text-muted)" }}>
             ({(file.size / 1024).toFixed(0)} KB)
           </span>
+          {onClear && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); onClear(); }}
+              aria-label="Remove file"
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: "var(--color-text-muted)", fontSize: 16,
+                padding: "0 2px", lineHeight: 1, marginLeft: 2,
+                transition: "color 150ms ease-out",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = "var(--color-error)"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+            >×</button>
+          )}
         </div>
       ) : (
         <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.5 }}>
@@ -58,7 +79,7 @@ export function FileDropZone({ file, onFile, placeholder, compact = false }: Fil
         </p>
       )}
       <input
-        ref={inputRef} type="file" accept=".pdf,.docx" style={{ display: "none" }}
+        ref={inputRef} type="file" accept={accept} style={{ display: "none" }}
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }}
       />
     </div>

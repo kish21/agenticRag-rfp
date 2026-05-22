@@ -269,11 +269,20 @@ class ExtractedCertification(BaseModel):
 
 class ExtractedInsurance(BaseModel):
     insurance_type: Optional[str] = None
-    amount_gbp: Optional[float] = None
+    amount: Optional[float] = None          # currency-neutral; use run.currency for display
+    amount_gbp: Optional[float] = None      # deprecated alias — read amount instead
     provider: Optional[str] = None
     confidence: float = Field(ge=0.0, le=1.0)
     grounding_quote: str
     source_chunk_id: str
+
+    @model_validator(mode="after")
+    def _backfill_amount(self) -> "ExtractedInsurance":
+        if self.amount is None and self.amount_gbp is not None:
+            self.amount = self.amount_gbp
+        elif self.amount_gbp is None and self.amount is not None:
+            self.amount_gbp = self.amount
+        return self
 
     @field_validator("grounding_quote")
     @classmethod
@@ -303,12 +312,27 @@ class ExtractedProject(BaseModel):
 
 class ExtractedPricing(BaseModel):
     year: Optional[int] = None
-    amount_gbp: Optional[float] = None
-    total_gbp: Optional[float] = None
+    amount: Optional[float] = None          # currency-neutral; use run.currency for display
+    total_amount: Optional[float] = None    # currency-neutral total
+    amount_gbp: Optional[float] = None      # deprecated alias
+    total_gbp: Optional[float] = None       # deprecated alias
+    description: Optional[str] = None
     includes: List[str] = []
     confidence: float = Field(ge=0.0, le=1.0)
     grounding_quote: str
     source_chunk_id: str
+
+    @model_validator(mode="after")
+    def _backfill_amounts(self) -> "ExtractedPricing":
+        if self.amount is None and self.amount_gbp is not None:
+            self.amount = self.amount_gbp
+        elif self.amount_gbp is None and self.amount is not None:
+            self.amount_gbp = self.amount
+        if self.total_amount is None and self.total_gbp is not None:
+            self.total_amount = self.total_gbp
+        elif self.total_gbp is None and self.total_amount is not None:
+            self.total_gbp = self.total_amount
+        return self
 
 class ExtractedFact(BaseModel):
     """Generic extracted fact — used for any ExtractionTarget with fact_type='custom'."""

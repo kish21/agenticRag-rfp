@@ -8,11 +8,12 @@ import { useThemeContext } from "@/components/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
 import { api, getUserInfo, clearUserInfo, isLoggedIn, type UserInfo } from "@/lib/api";
 import { NewEvaluationForm } from "@/components/NewEvaluationForm";
+import { ConfirmSetupPage } from "@/components/ConfirmSetupPage";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ShellState = "idle" | "running" | "completed";
-type CanvasPage = "welcome" | "upload-form" | "progress" | "results";
+type CanvasPage = "welcome" | "upload-form" | "confirm" | "progress" | "results";
 
 interface EvalRun {
   run_id: string;
@@ -45,6 +46,14 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   suggestedCriteria?: string[];
+}
+
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -117,6 +126,7 @@ export default function HomePage() {
   const [shellState, setShellState] = useState<ShellState>("idle");
   const [canvasPage, setCanvasPage] = useState<CanvasPage>("welcome");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [confirmRunId, setConfirmRunId] = useState<string | null>(null);
   const [rightExpanded, setRightExpanded] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -124,6 +134,8 @@ export default function HomePage() {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
 
   // Progress + agent log
   const [agentStatuses, setAgentStatuses] = useState<Record<string, { status: string; message: string }>>({});
@@ -139,6 +151,8 @@ export default function HomePage() {
   const [chatFile, setChatFile] = useState<File | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatFileDragging, setChatFileDragging] = useState(false);
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
 
   // Saved success criteria
   const [savedCriteria, setSavedCriteria] = useState<string[]>([]);
@@ -149,7 +163,42 @@ export default function HomePage() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
 
-  const chatVisible = shellState !== "running";
+  const chatVisible = shellState !== "running" && canvasPage !== "confirm";
+
+  // ── Chat session helpers (localStorage, keyed per email) ──────────────────
+
+  function _chatStorageKey(email: string) {
+    return `meridian_chat_sessions_${email}`;
+  }
+
+  function _loadSessions(email: string): ChatSession[] {
+    try {
+      const raw = localStorage.getItem(_chatStorageKey(email));
+      return raw ? (JSON.parse(raw) as ChatSession[]) : [];
+    } catch { return []; }
+  }
+
+  function _persistSession(email: string, session: ChatSession, allSessions: ChatSession[]) {
+    const updated = [session, ...allSessions.filter(s => s.id !== session.id)].slice(0, 20);
+    try { localStorage.setItem(_chatStorageKey(email), JSON.stringify(updated)); } catch { /* ignore quota */ }
+    setChatSessions(updated);
+  }
+
+  function newChatSession() {
+    setChatMessages([]);
+    setChatSessionId(null);
+    setChatInput("");
+    setChatFile(null);
+    setCanvasPage("welcome");
+  }
+
+  function loadChatSession(session: ChatSession) {
+    setChatMessages(session.messages);
+    setChatSessionId(session.id);
+    setChatInput("");
+    setChatFile(null);
+    setCanvasPage("welcome");
+  }
 
   // ── Auth + initial load ────────────────────────────────────────────────────
 
@@ -157,6 +206,9 @@ export default function HomePage() {
     if (!isLoggedIn()) { router.push("/login"); return; }
     const info = getUserInfo();
     setUserInfo(info);
+    if (info?.email) {
+      setChatSessions(_loadSessions(info.email));
+    }
     api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
       on401: () => router.push("/login"),
     })
@@ -235,23 +287,43 @@ export default function HomePage() {
       setShellState("running");
       setCanvasPage("progress");
       setRightExpanded(true);
+    } else if (run.status === "pending_confirm") {
+      setConfirmRunId(run.run_id);
+      setCanvasPage("confirm");
     } else {
       setCanvasPage("welcome");
     }
     if (isNarrow) setSidebarOpen(false);
   }
 
+  async function deleteRun(e: React.MouseEvent, runId: string) {
+    e.stopPropagation(); // don't trigger openRun
+    setDeletingRunId(runId);
+    try {
+      await api.delete(`/api/v1/evaluate/${runId}`);
+      setRuns(prev => prev.filter(r => r.run_id !== runId));
+      if (activeRunId === runId) {
+        setActiveRunId(null);
+        setCanvasPage("welcome");
+        setShellState("idle");
+      }
+    } catch {
+      // silent — server will return 409 for completed/running runs (shouldn't happen since button is hidden for those)
+    } finally {
+      setDeletingRunId(null);
+    }
+  }
+
   function handleEvalSuccess(runId: string, rfpTitle: string, vendorCount: number) {
     setActiveRunId(runId);
+    setConfirmRunId(runId);
     setAgentStatuses({});
     setAgentEvents([]);
     setResults(null);
-    setShellState("running");
-    setCanvasPage("progress");
-    setRightExpanded(true);
+    setCanvasPage("confirm");
     setRuns(prev => [{
       run_id: runId, rfp_title: rfpTitle,
-      status: "running", vendor_count: vendorCount,
+      status: "pending_confirm", vendor_count: vendorCount,
       created_at: new Date().toISOString(),
     }, ...prev]);
   }
@@ -265,26 +337,50 @@ export default function HomePage() {
     setChatFile(null);
     const ta = document.getElementById("chat-textarea") as HTMLTextAreaElement | null;
     if (ta) { ta.style.height = "auto"; }
-    setChatMessages(prev => [...prev, { role: "user", text: msg }]);
+
+    const userMsg: ChatMessage = { role: "user", text: msg };
+    const updatedWithUser = [...chatMessages, userMsg];
+    setChatMessages(updatedWithUser);
     setChatLoading(true);
 
     const form = new FormData();
     form.append("message", msg);
     if (attachedFile) form.append("file", attachedFile);
 
+    let assistantMsg: ChatMessage = { role: "assistant", text: "" };
     try {
       const res = await api.post<{ answer: string; suggested_criteria: string[] }>(
         "/api/v1/chat/document", { body: form }
       );
-      setChatMessages(prev => [...prev, {
+      assistantMsg = {
         role: "assistant",
         text: res.answer,
         suggestedCriteria: res.suggested_criteria?.length ? res.suggested_criteria : undefined,
-      }]);
+      };
     } catch {
-      setChatMessages(prev => [...prev, { role: "assistant", text: "Sorry, something went wrong. Please try again." }]);
+      assistantMsg = { role: "assistant", text: "Sorry, something went wrong. Please try again." };
     } finally {
       setChatLoading(false);
+    }
+
+    const finalMessages = [...updatedWithUser, assistantMsg];
+    setChatMessages(finalMessages);
+
+    // Persist session to localStorage
+    const email = userInfo?.email ?? "";
+    if (email) {
+      const sid = chatSessionId ?? `chat_${Date.now()}`;
+      const title = msg.length > 48 ? msg.slice(0, 48) + "…" : msg;
+      const now = new Date().toISOString();
+      const session: ChatSession = {
+        id: sid,
+        title,
+        messages: finalMessages,
+        createdAt: chatSessionId ? (chatSessions.find(s => s.id === sid)?.createdAt ?? now) : now,
+        updatedAt: now,
+      };
+      if (!chatSessionId) setChatSessionId(sid);
+      _persistSession(email, session, chatSessions);
     }
   }
 
@@ -696,6 +792,24 @@ export default function HomePage() {
       <NewEvaluationForm
         onBack={() => setCanvasPage("welcome")}
         onSuccess={handleEvalSuccess}
+        onAuth401={() => router.push("/login")}
+      />
+    );
+  }
+
+  function renderConfirm() {
+    return (
+      <ConfirmSetupPage
+        runId={confirmRunId!}
+        onConfirmed={() => {
+          setShellState("running");
+          setCanvasPage("progress");
+          setRightExpanded(true);
+          setRuns(prev => prev.map(r =>
+            r.run_id === confirmRunId ? { ...r, status: "running" } : r
+          ));
+        }}
+        onBack={() => setCanvasPage("upload-form")}
         onAuth401={() => router.push("/login")}
       />
     );
@@ -1179,6 +1293,77 @@ export default function HomePage() {
                 </button>
               </div>
 
+              {/* ── Personal chats section ───────────────────────── */}
+              <div style={{ padding: "8px 16px 4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <p style={{
+                  fontFamily: FONT, fontWeight: 600, fontSize: 10,
+                  letterSpacing: "0.1em", textTransform: "uppercase",
+                  color: "var(--color-text-muted)",
+                }}>
+                  Personal
+                </p>
+                <button
+                  type="button"
+                  onClick={newChatSession}
+                  title="New chat"
+                  style={{
+                    background: "none",
+                    borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "none",
+                    cursor: "pointer", padding: "2px 4px", borderRadius: "var(--radius)",
+                    fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)",
+                    transition: "color 150ms ease-out",
+                    lineHeight: 1,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = "var(--color-accent)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+                >
+                  + new
+                </button>
+              </div>
+
+              <div style={{ padding: "0 8px 4px" }}>
+                {chatSessions.length === 0 && (
+                  <p style={{ fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)", padding: "4px 8px", lineHeight: 1.5 }}>
+                    No chats yet. Ask a question below.
+                  </p>
+                )}
+                {chatSessions.slice(0, 8).map(session => {
+                  const isActive = session.id === chatSessionId;
+                  return (
+                    <button
+                      key={session.id}
+                      type="button"
+                      onClick={() => loadChatSession(session)}
+                      style={{
+                        width: "100%", textAlign: "left",
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "6px 8px",
+                        backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
+                        borderTop: "none", borderBottom: "none", borderRight: "none",
+                        borderLeft: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
+                        borderRadius: "0 var(--radius) var(--radius) 0",
+                        cursor: "pointer",
+                        transition: "background-color 150ms ease-out",
+                      }}
+                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-surface-hover)"; }}
+                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}
+                    >
+                      <span style={{ fontSize: 9, color: "var(--color-text-muted)", flexShrink: 0 }}>💬</span>
+                      <span style={{
+                        fontFamily: FONT, fontSize: 11,
+                        fontWeight: isActive ? 600 : 400,
+                        color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+                      }}>
+                        {session.title}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div style={{ height: 1, backgroundColor: "var(--color-border)", margin: "4px 0" }} />
+
               {/* Section label */}
               <div style={{ padding: "8px 16px 4px" }}>
                 <p style={{
@@ -1206,43 +1391,79 @@ export default function HomePage() {
                   </p>
                 )}
                 {!loading && runs.slice(0, 10).map(run => {
-                  const isActive  = run.run_id === activeRunId;
-                  const isRunning = run.status === "running";
+                  const isActive     = run.run_id === activeRunId;
+                  const isRunning    = run.status === "running";
+                  const isCompleted  = run.status === "completed";
+                  const canDelete    = !isCompleted && !isRunning;
+                  const isHovered    = hoveredRunId === run.run_id;
+                  const isDeleting   = deletingRunId === run.run_id;
                   return (
-                    <button
+                    <div
                       key={run.run_id}
-                      type="button"
-                      onClick={() => openRun(run)}
-                      style={{
-                        width: "100%", textAlign: "left",
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "7px 8px",
-                        backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
-                        borderTop: "none", borderBottom: "none", borderRight: "none",
-                        borderLeft: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
-                        borderRadius: "0 var(--radius) var(--radius) 0",
-                        cursor: "pointer",
-                        transition: "background-color 150ms ease-out",
-                        ...(isRunning ? { animation: "meridian-pulse-border 2.5s ease-in-out infinite" } : {}),
-                      }}
-                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-surface-hover)"; }}
-                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}
+                      style={{ position: "relative" }}
+                      onMouseEnter={() => setHoveredRunId(run.run_id)}
+                      onMouseLeave={() => setHoveredRunId(null)}
                     >
-                      <div style={{
-                        width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                        backgroundColor: STATUS_DOT[run.status] ?? "var(--color-text-muted)",
-                        ...(isRunning ? { animation: "meridian-dot-pulse 2s ease-in-out infinite" } : {}),
-                      }} />
-                      <span style={{
-                        fontFamily: FONT, fontSize: 12,
-                        fontWeight: isActive ? 600 : 400,
-                        color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        flex: 1,
-                      }}>
-                        {run.rfp_title || "Untitled RFP"}
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => openRun(run)}
+                        style={{
+                          width: "100%", textAlign: "left",
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "7px 8px",
+                          paddingRight: canDelete ? 28 : 8,
+                          backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
+                          borderTop: "none", borderBottom: "none", borderRight: "none",
+                          borderLeft: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
+                          borderRadius: "0 var(--radius) var(--radius) 0",
+                          cursor: "pointer",
+                          transition: "background-color 150ms ease-out",
+                          ...(isRunning ? { animation: "meridian-pulse-border 2.5s ease-in-out infinite" } : {}),
+                        }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-surface-hover)"; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}
+                      >
+                        <div style={{
+                          width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                          backgroundColor: STATUS_DOT[run.status] ?? "var(--color-text-muted)",
+                          ...(isRunning ? { animation: "meridian-dot-pulse 2s ease-in-out infinite" } : {}),
+                        }} />
+                        <span style={{
+                          fontFamily: FONT, fontSize: 12,
+                          fontWeight: isActive ? 600 : 400,
+                          color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          flex: 1,
+                        }}>
+                          {run.rfp_title || "Untitled RFP"}
+                        </span>
+                      </button>
+
+                      {/* Delete button — only on non-completed, non-running runs, visible on hover */}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={e => deleteRun(e, run.run_id)}
+                          title="Delete run"
+                          style={{
+                            position: "absolute", right: 6, top: "50%",
+                            transform: "translateY(-50%)",
+                            opacity: isHovered && !isDeleting ? 1 : 0,
+                            pointerEvents: isHovered ? "auto" : "none",
+                            background: "none",
+                            borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "none",
+                            cursor: "pointer", padding: "2px 4px",
+                            color: "var(--color-text-muted)",
+                            fontSize: 13, lineHeight: 1,
+                            transition: "opacity 150ms ease-out, color 150ms ease-out",
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.color = "var(--color-error)"; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+                        >
+                          {isDeleting ? "…" : "×"}
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -1345,12 +1566,30 @@ export default function HomePage() {
               flex: 1, overflowY: "auto",
               padding: isMobile ? "24px 16px" : isTablet ? "32px 24px" : "40px 40px",
             }}>
-              <div key={canvasPage} style={{ animation: "meridian-canvas-enter 200ms ease-out" }}>
-                {canvasPage === "welcome"     && renderWelcome()}
-                {canvasPage === "upload-form" && renderUploadForm()}
-                {canvasPage === "progress"    && renderProgress()}
-                {canvasPage === "results"     && renderResults()}
-              </div>
+              {/*
+                Upload form is kept mounted while on confirm so that
+                clicking "← Back" restores all uploaded files and fields.
+                It is hidden (not unmounted) during confirm.
+              */}
+              {(canvasPage === "upload-form" || canvasPage === "confirm") && (
+                <div style={{ display: canvasPage === "upload-form" ? "block" : "none" }}>
+                  {renderUploadForm()}
+                </div>
+              )}
+
+              {canvasPage !== "upload-form" && canvasPage !== "confirm" && (
+                <div key={canvasPage} style={{ animation: "meridian-canvas-enter 200ms ease-out" }}>
+                  {canvasPage === "welcome"  && renderWelcome()}
+                  {canvasPage === "progress" && renderProgress()}
+                  {canvasPage === "results"  && renderResults()}
+                </div>
+              )}
+
+              {canvasPage === "confirm" && (
+                <div style={{ animation: "meridian-canvas-enter 200ms ease-out" }}>
+                  {renderConfirm()}
+                </div>
+              )}
             </div>
 
             {/* Chat box — pinned bottom, hides when running */}

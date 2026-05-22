@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { FONT, DISPLAY } from "@/lib/theme";
 import { useBreakpoint } from "@/lib/hooks";
 import { api } from "@/lib/api";
@@ -69,10 +69,29 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
 
   const [rfpTitle, setRfpTitle] = useState("");
   const [department, setDepartment] = useState("");
+  const [contractValue, setContractValue] = useState("");
+  const [currency, setCurrency] = useState("GBP");
   const [rfpFile, setRfpFile] = useState<File | null>(null);
+  const [criteriaFile, setCriteriaFile] = useState<File | null>(null);
   const [vendors, setVendors] = useState<VendorSlot[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (formError) errorRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [formError]);
+
+  function resetForm() {
+    setRfpTitle("");
+    setDepartment("");
+    setContractValue("");
+    setCurrency("GBP");
+    setRfpFile(null);
+    setCriteriaFile(null);
+    setVendors([]);
+    setFormError("");
+  }
 
   function addVendorsFromFiles(files: File[]) {
     setVendors(prev => {
@@ -105,11 +124,17 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
     const fd = new FormData();
     fd.append("rfp_title", rfpTitle.trim());
     fd.append("department", department);
+    fd.append("contract_value", contractValue.replace(/,/g, "") || "0");
+    fd.append("currency", currency);
     fd.append("rfp_file", rfpFile);
+    if (criteriaFile) fd.append("criteria_sheet", criteriaFile);
+    const vendorNamesObj: Record<string, string> = {};
     vendors.forEach(v => {
-      fd.append("vendor_names", v.name.trim());
+      const vid = v.file.name.replace(/\.[^.]+$/, "");
+      vendorNamesObj[vid] = v.name.trim();
       fd.append("vendor_files", v.file);
     });
+    fd.append("vendor_names", JSON.stringify(vendorNamesObj));
 
     try {
       const res = await api.post<{ run_id: string }>("/api/v1/evaluate/start", {
@@ -126,22 +151,43 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
 
   return (
     <div className="w-full" style={{ maxWidth: 620 }}>
-      {/* Back */}
-      <button
-        type="button"
-        onClick={onBack}
-        style={{
-          background: "none", border: "none", cursor: "pointer",
-          fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)",
-          padding: 0, marginBottom: 20,
-          display: "flex", alignItems: "center", gap: 4,
-          transition: "color 150ms ease-out",
-        }}
-        onMouseEnter={e => { e.currentTarget.style.color = "var(--color-text-primary)"; }}
-        onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
-      >
-        ← Back
-      </button>
+      {/* Back + Reset row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <button
+          type="button"
+          onClick={onBack}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)",
+            padding: 0,
+            display: "flex", alignItems: "center", gap: 4,
+            transition: "color 150ms ease-out",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = "var(--color-text-primary)"; }}
+          onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+        >
+          ← Back
+        </button>
+
+        {/* Only show reset if there's something to clear */}
+        {(rfpTitle || rfpFile || vendors.length > 0 || criteriaFile) && (
+          <button
+            type="button"
+            onClick={resetForm}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)",
+              padding: "4px 0",
+              display: "flex", alignItems: "center", gap: 4,
+              transition: "color 150ms ease-out",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = "var(--color-error)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+          >
+            ↺ Clear all
+          </button>
+        )}
+      </div>
 
       <h1 style={{
         fontFamily: DISPLAY, fontWeight: 800,
@@ -155,10 +201,11 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
         Upload your RFP and vendor proposals. Nine specialised agents will evaluate and rank each vendor.
       </p>
 
+      <style>{`@keyframes meridian-spin { to { transform: rotate(360deg); } }`}</style>
       <form onSubmit={handleSubmit} noValidate>
         {/* Error banner */}
         {formError && (
-          <div role="alert" style={{
+          <div ref={errorRef} role="alert" style={{
             marginBottom: 20, padding: "10px 14px",
             backgroundColor: "var(--color-surface)",
             borderTop: "1px solid var(--color-error)",
@@ -204,14 +251,82 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
           </div>
         </div>
 
+        {/* Contract value + Currency */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
+          gap: 12, marginBottom: 20, alignItems: "end",
+        }}>
+          <div>
+            <label htmlFor="contract-value" style={labelCss}>Contract Value</label>
+            <input
+              id="contract-value" type="text" inputMode="numeric"
+              value={contractValue}
+              onChange={e => setContractValue(e.target.value.replace(/[^0-9,.]/g, ""))}
+              placeholder="e.g. 2,400,000"
+              suppressHydrationWarning style={inputCss}
+              onFocus={e => { e.currentTarget.style.borderTopColor = "var(--color-accent)"; e.currentTarget.style.borderBottomColor = "var(--color-accent)"; e.currentTarget.style.borderLeftColor = "var(--color-accent)"; e.currentTarget.style.borderRightColor = "var(--color-accent)"; }}
+              onBlur={e => { e.currentTarget.style.borderTopColor = "var(--color-border)"; e.currentTarget.style.borderBottomColor = "var(--color-border)"; e.currentTarget.style.borderLeftColor = "var(--color-border)"; e.currentTarget.style.borderRightColor = "var(--color-border)"; }}
+            />
+          </div>
+          <div style={{ minWidth: 120 }}>
+            <label htmlFor="currency" style={labelCss}>Currency</label>
+            <select
+              id="currency" value={currency}
+              onChange={e => setCurrency(e.target.value)}
+              style={{ ...inputCss, cursor: "pointer" }}
+              onFocus={e => { e.currentTarget.style.borderTopColor = "var(--color-accent)"; e.currentTarget.style.borderBottomColor = "var(--color-accent)"; e.currentTarget.style.borderLeftColor = "var(--color-accent)"; e.currentTarget.style.borderRightColor = "var(--color-accent)"; }}
+              onBlur={e => { e.currentTarget.style.borderTopColor = "var(--color-border)"; e.currentTarget.style.borderBottomColor = "var(--color-border)"; e.currentTarget.style.borderLeftColor = "var(--color-border)"; e.currentTarget.style.borderRightColor = "var(--color-border)"; }}
+            >
+              {["GBP","USD","EUR","AUD","CAD","SGD","AED","INR","JPY","CHF"].map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         {/* RFP document */}
         <div style={{ marginBottom: 24 }}>
           <label style={labelCss}>RFP Document *</label>
           <FileDropZone
             file={rfpFile}
             onFile={setRfpFile}
+            onClear={() => setRfpFile(null)}
             placeholder="Drop RFP PDF or DOCX here, or click to browse"
           />
+        </div>
+
+        {/* Criteria sheet — optional */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <label style={labelCss}>Your Criteria Sheet</label>
+            <span style={{
+              fontFamily: FONT, fontSize: 10, fontWeight: 500,
+              letterSpacing: "0.06em", textTransform: "uppercase",
+              color: "var(--color-text-muted)",
+              padding: "1px 6px",
+              borderTop: "1px solid var(--color-border)",
+              borderBottom: "1px solid var(--color-border)",
+              borderLeft: "1px solid var(--color-border)",
+              borderRight: "1px solid var(--color-border)",
+              borderRadius: 3,
+            }}>optional</span>
+          </div>
+          <FileDropZone
+            file={criteriaFile}
+            onFile={setCriteriaFile}
+            onClear={() => setCriteriaFile(null)}
+            accept=".csv,.xlsx,.xls,.pdf,.docx"
+            placeholder="Drop your scoring sheet — CSV, Excel, or PDF"
+          />
+          {criteriaFile && (
+            <p style={{
+              fontFamily: FONT, fontSize: 11, color: "var(--color-warning)",
+              marginTop: 6,
+            }}>
+              Your criteria will be added as a 4th source — overrides RFP-extracted, not org/dept templates.
+            </p>
+          )}
         </div>
 
         {/* Vendor proposals */}
@@ -246,7 +361,7 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
                   index={idx}
                   name={vendor.name}
                   file={vendor.file}
-                  canRemove={vendors.length > 1}
+                  canRemove={true}
                   onRemove={() => removeVendor(vendor.id)}
                   onNameChange={name => updateVendorName(vendor.id, name)}
                 />

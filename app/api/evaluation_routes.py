@@ -59,7 +59,8 @@ def _db_get_run(run_id: str, org_id: str) -> dict:
                        status, vendor_ids, contract_value,
                        agent_events, agent_log, decision_output,
                        created_at, completed_at,
-                       vendor_names, created_by_email, creator_dept_id
+                       vendor_names, created_by_email, creator_dept_id,
+                       currency
                 FROM evaluation_runs
                 WHERE run_id = CAST(:rid AS uuid)
                   AND org_id = CAST(:oid AS uuid)
@@ -187,6 +188,8 @@ async def start_evaluation(
     vendor_names: str = Form(default="{}"),
     rfp_file: UploadFile = File(...),
     vendor_files: list[UploadFile] = File(default=[]),
+    criteria_sheet: UploadFile = File(default=None),
+    currency: str = Form(default="GBP"),
     user: TokenData = Depends(get_current_user),
 ):
     """
@@ -204,6 +207,12 @@ async def start_evaluation(
 
     # Read all bytes upfront
     rfp_bytes = await rfp_file.read()
+    criteria_bytes: bytes | None = None
+    criteria_filename: str | None = None
+    if criteria_sheet and criteria_sheet.filename:
+        criteria_bytes = await criteria_sheet.read()
+        criteria_filename = criteria_sheet.filename
+
     vendor_file_map: dict[str, tuple[bytes, str]] = {}
     for vf in vendor_files:
         vbytes = await vf.read()
@@ -217,6 +226,7 @@ async def start_evaluation(
     from app.core.criteria_merger import (
         get_org_criteria, get_dept_criteria,
         extract_rfp_text, extract_criteria_from_rfp,
+        extract_criteria_from_user_sheet,
         merge_criteria,
     )
 
@@ -227,7 +237,12 @@ async def start_evaluation(
     org_criteria  = get_org_criteria(user.org_id)
     dept_criteria = get_dept_criteria(user.org_id, department)
 
-    # Merge org+dept templates only — RFP LLM extraction runs in background
+    # Parse user-uploaded criteria sheet synchronously (pandas/pypdf — fast, no LLM)
+    user_criteria: dict | None = None
+    if criteria_bytes and criteria_filename:
+        user_criteria = await extract_criteria_from_user_sheet(criteria_bytes, criteria_filename)
+
+    # Merge org+dept+user templates — RFP LLM extraction runs in background
     merged = merge_criteria(
         org_criteria=org_criteria,
         dept_criteria=dept_criteria,
@@ -235,6 +250,7 @@ async def start_evaluation(
         department=department,
         rfp_id=rfp_id,
         org_id=user.org_id,
+        user_criteria=user_criteria,
     )
 
     # Build initial EvaluationSetup with defaults — overwritten by background task once LLM finishes
@@ -309,12 +325,12 @@ async def start_evaluation(
                 INSERT INTO evaluation_runs
                     (run_id, org_id, rfp_id, setup_id, rfp_title, department,
                      rfp_filename, rfp_bytes, status, vendor_ids, contract_value,
-                     vendor_names, created_by_email, creator_dept_id)
+                     vendor_names, created_by_email, creator_dept_id, currency)
                 VALUES
                     (CAST(:run_id AS uuid), CAST(:org_id AS uuid), :rfp_id, :setup_id,
                      :rfp_title, :department, :rfp_filename, :rfp_bytes,
                      'pending_confirm', :vendor_ids, :contract_value,
-                     CAST(:vendor_names AS jsonb), :created_by_email, :creator_dept_id)
+                     CAST(:vendor_names AS jsonb), :created_by_email, :creator_dept_id, :currency)
             """),
             {
                 "run_id":           run_id,
@@ -330,6 +346,7 @@ async def start_evaluation(
                 "vendor_names":     vendor_names if vendor_names.strip() else "{}",
                 "created_by_email": user.email,
                 "creator_dept_id":  user.dept_id,
+                "currency":         currency.upper().strip()[:3],
             },
         )
         # Store each vendor file in vendor_documents
@@ -368,7 +385,7 @@ async def start_evaluation(
     background_tasks.add_task(
         _refine_setup_with_llm,
         setup_id, rfp_text, org_criteria, dept_criteria,
-        department, rfp_id, user.org_id,
+        department, rfp_id, user.org_id, user_criteria,
     )
 
     return {"run_id": run_id, "setup_id": setup_id, "rfp_id": rfp_id}
@@ -386,7 +403,7 @@ async def list_runs(user: TokenData = Depends(get_current_user)):
         query = sa.text("""
             SELECT
                 r.run_id::text, r.rfp_id, r.status, r.created_at,
-                r.approval_tier, r.contract_value,
+                r.approval_tier, r.contract_value, r.currency,
                 r.rfp_title, r.department,
                 array_length(r.vendor_ids, 1) AS vendor_count,
                 r.decision_output
@@ -401,7 +418,7 @@ async def list_runs(user: TokenData = Depends(get_current_user)):
         query = sa.text("""
             SELECT
                 r.run_id::text, r.rfp_id, r.status, r.created_at,
-                r.approval_tier, r.contract_value,
+                r.approval_tier, r.contract_value, r.currency,
                 r.rfp_title, r.department,
                 array_length(r.vendor_ids, 1) AS vendor_count,
                 r.decision_output
@@ -433,6 +450,8 @@ async def list_runs(user: TokenData = Depends(get_current_user)):
             "approver_role":     dec.get("approval_routing", {}).get("approver_role") if dec else None,
             "sla_deadline":      dec.get("approval_routing", {}).get("sla_deadline") if dec else None,
             "started_at":        r["created_at"].isoformat() if r["created_at"] else "",
+            "currency":          r.get("currency") or "GBP",
+            "contract_value":    float(r["contract_value"]) if r.get("contract_value") is not None else None,
         })
 
     return {"runs": runs}
@@ -449,6 +468,12 @@ async def get_setup(run_id: str, user: TokenData = Depends(get_current_user)):
     setup = _db_get_setup(run["setup_id"])
     if not setup:
         raise HTTPException(status_code=404, detail="Setup not found")
+    # Inject run-level fields the confirm page needs
+    setup["currency"] = run.get("currency") or "GBP"
+    setup["contract_value"] = float(run["contract_value"]) if run.get("contract_value") is not None else None
+    setup["vendor_count"] = len(run.get("vendor_ids") or [])
+    setup["rfp_title"] = run.get("rfp_title") or ""
+    setup["department"] = run.get("department") or ""
     return setup
 
 
@@ -533,6 +558,7 @@ async def _refine_setup_with_llm(
     department: str,
     rfp_id: str,
     org_id: str,
+    user_criteria: dict | None = None,
 ) -> None:
     """
     Runs after /start returns. Calls the LLM to extract RFP-specific criteria
@@ -551,6 +577,7 @@ async def _refine_setup_with_llm(
             department=department,
             rfp_id=rfp_id,
             org_id=org_id,
+            user_criteria=user_criteria,
         )
         if not merged["mandatory_checks"] and not merged["scoring_criteria"]:
             return  # nothing better than defaults — leave as-is
@@ -670,7 +697,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             row = conn.execute(
                 sa.text("""
                     SELECT rfp_id, rfp_title, department, rfp_filename,
-                           rfp_bytes, vendor_ids, contract_value, setup_id
+                           rfp_bytes, vendor_ids, contract_value, setup_id,
+                           currency
                     FROM evaluation_runs
                     WHERE run_id = CAST(:rid AS uuid)
                 """),
@@ -687,6 +715,7 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         vendor_ids     = list(row[5] or [])
         contract_value = float(row[6] or 0)
         setup_id       = row[7]
+        currency       = row[8] if len(row) > 8 and row[8] else "GBP"
 
         setup_json = _db_get_setup(setup_id)
         if not setup_json:
@@ -830,7 +859,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         exp_out, _ = await run_explanation_agent(decision_output=dec_out,
                                                   evaluation_outputs=evaluation_outputs,
                                                   extraction_outputs=extraction_outputs,
-                                                  source_chunks=source_chunks)
+                                                  source_chunks=source_chunks,
+                                                  currency=currency)
         _emit("explanation", "done", "Report ready — every claim cited",
               log_msg="Evaluation complete. Full report ready with citations for every finding.")
 
@@ -1147,3 +1177,54 @@ async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_curre
         "by_agent": {},
         "source": "persisted",
     }
+
+
+# ── DELETE /{runId} ───────────────────────────────────────────────────────────
+
+@router.delete("/{run_id}")
+async def delete_run(run_id: str, user: TokenData = Depends(get_current_user)):
+    """
+    Permanently delete an evaluation run.
+    Blocked if the run status is 'completed' — those are audit records.
+    Blocked if the run is currently 'running' — would orphan the pipeline.
+    """
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+
+    if run["status"] == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Completed runs cannot be deleted — they are audit records.",
+        )
+    if run["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a run that is currently in progress.",
+        )
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        # Delete in FK-safe order — deepest children first, parents last
+        rid = {"rid": run_id}
+        conn.execute(sa.text("DELETE FROM approvals       WHERE run_id = CAST(:rid AS uuid)"), rid)
+        conn.execute(sa.text("DELETE FROM decisions        WHERE run_id = CAST(:rid AS uuid)"), rid)
+        conn.execute(sa.text("DELETE FROM retrieval_log    WHERE run_id = CAST(:rid AS uuid)"), rid)
+        # audit_log keeps a history record (run_id set to NULL rather than deleted)
+        conn.execute(sa.text("UPDATE audit_log SET run_id = NULL WHERE run_id = CAST(:rid AS uuid)"), rid)
+        conn.execute(
+            sa.text("DELETE FROM vendor_documents WHERE rfp_id = :rfp_id AND org_id = CAST(:oid AS uuid)"),
+            {"rfp_id": run["rfp_id"], "oid": user.org_id},
+        )
+        if run.get("setup_id"):
+            conn.execute(sa.text("DELETE FROM extracted_facts WHERE setup_id = :sid"), {"sid": run["setup_id"]})
+        conn.execute(
+            sa.text("DELETE FROM evaluation_runs WHERE run_id = CAST(:rid AS uuid) AND org_id = CAST(:oid AS uuid)"),
+            {"rid": run_id, "oid": user.org_id},
+        )
+        if run.get("setup_id"):
+            conn.execute(sa.text("DELETE FROM evaluation_setups WHERE setup_id = :sid"), {"sid": run["setup_id"]})
+
+    audit(org_id=user.org_id, run_id=run_id, event_type="run.deleted",
+          actor=user.email, detail={"status_at_deletion": run["status"]})
+
+    return {"run_id": run_id, "deleted": True}

@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 /* ── Default theme vars (slate — Stripe-style) ───────────────────────────────
    Overwritten at runtime by applyThemeVars() in ThemeProvider.
    These values ensure a flash-free first paint before JS hydrates.          */
