@@ -25,7 +25,7 @@ interface EvalRun {
 
 interface AgentEvent {
   agent: string;
-  status: "pending" | "running" | "done" | "blocked";
+  status: "pending" | "running" | "done" | "blocked" | "interrupted" | "failed" | "completed";
   message: string;
 }
 
@@ -980,8 +980,16 @@ export default function HomePage() {
 
         <button
           type="button"
-          onClick={() => {
+          onClick={async () => {
             esRef.current?.close();
+            if (activeRunId) {
+              try {
+                await api.post(`/api/v1/evaluate/${activeRunId}/cancel`);
+              } catch { /* best-effort — UI resets regardless */ }
+              setRuns(prev => prev.map(r =>
+                r.run_id === activeRunId ? { ...r, status: "interrupted" as EvalRun["status"] } : r
+              ));
+            }
             setShellState("idle");
             setCanvasPage("welcome");
             setRightExpanded(false);

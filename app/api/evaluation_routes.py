@@ -1179,6 +1179,35 @@ async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_curre
     }
 
 
+# ── POST /{runId}/cancel ──────────────────────────────────────────────────────
+
+@router.post("/{run_id}/cancel")
+async def cancel_run(run_id: str, user: TokenData = Depends(get_current_user)):
+    """Mark a running evaluation as interrupted so the SSE stream terminates."""
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+
+    if run["status"] not in ("running", "pending"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel a run with status '{run['status']}'.",
+        )
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text("""
+                UPDATE evaluation_runs
+                SET status = 'interrupted', completed_at = NOW()
+                WHERE run_id = CAST(:rid AS uuid)
+                  AND org_id = CAST(:oid AS uuid)
+            """),
+            {"rid": run_id, "oid": user.org_id},
+        )
+
+    return {"run_id": run_id, "status": "interrupted"}
+
+
 # ── DELETE /{runId} ───────────────────────────────────────────────────────────
 
 @router.delete("/{run_id}")
