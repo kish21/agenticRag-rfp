@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, isLoggedIn } from "@/lib/api";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
+import { useBreakpoint } from "@/lib/hooks";
 
 // ── Types matching DecisionOutput / ShortlistedVendor / CriterionScore ────────
 
@@ -81,6 +82,7 @@ function scoreBar(score: number, max = 10) {
 export default function ComparePage() {
   const params = useParams();
   const router = useRouter();
+  const bp     = useBreakpoint();
   const runId  = params?.runId as string | undefined;
 
   const [data,   setData]   = useState<RunResults | null>(null);
@@ -148,7 +150,7 @@ export default function ComparePage() {
 
         {/* Error */}
         {error && (
-          <div style={{
+          <div role="alert" style={{
             padding: "12px 16px", borderRadius: "var(--radius)",
             borderTop: "1px solid var(--color-border)",
             borderBottom: "1px solid var(--color-border)",

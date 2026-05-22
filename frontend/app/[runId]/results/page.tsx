@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, isLoggedIn } from "@/lib/api";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
+import { useBreakpoint } from "@/lib/hooks";
 
 interface VendorScore {
   vendor_name: string;
@@ -22,6 +23,7 @@ interface EvalResults {
 export default function ResultsPage() {
   const params   = useParams();
   const router   = useRouter();
+  const bp       = useBreakpoint();
   const runId    = params?.runId as string | undefined;
 
   const [results, setResults] = useState<EvalResults | null>(null);
@@ -81,7 +83,7 @@ export default function ResultsPage() {
 
         {/* Error */}
         {error && (
-          <div style={{
+          <div role="alert" style={{
             padding: "14px 16px",
             backgroundColor: "var(--color-surface)",
             borderTop: "1px solid var(--color-border)",
