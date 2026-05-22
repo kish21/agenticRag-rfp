@@ -194,28 +194,48 @@ Wait for confirmation before starting.
 
 ---
 
+## PACKAGE STRUCTURE — app/ sub-packages (refactored May 2026)
+
+```
+app/core/ is GONE — replaced by focused sub-packages:
+
+app/auth/        — jwt.py, rbac.py, dependencies.py
+app/providers/   — llm.py, embedding.py, reranker.py, compute.py, observability.py
+app/infra/       — audit.py, logger.py, rate_limiter.py, circuit_breaker.py, cost_tracker.py
+app/retrieval/   — qdrant.py, pipeline.py
+app/domain/      — criteria.py, rfp.py, override.py, org_settings.py, agent_registry.py
+app/schemas/     — output_models.py
+app/validators/  — extraction.py, retrieval.py, ingestion.py
+app/agents/      — flat: 9 single .py files, one per agent
+app/api/         — routes per concern
+app/jobs/        — cleanup.py, rate_monitor.py
+deploy/          — modal.py (was app_modal.py)
+tools/           — checkpoint_runner.py, contract_tests.py, drift_detector.py
+```
+
+Import rule: never import from app.core (deleted). Use the sub-package paths above.
+
 ## FILE OWNERSHIP MAP
 
 ```
 Skill 01: requirements.txt, .env, docker-compose.yml, app/config.py, app/main.py
 Skill 02: app/agents/planner.py, app/agents/critic.py
-          app/core/qdrant_client.py, app/core/rate_limiter.py
-          app/api/auth.py, app/api/routes.py, app_modal.py
-Skill 03: app/agents/ingestion.py, app/core/llamaindex_pipeline.py
-          app/core/ingestion_validator.py
-Skill 03b: app/agents/retrieval.py, app/core/reranker.py
-           app/core/query_rewriter.py, app/core/hyde.py
-           app/core/context_optimizer.py
-Skill 04: app/agents/extraction.py, app/core/output_models.py
+          app/retrieval/qdrant.py, app/infra/rate_limiter.py
+          app/api/auth_routes.py, app/api/evaluation_routes.py, deploy/modal.py
+Skill 03: app/agents/ingestion.py, app/retrieval/pipeline.py
+          app/validators/ingestion.py
+Skill 03b: app/agents/retrieval.py, app/providers/reranker.py
+           app/retrieval/pipeline.py
+Skill 04: app/agents/extraction.py, app/schemas/output_models.py
           app/db/schema.sql, app/db/fact_store.py
 Skill 05: app/agents/evaluation.py, app/agents/comparator.py
 Skill 06: app/agents/decision.py, app/agents/explanation.py
-          app/core/override_mechanism.py, app/core/rfp_confirmation.py
+          app/domain/override.py, app/domain/rfp.py
 Skill 07: app/output/pdf_report.py, frontend/ (Next.js)
           tests/regression/
-Skill 08: app/core/langfuse_client.py, app/jobs/cleanup.py
+Skill 08: app/providers/observability.py, app/jobs/cleanup.py
           app/jobs/rate_monitor.py
-Skill 09: app/core/agent_registry.py, app/api/admin_routes.py
+Skill 09: app/domain/agent_registry.py, app/api/admin_routes.py
           app/agents/hr_agent_config.py
 ```
 
