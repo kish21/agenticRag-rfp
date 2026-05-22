@@ -87,7 +87,7 @@ jobs:
           EOF
 
       - name: Run pytest
-        run: pytest tests/ -v --tb=short --ignore=tests/regression
+        run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression
 
   # ── Job 4: Backend contract tests (no services needed — import-only) ─────
   backend-contracts:
