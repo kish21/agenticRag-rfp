@@ -3,6 +3,10 @@
 *.env.local
 *.env.*.local
 
+# Log files — rotate daily, do not commit
+logs/*.jsonl
+logs/*.log
+
 # Python
 venv/
 __pycache__/

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from app.core.dependencies import get_current_user
 from app.core.auth import TokenData, decode_token
 from app.core.audit import audit
+from app.core.logger import rfp_logger, DevLevel, AgentLevel
 from app.core.rbac import require_run_access, require_admin_role, log_access
 from app.core.output_models import (
     AuditOverride, EvaluationSetup, MandatoryCheck,
@@ -678,6 +679,11 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
                   actor="system", agent=agent, detail={"message": message})
 
     def _fail(agent: str, err: Exception) -> None:
+        import traceback as _tb
+        rfp_logger.dev(DevLevel.ERROR, agent, f"Pipeline blocked: {err}",
+                       data={"traceback": _tb.format_exc()},
+                       run_id=run_id, org_id=org_id)
+        rfp_logger.end_run(run_id=run_id, org_id=org_id, status="blocked")
         _emit(agent, "blocked", str(err),
               log_msg=f"Something went wrong in the {agent} step. The evaluation could not continue.")
         try:
@@ -686,6 +692,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             pass
         audit(org_id=org_id, run_id=run_id, event_type="run.blocked",
               actor="system", detail={"agent": agent, "error": str(err)})
+
+    rfp_logger.start_run(run_id=run_id, org_id=org_id, rfp_id="", vendor_count=0)
 
     from app.core.cost_tracker import set_run_context, get_run_cost as _get_cost, clear_run_cost
     _cost_ctx = set_run_context(run_id=run_id, agent="pipeline")
@@ -724,6 +732,14 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
 
         vendor_file_map = _db_load_vendor_files(run_id)
         n_vendors = len(vendor_ids)
+
+        # Update start_run now that we have real context
+        rfp_logger.dev(DevLevel.AGENT, "Pipeline",
+                       f"Starting pipeline: {n_vendors} vendor(s), RFP '{rfp_title}'",
+                       data={"rfp_id": rfp_id, "vendors": n_vendors,
+                             "criteria": len(evaluation_setup.scoring_criteria),
+                             "mandatory_checks": len(evaluation_setup.mandatory_checks)},
+                       run_id=run_id, org_id=org_id)
 
         # ── 1. Planner ────────────────────────────────────────────────────────
         _emit("planner", "running", "Decomposing evaluation into task DAG",
@@ -792,7 +808,12 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
                 warnings=[],
             )
             retrieval_outputs[vid] = combined
-            print(f"[DEBUG retrieval] vendor={vid} queries={len(queries)} unique_chunks={len(merged_chunks)}")
+            rfp_logger.dev(DevLevel.RAG, "retrieval",
+                           f"Vendor {vid}: {len(merged_chunks)} unique chunks from {len(queries)} queries",
+                           data={"vendor_id": vid, "queries": len(queries),
+                                 "unique_chunks": len(merged_chunks),
+                                 "confidence": combined.confidence},
+                           run_id=run_id, org_id=org_id)
         _emit("retrieval", "done", f"Retrieved chunks for {n_vendors} vendors",
               log_msg=f"Found the most relevant passages from all {n_vendors} vendor proposals.")
 
@@ -810,7 +831,16 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             source_chunks[vid] = "\n".join(
                 c.text for c in retrieval_outputs[vid].chunks
             ) if hasattr(retrieval_outputs[vid], "chunks") else ""
-            print(f"[DEBUG extraction] vendor={vid} slas={len(ext_out.slas)} pricing={len(ext_out.pricing)} facts={len(ext_out.extracted_facts)} completeness={ext_out.extraction_completeness:.2f} hal_risk={ext_out.hallucination_risk:.2f} critic={critic_ext.overall_verdict}")
+            rfp_logger.dev(DevLevel.INFO, "extraction",
+                           f"Vendor {vid}: {len(ext_out.slas)} SLAs, {len(ext_out.pricing)} pricing, {len(ext_out.extracted_facts)} facts",
+                           data={"vendor_id": vid,
+                                 "slas": len(ext_out.slas),
+                                 "pricing": len(ext_out.pricing),
+                                 "facts": len(ext_out.extracted_facts),
+                                 "completeness": round(ext_out.extraction_completeness, 2),
+                                 "hallucination_risk": round(ext_out.hallucination_risk, 2),
+                                 "critic": critic_ext.overall_verdict},
+                           run_id=run_id, org_id=org_id)
         total_facts = sum(
             len(getattr(o, "certifications", []) or []) +
             len(getattr(o, "slas", []) or []) +
@@ -870,6 +900,12 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
 
         # Persist decision to DB
         _db_save_decision(run_id, dec_out.model_dump(mode="json"))
+        rfp_logger.end_run(run_id=run_id, org_id=org_id, status="complete",
+                           recommended_vendor=(getattr(dec_out, "shortlisted_vendors", None) or [None])[0])
+        rfp_logger.dev(DevLevel.SUCCESS, "Pipeline",
+                       f"Evaluation complete — {n_short} shortlisted, {n_rej} rejected",
+                       data={"shortlisted": n_short, "rejected": n_rej},
+                       run_id=run_id, org_id=org_id)
         audit(org_id=org_id, run_id=run_id, event_type="run.completed",
               actor="system",
               detail={"shortlisted": n_short, "rejected": n_rej,

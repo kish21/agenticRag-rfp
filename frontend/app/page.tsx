@@ -9,6 +9,7 @@ import { useBreakpoint } from "@/lib/hooks";
 import { api, getUserInfo, clearUserInfo, isLoggedIn, type UserInfo } from "@/lib/api";
 import { NewEvaluationForm } from "@/components/NewEvaluationForm";
 import { ConfirmSetupPage } from "@/components/ConfirmSetupPage";
+import { DevLogPanel, type DevLogEntry } from "@/components/DevLogPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -136,12 +137,19 @@ export default function HomePage() {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const isDevRole = userInfo?.role === "org_admin" || userInfo?.role === "company_admin";
   const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
 
   // Progress + agent log
   const [agentStatuses, setAgentStatuses] = useState<Record<string, { status: string; message: string }>>({});
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+
+  // Developer log
+  const [devLogEntries, setDevLogEntries] = useState<DevLogEntry[]>([]);
+  const [devLogConnected, setDevLogConnected] = useState(false);
+  const [rightTab, setRightTab] = useState<"agent" | "dev">("agent");
+  const devEsRef = useRef<EventSource | null>(null);
 
   // Results
   const [results, setResults] = useState<EvalResults | null>(null);
@@ -259,6 +267,26 @@ export default function HomePage() {
     es.onerror = (e) => { console.error("[SSE] stream error", e); es.close(); };
     return () => { es.close(); esRef.current = null; };
   }, [shellState, activeRunId]);
+
+  // ── Dev log SSE ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!activeRunId) return;
+    const runParam = `run_id=${activeRunId}`;
+    const es = new EventSource(`/api/v1/logs/stream?${runParam}`, { withCredentials: true });
+    devEsRef.current = es;
+    es.onopen    = () => setDevLogConnected(true);
+    es.onerror   = () => setDevLogConnected(false);
+    es.onmessage = (e) => {
+      try {
+        const entry = JSON.parse(e.data);
+        if (entry.type === "dev") {
+          setDevLogEntries(prev => [...prev.slice(-1999), entry as DevLogEntry]);
+        }
+      } catch { /* skip */ }
+    };
+    return () => { es.close(); devEsRef.current = null; setDevLogConnected(false); };
+  }, [activeRunId]);
 
   // ── Results fetch ──────────────────────────────────────────────────────────
 
@@ -1865,20 +1893,33 @@ export default function HomePage() {
                   {/* Panel header */}
                   <div style={{
                     display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "12px 16px",
+                    padding: "10px 12px",
                     borderBottom: "1px solid var(--color-border)",
-                    flexShrink: 0,
+                    flexShrink: 0, gap: 8,
                   }}>
-                    <div>
-                      <p style={{
-                        fontFamily: FONT, fontWeight: 600, fontSize: 11,
-                        letterSpacing: "0.08em", textTransform: "uppercase",
-                        color: "var(--color-text-muted)",
-                      }}>
-                        Agent Log
-                      </p>
+                    {/* Tabs */}
+                    <div style={{ display: "flex", gap: 2 }}>
+                      {(["agent", ...(isDevRole ? ["dev"] : [])] as ("agent" | "dev")[]).map(tab => (
+                        <button
+                          key={tab}
+                          type="button"
+                          onClick={() => setRightTab(tab)}
+                          style={{
+                            fontFamily: FONT, fontWeight: 600, fontSize: 10,
+                            letterSpacing: "0.08em", textTransform: "uppercase",
+                            padding: "3px 8px",
+                            borderRadius: "var(--radius)",
+                            border: "none", cursor: "pointer",
+                            backgroundColor: rightTab === tab ? "var(--color-surface-hover)" : "transparent",
+                            color: rightTab === tab ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                            transition: "opacity 150ms ease-out",
+                          }}
+                        >
+                          {tab === "agent" ? "Agent Log" : "Dev Log"}
+                        </button>
+                      ))}
                       {shellState === "running" && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
                           <div style={{
                             width: 5, height: 5, borderRadius: "50%",
                             backgroundColor: "var(--color-info)",
@@ -1904,40 +1945,47 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  {/* Events feed */}
-                  <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-                    {agentEvents.length === 0 && (
-                      <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
-                        {shellState === "running" ? "Waiting for first agent event…" : "No events recorded."}
-                      </p>
-                    )}
-                    {agentEvents.map((ev, i) => (
-                      <div key={i} style={{ marginBottom: 12 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                          <div style={{
-                            width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
-                            backgroundColor: agentStatusColor(ev.status),
-                          }} />
+                  {/* Agent log tab */}
+                  {rightTab === "agent" && (
+                    <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
+                      {agentEvents.length === 0 && (
+                        <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                          {shellState === "running" ? "Waiting for first agent event…" : "No events recorded."}
+                        </p>
+                      )}
+                      {agentEvents.map((ev, i) => (
+                        <div key={i} style={{ marginBottom: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                            <div style={{
+                              width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+                              backgroundColor: agentStatusColor(ev.status),
+                            }} />
+                            <p style={{
+                              fontFamily: MONO, fontSize: 10, fontWeight: 600,
+                              color: "var(--color-text-secondary)", letterSpacing: "0.04em",
+                            }}>
+                              {AGENT_LABELS[ev.agent] ?? ev.agent}
+                            </p>
+                            <p style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-text-muted)", marginLeft: "auto" }}>
+                              {ev.status}
+                            </p>
+                          </div>
                           <p style={{
-                            fontFamily: MONO, fontSize: 10, fontWeight: 600,
-                            color: "var(--color-text-secondary)", letterSpacing: "0.04em",
+                            fontFamily: FONT, fontSize: 11,
+                            color: "var(--color-text-muted)", lineHeight: 1.5, paddingLeft: 11,
                           }}>
-                            {AGENT_LABELS[ev.agent] ?? ev.agent}
-                          </p>
-                          <p style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-text-muted)", marginLeft: "auto" }}>
-                            {ev.status}
+                            {ev.message}
                           </p>
                         </div>
-                        <p style={{
-                          fontFamily: FONT, fontSize: 11,
-                          color: "var(--color-text-muted)", lineHeight: 1.5, paddingLeft: 11,
-                        }}>
-                          {ev.message}
-                        </p>
-                      </div>
-                    ))}
-                    <div ref={logEndRef} />
-                  </div>
+                      ))}
+                      <div ref={logEndRef} />
+                    </div>
+                  )}
+
+                  {/* Dev log tab */}
+                  {rightTab === "dev" && isDevRole && (
+                    <DevLogPanel entries={devLogEntries} connected={devLogConnected} />
+                  )}
                 </div>
               ) : (
                 /* Collapsed strip with rotated label */
