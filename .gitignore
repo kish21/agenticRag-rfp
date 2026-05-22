@@ -37,6 +37,7 @@ coverage.xml
 # Logs
 *.log
 logs/
+!frontend/app/api/v1/logs/
 langsmith_logs/
 langfuse_logs/
 traces/
