@@ -75,4 +75,5 @@ if _failed == 0:
 else:
     print(f"HR agent test: {_failed} check(s) failed")
 
-sys.exit(0 if _failed == 0 else 1)
+if __name__ == "__main__":
+    sys.exit(0 if _failed == 0 else 1)

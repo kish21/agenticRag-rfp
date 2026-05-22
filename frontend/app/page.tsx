@@ -8,11 +8,13 @@ import { useThemeContext } from "@/components/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
 import { api, getUserInfo, clearUserInfo, isLoggedIn, type UserInfo } from "@/lib/api";
 import { NewEvaluationForm } from "@/components/NewEvaluationForm";
+import { ConfirmSetupPage } from "@/components/ConfirmSetupPage";
+import { DevLogPanel, type DevLogEntry } from "@/components/DevLogPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ShellState = "idle" | "running" | "completed";
-type CanvasPage = "welcome" | "upload-form" | "progress" | "results";
+type CanvasPage = "welcome" | "upload-form" | "confirm" | "progress" | "results";
 
 interface EvalRun {
   run_id: string;
@@ -24,7 +26,7 @@ interface EvalRun {
 
 interface AgentEvent {
   agent: string;
-  status: "pending" | "running" | "done" | "blocked";
+  status: "pending" | "running" | "done" | "blocked" | "interrupted" | "failed" | "completed" | "complete";
   message: string;
 }
 
@@ -47,17 +49,25 @@ interface ChatMessage {
   suggestedCriteria?: string[];
 }
 
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const AGENTS = [
-  "PlannerAgent", "IngestionAgent", "RetrievalAgent", "ExtractionAgent",
-  "EvaluationAgent", "ComparatorAgent", "DecisionAgent", "ExplanationAgent", "CriticAgent",
+  "planner", "ingestion", "retrieval", "extraction",
+  "evaluation", "comparator", "decision", "explanation", "critic",
 ];
 
 const AGENT_LABELS: Record<string, string> = {
-  PlannerAgent: "Planner", IngestionAgent: "Ingestion", RetrievalAgent: "Retrieval",
-  ExtractionAgent: "Extraction", EvaluationAgent: "Evaluation", ComparatorAgent: "Comparator",
-  DecisionAgent: "Decision", ExplanationAgent: "Explanation", CriticAgent: "Critic",
+  planner: "Planner", ingestion: "Ingestion", retrieval: "Retrieval",
+  extraction: "Extraction", evaluation: "Evaluation", comparator: "Comparator",
+  decision: "Decision", explanation: "Explanation", critic: "Critic",
 };
 
 const ROLE_DISPLAY: Record<string, string> = {
@@ -67,13 +77,15 @@ const ROLE_DISPLAY: Record<string, string> = {
 };
 
 const STATUS_DOT: Record<string, string> = {
-  completed: "var(--color-success)",
-  running:   "var(--color-info)",
-  pending:   "var(--color-warning)",
-  failed:    "var(--color-error)",
-  draft:     "var(--color-text-muted)",
-  done:      "var(--color-success)",
-  blocked:   "var(--color-error)",
+  complete:    "var(--color-success)",
+  completed:   "var(--color-success)",
+  running:     "var(--color-info)",
+  pending:     "var(--color-warning)",
+  failed:      "var(--color-error)",
+  interrupted: "var(--color-warning)",
+  draft:       "var(--color-text-muted)",
+  done:        "var(--color-success)",
+  blocked:     "var(--color-error)",
 };
 
 function fmtDate(iso: string) {
@@ -117,6 +129,7 @@ export default function HomePage() {
   const [shellState, setShellState] = useState<ShellState>("idle");
   const [canvasPage, setCanvasPage] = useState<CanvasPage>("welcome");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [confirmRunId, setConfirmRunId] = useState<string | null>(null);
   const [rightExpanded, setRightExpanded] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -124,10 +137,19 @@ export default function HomePage() {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const isDevRole = userInfo?.role === "org_admin" || userInfo?.role === "company_admin";
+  const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
 
   // Progress + agent log
   const [agentStatuses, setAgentStatuses] = useState<Record<string, { status: string; message: string }>>({});
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+
+  // Developer log
+  const [devLogEntries, setDevLogEntries] = useState<DevLogEntry[]>([]);
+  const [devLogConnected, setDevLogConnected] = useState(false);
+  const [rightTab, setRightTab] = useState<"agent" | "dev">("agent");
+  const devEsRef = useRef<EventSource | null>(null);
 
   // Results
   const [results, setResults] = useState<EvalResults | null>(null);
@@ -139,6 +161,8 @@ export default function HomePage() {
   const [chatFile, setChatFile] = useState<File | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatFileDragging, setChatFileDragging] = useState(false);
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
 
   // Saved success criteria
   const [savedCriteria, setSavedCriteria] = useState<string[]>([]);
@@ -149,7 +173,42 @@ export default function HomePage() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
 
-  const chatVisible = shellState !== "running";
+  const chatVisible = shellState !== "running" && canvasPage !== "confirm";
+
+  // ── Chat session helpers (localStorage, keyed per email) ──────────────────
+
+  function _chatStorageKey(email: string) {
+    return `meridian_chat_sessions_${email}`;
+  }
+
+  function _loadSessions(email: string): ChatSession[] {
+    try {
+      const raw = localStorage.getItem(_chatStorageKey(email));
+      return raw ? (JSON.parse(raw) as ChatSession[]) : [];
+    } catch { return []; }
+  }
+
+  function _persistSession(email: string, session: ChatSession, allSessions: ChatSession[]) {
+    const updated = [session, ...allSessions.filter(s => s.id !== session.id)].slice(0, 20);
+    try { localStorage.setItem(_chatStorageKey(email), JSON.stringify(updated)); } catch { /* ignore quota */ }
+    setChatSessions(updated);
+  }
+
+  function newChatSession() {
+    setChatMessages([]);
+    setChatSessionId(null);
+    setChatInput("");
+    setChatFile(null);
+    setCanvasPage("welcome");
+  }
+
+  function loadChatSession(session: ChatSession) {
+    setChatMessages(session.messages);
+    setChatSessionId(session.id);
+    setChatInput("");
+    setChatFile(null);
+    setCanvasPage("welcome");
+  }
 
   // ── Auth + initial load ────────────────────────────────────────────────────
 
@@ -157,6 +216,9 @@ export default function HomePage() {
     if (!isLoggedIn()) { router.push("/login"); return; }
     const info = getUserInfo();
     setUserInfo(info);
+    if (info?.email) {
+      setChatSessions(_loadSessions(info.email));
+    }
     api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
       on401: () => router.push("/login"),
     })
@@ -172,26 +234,79 @@ export default function HomePage() {
 
   useEffect(() => {
     if (shellState !== "running" || !activeRunId) return;
-    const base = process.env.NEXT_PUBLIC_API_SSE_URL ?? "";
-    const es = new EventSource(`${base}/api/v1/evaluate/${activeRunId}/stream`, { withCredentials: true });
-    esRef.current = es;
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
 
-    es.onmessage = e => {
-      try {
-        const ev: AgentEvent = JSON.parse(e.data);
-        setAgentEvents(prev => [...prev, ev]);
-        setAgentStatuses(prev => ({ ...prev, [ev.agent]: { status: ev.status, message: ev.message } }));
-        if (ev.agent === "ExplanationAgent" && ev.status === "done") {
-          setShellState("completed");
-          setCanvasPage("results");
-          es.close();
+    function connect() {
+      if (closed) return;
+      es = new EventSource(`/api/v1/evaluate/${activeRunId}/status`, { withCredentials: true });
+      esRef.current = es;
+
+      es.onmessage = e => {
+        try {
+          const ev = JSON.parse(e.data) as Record<string, unknown>;
+          if (ev.type === "heartbeat") return;
+          if (ev.type === "done") {
+            closed = true;
+            es?.close();
+            setShellState("completed");
+            setCanvasPage("results");
+            return;
+          }
+          const agentEv = ev as unknown as AgentEvent;
+          if (agentEv.agent) {
+            setAgentEvents(prev => [...prev, agentEv]);
+            setAgentStatuses(prev => ({ ...prev, [agentEv.agent]: { status: agentEv.status, message: agentEv.message } }));
+            if (agentEv.agent === "explanation" && agentEv.status === "done") {
+              closed = true;
+              es?.close();
+              setShellState("completed");
+              setCanvasPage("results");
+            }
+          }
+        } catch { /* malformed event — skip */ }
+      };
+
+      es.onerror = () => {
+        es?.close();
+        esRef.current = null;
+        if (!closed) {
+          retryTimer = setTimeout(connect, 2000);
         }
-      } catch { /* malformed event — skip */ }
-    };
+      };
+    }
 
-    es.onerror = () => es.close();
-    return () => { es.close(); esRef.current = null; };
+    connect();
+    return () => {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      es?.close();
+      esRef.current = null;
+    };
   }, [shellState, activeRunId]);
+
+  // ── Dev log SSE ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!isDevRole) return;
+    const url = activeRunId
+      ? `/api/v1/logs/stream?run_id=${activeRunId}`
+      : `/api/v1/logs/stream`;
+    const es = new EventSource(url, { withCredentials: true });
+    devEsRef.current = es;
+    es.onopen    = () => setDevLogConnected(true);
+    es.onerror   = () => setDevLogConnected(false);
+    es.onmessage = (e) => {
+      try {
+        const entry = JSON.parse(e.data);
+        if (entry.type === "dev") {
+          setDevLogEntries(prev => [...prev.slice(-1999), entry as DevLogEntry]);
+        }
+      } catch { /* skip */ }
+    };
+    return () => { es.close(); devEsRef.current = null; setDevLogConnected(false); };
+  }, [isDevRole, activeRunId]);
 
   // ── Results fetch ──────────────────────────────────────────────────────────
 
@@ -228,30 +343,54 @@ export default function HomePage() {
 
   function openRun(run: EvalRun) {
     setActiveRunId(run.run_id);
-    if (run.status === "completed") {
+    if (run.status === "completed" || run.status === "complete") {
       setShellState("completed");
       setCanvasPage("results");
     } else if (run.status === "running") {
       setShellState("running");
       setCanvasPage("progress");
       setRightExpanded(true);
+    } else if (run.status === "pending_confirm") {
+      setConfirmRunId(run.run_id);
+      setCanvasPage("confirm");
+    } else if (run.status === "interrupted" || run.status === "failed") {
+      setShellState("completed");
+      setCanvasPage("results");
     } else {
       setCanvasPage("welcome");
     }
     if (isNarrow) setSidebarOpen(false);
   }
 
+  async function deleteRun(e: React.MouseEvent, runId: string) {
+    e.stopPropagation(); // don't trigger openRun
+    setDeletingRunId(runId);
+    try {
+      await api.delete(`/api/v1/evaluate/${runId}`);
+      setRuns(prev => prev.filter(r => r.run_id !== runId));
+      if (activeRunId === runId) {
+        setActiveRunId(null);
+        setCanvasPage("welcome");
+        setShellState("idle");
+      }
+    } catch {
+      // silent — server will return 409 for completed/running runs (shouldn't happen since button is hidden for those)
+    } finally {
+      setDeletingRunId(null);
+    }
+  }
+
   function handleEvalSuccess(runId: string, rfpTitle: string, vendorCount: number) {
     setActiveRunId(runId);
+    setConfirmRunId(runId);
     setAgentStatuses({});
     setAgentEvents([]);
+    setDevLogEntries([]);
     setResults(null);
-    setShellState("running");
-    setCanvasPage("progress");
-    setRightExpanded(true);
+    setCanvasPage("confirm");
     setRuns(prev => [{
       run_id: runId, rfp_title: rfpTitle,
-      status: "running", vendor_count: vendorCount,
+      status: "pending_confirm", vendor_count: vendorCount,
       created_at: new Date().toISOString(),
     }, ...prev]);
   }
@@ -265,26 +404,50 @@ export default function HomePage() {
     setChatFile(null);
     const ta = document.getElementById("chat-textarea") as HTMLTextAreaElement | null;
     if (ta) { ta.style.height = "auto"; }
-    setChatMessages(prev => [...prev, { role: "user", text: msg }]);
+
+    const userMsg: ChatMessage = { role: "user", text: msg };
+    const updatedWithUser = [...chatMessages, userMsg];
+    setChatMessages(updatedWithUser);
     setChatLoading(true);
 
     const form = new FormData();
     form.append("message", msg);
     if (attachedFile) form.append("file", attachedFile);
 
+    let assistantMsg: ChatMessage = { role: "assistant", text: "" };
     try {
       const res = await api.post<{ answer: string; suggested_criteria: string[] }>(
         "/api/v1/chat/document", { body: form }
       );
-      setChatMessages(prev => [...prev, {
+      assistantMsg = {
         role: "assistant",
         text: res.answer,
         suggestedCriteria: res.suggested_criteria?.length ? res.suggested_criteria : undefined,
-      }]);
+      };
     } catch {
-      setChatMessages(prev => [...prev, { role: "assistant", text: "Sorry, something went wrong. Please try again." }]);
+      assistantMsg = { role: "assistant", text: "Sorry, something went wrong. Please try again." };
     } finally {
       setChatLoading(false);
+    }
+
+    const finalMessages = [...updatedWithUser, assistantMsg];
+    setChatMessages(finalMessages);
+
+    // Persist session to localStorage
+    const email = userInfo?.email ?? "";
+    if (email) {
+      const sid = chatSessionId ?? `chat_${Date.now()}`;
+      const title = msg.length > 48 ? msg.slice(0, 48) + "…" : msg;
+      const now = new Date().toISOString();
+      const session: ChatSession = {
+        id: sid,
+        title,
+        messages: finalMessages,
+        createdAt: chatSessionId ? (chatSessions.find(s => s.id === sid)?.createdAt ?? now) : now,
+        updatedAt: now,
+      };
+      if (!chatSessionId) setChatSessionId(sid);
+      _persistSession(email, session, chatSessions);
     }
   }
 
@@ -310,7 +473,7 @@ export default function HomePage() {
   function renderWelcome() {
     const total     = runs.length;
     const running   = runs.filter(r => r.status === "running").length;
-    const completed = runs.filter(r => r.status === "completed").length;
+    const completed = runs.filter(r => r.status === "completed" || r.status === "complete").length;
     const hasChatMessages = chatMessages.length > 0;
 
     return (
@@ -701,6 +864,24 @@ export default function HomePage() {
     );
   }
 
+  function renderConfirm() {
+    return (
+      <ConfirmSetupPage
+        runId={confirmRunId!}
+        onConfirmed={() => {
+          setShellState("running");
+          setCanvasPage("progress");
+          setRightExpanded(true);
+          setRuns(prev => prev.map(r =>
+            r.run_id === confirmRunId ? { ...r, status: "running" } : r
+          ));
+        }}
+        onBack={() => setCanvasPage("upload-form")}
+        onAuth401={() => router.push("/login")}
+      />
+    );
+  }
+
   function renderProgress() {
     const done  = Object.values(agentStatuses).filter(a => a.status === "done").length;
     const total = AGENTS.length;
@@ -753,52 +934,94 @@ export default function HomePage() {
         }}>
           {AGENTS.map((agent, i) => {
             const s = agentStatuses[agent];
-            const status     = s?.status ?? "pending";
-            const message    = s?.message ?? "Waiting…";
-            const isActive   = status === "running";
-            const isDone     = status === "done";
-            const isBlocked  = status === "blocked";
+            const status    = s?.status ?? "pending";
+            const message   = s?.message;
+            const isActive  = status === "running";
+            const isDone    = status === "done";
+            const isBlocked = status === "blocked";
+            const isPending = !isActive && !isDone && !isBlocked;
+
+            const statusLabel = isBlocked ? "Blocked"
+              : isDone    ? "Complete"
+              : isActive  ? "Running"
+              : "Not started";
+
+            const statusColor = isBlocked ? "var(--color-error)"
+              : isDone   ? "var(--color-success)"
+              : isActive ? "var(--color-info)"
+              : "var(--color-text-muted)";
 
             return (
               <div key={agent} style={{
-                display: "flex", alignItems: "flex-start", gap: 12,
-                padding: "12px 16px",
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "13px 16px",
                 borderBottom: i < AGENTS.length - 1 ? "1px solid var(--color-border)" : "none",
                 backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
-                borderLeft: isActive ? "2px solid var(--color-info)" : "2px solid transparent",
+                borderLeft: isActive ? "3px solid var(--color-info)"
+                  : isDone  ? "3px solid var(--color-success)"
+                  : isBlocked ? "3px solid var(--color-error)"
+                  : "3px solid transparent",
                 transition: "background-color 150ms ease-out",
-                ...(isActive ? { animation: "meridian-pulse-border 2s ease-in-out infinite" } : {}),
               }}>
-                <div style={{
-                  width: 7, height: 7, borderRadius: "50%",
-                  flexShrink: 0, marginTop: 5,
-                  backgroundColor: isBlocked ? "var(--color-error)"
-                    : isDone ? "var(--color-success)"
-                    : isActive ? "var(--color-info)"
-                    : "var(--color-border)",
-                  ...(isActive ? { animation: "meridian-dot-pulse 1.5s ease-in-out infinite" } : {}),
-                }} />
+                {/* Icon column */}
+                <div style={{ width: 18, height: 18, flexShrink: 0, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {isActive && (
+                    <div style={{
+                      width: 16, height: 16, borderRadius: "50%",
+                      borderTop: "2px solid var(--color-info)",
+                      borderBottom: "2px solid transparent",
+                      borderLeft: "2px solid transparent",
+                      borderRight: "2px solid transparent",
+                      animation: "meridian-spin 0.7s linear infinite",
+                    }} />
+                  )}
+                  {isDone && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="7" fill="var(--color-success)" fillOpacity="0.15" stroke="var(--color-success)" strokeWidth="1.5"/>
+                      <path d="M5 8l2 2 4-4" stroke="var(--color-success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                  {isBlocked && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="7" fill="var(--color-error)" fillOpacity="0.15" stroke="var(--color-error)" strokeWidth="1.5"/>
+                      <path d="M8 5v3.5M8 11h.01" stroke="var(--color-error)" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                  )}
+                  {isPending && (
+                    <div style={{
+                      width: 8, height: 8, borderRadius: "50%",
+                      border: "1.5px solid var(--color-border)",
+                      backgroundColor: "transparent",
+                    }} />
+                  )}
+                </div>
+
+                {/* Text column */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <p style={{
-                      fontFamily: FONT, fontWeight: 600, fontSize: 13,
-                      color: isDone ? "var(--color-text-secondary)" : "var(--color-text-primary)",
+                      fontFamily: FONT, fontWeight: isActive ? 700 : isDone ? 500 : 500,
+                      fontSize: 13,
+                      color: isPending ? "var(--color-text-muted)"
+                        : isDone ? "var(--color-text-secondary)"
+                        : "var(--color-text-primary)",
                     }}>
                       {AGENT_LABELS[agent] ?? agent}
                     </p>
                     <span style={{
                       fontFamily: MONO, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase",
-                      color: isBlocked ? "var(--color-error)"
-                        : isDone ? "var(--color-success)"
-                        : isActive ? "var(--color-info)"
-                        : "var(--color-text-muted)",
+                      fontWeight: isActive ? 700 : 400,
+                      color: statusColor,
+                      whiteSpace: "nowrap",
                     }}>
-                      {status}
+                      {statusLabel}
                     </span>
                   </div>
-                  <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.5, marginTop: 2 }}>
-                    {message}
-                  </p>
+                  {(isActive || isDone || isBlocked) && message && (
+                    <p style={{ fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.5, marginTop: 2 }}>
+                      {message}
+                    </p>
+                  )}
                 </div>
               </div>
             );
@@ -807,8 +1030,16 @@ export default function HomePage() {
 
         <button
           type="button"
-          onClick={() => {
+          onClick={async () => {
             esRef.current?.close();
+            if (activeRunId) {
+              try {
+                await api.post(`/api/v1/evaluate/${activeRunId}/cancel`);
+              } catch { /* best-effort — UI resets regardless */ }
+              setRuns(prev => prev.map(r =>
+                r.run_id === activeRunId ? { ...r, status: "interrupted" as EvalRun["status"] } : r
+              ));
+            }
             setShellState("idle");
             setCanvasPage("welcome");
             setRightExpanded(false);
@@ -1179,6 +1410,77 @@ export default function HomePage() {
                 </button>
               </div>
 
+              {/* ── Personal chats section ───────────────────────── */}
+              <div style={{ padding: "8px 16px 4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <p style={{
+                  fontFamily: FONT, fontWeight: 600, fontSize: 10,
+                  letterSpacing: "0.1em", textTransform: "uppercase",
+                  color: "var(--color-text-muted)",
+                }}>
+                  Personal
+                </p>
+                <button
+                  type="button"
+                  onClick={newChatSession}
+                  title="New chat"
+                  style={{
+                    background: "none",
+                    borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "none",
+                    cursor: "pointer", padding: "2px 4px", borderRadius: "var(--radius)",
+                    fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)",
+                    transition: "color 150ms ease-out",
+                    lineHeight: 1,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = "var(--color-accent)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+                >
+                  + new
+                </button>
+              </div>
+
+              <div style={{ padding: "0 8px 4px" }}>
+                {chatSessions.length === 0 && (
+                  <p style={{ fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)", padding: "4px 8px", lineHeight: 1.5 }}>
+                    No chats yet. Ask a question below.
+                  </p>
+                )}
+                {chatSessions.slice(0, 8).map(session => {
+                  const isActive = session.id === chatSessionId;
+                  return (
+                    <button
+                      key={session.id}
+                      type="button"
+                      onClick={() => loadChatSession(session)}
+                      style={{
+                        width: "100%", textAlign: "left",
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "6px 8px",
+                        backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
+                        borderTop: "none", borderBottom: "none", borderRight: "none",
+                        borderLeft: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
+                        borderRadius: "0 var(--radius) var(--radius) 0",
+                        cursor: "pointer",
+                        transition: "background-color 150ms ease-out",
+                      }}
+                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-surface-hover)"; }}
+                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}
+                    >
+                      <span style={{ fontSize: 9, color: "var(--color-text-muted)", flexShrink: 0 }}>💬</span>
+                      <span style={{
+                        fontFamily: FONT, fontSize: 11,
+                        fontWeight: isActive ? 600 : 400,
+                        color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+                      }}>
+                        {session.title}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div style={{ height: 1, backgroundColor: "var(--color-border)", margin: "4px 0" }} />
+
               {/* Section label */}
               <div style={{ padding: "8px 16px 4px" }}>
                 <p style={{
@@ -1206,43 +1508,79 @@ export default function HomePage() {
                   </p>
                 )}
                 {!loading && runs.slice(0, 10).map(run => {
-                  const isActive  = run.run_id === activeRunId;
-                  const isRunning = run.status === "running";
+                  const isActive     = run.run_id === activeRunId;
+                  const isRunning    = run.status === "running";
+                  const isCompleted  = run.status === "completed";
+                  const canDelete    = !isCompleted && !isRunning;
+                  const isHovered    = hoveredRunId === run.run_id;
+                  const isDeleting   = deletingRunId === run.run_id;
                   return (
-                    <button
+                    <div
                       key={run.run_id}
-                      type="button"
-                      onClick={() => openRun(run)}
-                      style={{
-                        width: "100%", textAlign: "left",
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "7px 8px",
-                        backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
-                        borderTop: "none", borderBottom: "none", borderRight: "none",
-                        borderLeft: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
-                        borderRadius: "0 var(--radius) var(--radius) 0",
-                        cursor: "pointer",
-                        transition: "background-color 150ms ease-out",
-                        ...(isRunning ? { animation: "meridian-pulse-border 2.5s ease-in-out infinite" } : {}),
-                      }}
-                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-surface-hover)"; }}
-                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}
+                      style={{ position: "relative" }}
+                      onMouseEnter={() => setHoveredRunId(run.run_id)}
+                      onMouseLeave={() => setHoveredRunId(null)}
                     >
-                      <div style={{
-                        width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                        backgroundColor: STATUS_DOT[run.status] ?? "var(--color-text-muted)",
-                        ...(isRunning ? { animation: "meridian-dot-pulse 2s ease-in-out infinite" } : {}),
-                      }} />
-                      <span style={{
-                        fontFamily: FONT, fontSize: 12,
-                        fontWeight: isActive ? 600 : 400,
-                        color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        flex: 1,
-                      }}>
-                        {run.rfp_title || "Untitled RFP"}
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => openRun(run)}
+                        style={{
+                          width: "100%", textAlign: "left",
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "7px 8px",
+                          paddingRight: canDelete ? 28 : 8,
+                          backgroundColor: isActive ? "var(--color-surface-hover)" : "transparent",
+                          borderTop: "none", borderBottom: "none", borderRight: "none",
+                          borderLeft: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
+                          borderRadius: "0 var(--radius) var(--radius) 0",
+                          cursor: "pointer",
+                          transition: "background-color 150ms ease-out",
+                          ...(isRunning ? { animation: "meridian-pulse-border 2.5s ease-in-out infinite" } : {}),
+                        }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-surface-hover)"; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}
+                      >
+                        <div style={{
+                          width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                          backgroundColor: STATUS_DOT[run.status] ?? "var(--color-text-muted)",
+                          ...(isRunning ? { animation: "meridian-dot-pulse 2s ease-in-out infinite" } : {}),
+                        }} />
+                        <span style={{
+                          fontFamily: FONT, fontSize: 12,
+                          fontWeight: isActive ? 600 : 400,
+                          color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          flex: 1,
+                        }}>
+                          {run.rfp_title || "Untitled RFP"}
+                        </span>
+                      </button>
+
+                      {/* Delete button — only on non-completed, non-running runs, visible on hover */}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={e => deleteRun(e, run.run_id)}
+                          title="Delete run"
+                          style={{
+                            position: "absolute", right: 6, top: "50%",
+                            transform: "translateY(-50%)",
+                            opacity: isHovered && !isDeleting ? 1 : 0,
+                            pointerEvents: isHovered ? "auto" : "none",
+                            background: "none",
+                            borderTop: "none", borderBottom: "none", borderLeft: "none", borderRight: "none",
+                            cursor: "pointer", padding: "2px 4px",
+                            color: "var(--color-text-muted)",
+                            fontSize: 13, lineHeight: 1,
+                            transition: "opacity 150ms ease-out, color 150ms ease-out",
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.color = "var(--color-error)"; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
+                        >
+                          {isDeleting ? "…" : "×"}
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -1345,12 +1683,30 @@ export default function HomePage() {
               flex: 1, overflowY: "auto",
               padding: isMobile ? "24px 16px" : isTablet ? "32px 24px" : "40px 40px",
             }}>
-              <div key={canvasPage} style={{ animation: "meridian-canvas-enter 200ms ease-out" }}>
-                {canvasPage === "welcome"     && renderWelcome()}
-                {canvasPage === "upload-form" && renderUploadForm()}
-                {canvasPage === "progress"    && renderProgress()}
-                {canvasPage === "results"     && renderResults()}
-              </div>
+              {/*
+                Upload form is kept mounted while on confirm so that
+                clicking "← Back" restores all uploaded files and fields.
+                It is hidden (not unmounted) during confirm.
+              */}
+              {(canvasPage === "upload-form" || canvasPage === "confirm") && (
+                <div style={{ display: canvasPage === "upload-form" ? "block" : "none" }}>
+                  {renderUploadForm()}
+                </div>
+              )}
+
+              {canvasPage !== "upload-form" && canvasPage !== "confirm" && (
+                <div key={canvasPage} style={{ animation: "meridian-canvas-enter 200ms ease-out" }}>
+                  {canvasPage === "welcome"  && renderWelcome()}
+                  {canvasPage === "progress" && renderProgress()}
+                  {canvasPage === "results"  && renderResults()}
+                </div>
+              )}
+
+              {canvasPage === "confirm" && (
+                <div style={{ animation: "meridian-canvas-enter 200ms ease-out" }}>
+                  {renderConfirm()}
+                </div>
+              )}
             </div>
 
             {/* Chat box — pinned bottom, hides when running */}
@@ -1558,20 +1914,33 @@ export default function HomePage() {
                   {/* Panel header */}
                   <div style={{
                     display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "12px 16px",
+                    padding: "10px 12px",
                     borderBottom: "1px solid var(--color-border)",
-                    flexShrink: 0,
+                    flexShrink: 0, gap: 8,
                   }}>
-                    <div>
-                      <p style={{
-                        fontFamily: FONT, fontWeight: 600, fontSize: 11,
-                        letterSpacing: "0.08em", textTransform: "uppercase",
-                        color: "var(--color-text-muted)",
-                      }}>
-                        Agent Log
-                      </p>
+                    {/* Tabs */}
+                    <div style={{ display: "flex", gap: 2 }}>
+                      {(["agent", ...(isDevRole ? ["dev"] : [])] as ("agent" | "dev")[]).map(tab => (
+                        <button
+                          key={tab}
+                          type="button"
+                          onClick={() => setRightTab(tab)}
+                          style={{
+                            fontFamily: FONT, fontWeight: 600, fontSize: 10,
+                            letterSpacing: "0.08em", textTransform: "uppercase",
+                            padding: "3px 8px",
+                            borderRadius: "var(--radius)",
+                            border: "none", cursor: "pointer",
+                            backgroundColor: rightTab === tab ? "var(--color-surface-hover)" : "transparent",
+                            color: rightTab === tab ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                            transition: "opacity 150ms ease-out",
+                          }}
+                        >
+                          {tab === "agent" ? "Agent Log" : "Dev Log"}
+                        </button>
+                      ))}
                       {shellState === "running" && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
                           <div style={{
                             width: 5, height: 5, borderRadius: "50%",
                             backgroundColor: "var(--color-info)",
@@ -1597,40 +1966,47 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  {/* Events feed */}
-                  <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-                    {agentEvents.length === 0 && (
-                      <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
-                        {shellState === "running" ? "Waiting for first agent event…" : "No events recorded."}
-                      </p>
-                    )}
-                    {agentEvents.map((ev, i) => (
-                      <div key={i} style={{ marginBottom: 12 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                          <div style={{
-                            width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
-                            backgroundColor: agentStatusColor(ev.status),
-                          }} />
+                  {/* Agent log tab */}
+                  {rightTab === "agent" && (
+                    <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
+                      {agentEvents.length === 0 && (
+                        <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.6 }}>
+                          {shellState === "running" ? "Waiting for first agent event…" : "No events recorded."}
+                        </p>
+                      )}
+                      {agentEvents.map((ev, i) => (
+                        <div key={i} style={{ marginBottom: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                            <div style={{
+                              width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+                              backgroundColor: agentStatusColor(ev.status),
+                            }} />
+                            <p style={{
+                              fontFamily: MONO, fontSize: 10, fontWeight: 600,
+                              color: "var(--color-text-secondary)", letterSpacing: "0.04em",
+                            }}>
+                              {AGENT_LABELS[ev.agent] ?? ev.agent}
+                            </p>
+                            <p style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-text-muted)", marginLeft: "auto" }}>
+                              {ev.status}
+                            </p>
+                          </div>
                           <p style={{
-                            fontFamily: MONO, fontSize: 10, fontWeight: 600,
-                            color: "var(--color-text-secondary)", letterSpacing: "0.04em",
+                            fontFamily: FONT, fontSize: 11,
+                            color: "var(--color-text-muted)", lineHeight: 1.5, paddingLeft: 11,
                           }}>
-                            {AGENT_LABELS[ev.agent] ?? ev.agent}
-                          </p>
-                          <p style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-text-muted)", marginLeft: "auto" }}>
-                            {ev.status}
+                            {ev.message}
                           </p>
                         </div>
-                        <p style={{
-                          fontFamily: FONT, fontSize: 11,
-                          color: "var(--color-text-muted)", lineHeight: 1.5, paddingLeft: 11,
-                        }}>
-                          {ev.message}
-                        </p>
-                      </div>
-                    ))}
-                    <div ref={logEndRef} />
-                  </div>
+                      ))}
+                      <div ref={logEndRef} />
+                    </div>
+                  )}
+
+                  {/* Dev log tab */}
+                  {rightTab === "dev" && isDevRole && (
+                    <DevLogPanel entries={devLogEntries} connected={devLogConnected} />
+                  )}
                 </div>
               ) : (
                 /* Collapsed strip with rotated label */

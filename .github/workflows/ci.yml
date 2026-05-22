@@ -54,7 +54,42 @@ jobs:
       - name: Run frontend checkpoint runner
         run: python frontend_checkpoint_runner.py run BUILD THEME RESPONSIVE AUTH FORMS A11Y SECURITY
 
-  # ── Job 3: Backend contract tests (no services needed — import-only) ─────
+  # ── Job 3: Backend unit tests ────────────────────────────────────────────
+  backend-tests:
+    name: Backend — pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create minimal .env for tests
+        run: |
+          cat > .env << 'EOF'
+          DATABASE_URL=postgresql://user:pass@localhost/db
+          QDRANT_URL=http://localhost:6333
+          SECRET_KEY=ci-test-secret-key-not-real
+          LLM_PROVIDER=openai
+          OPENAI_API_KEY=sk-fake-key-for-import-testing
+          EMBEDDING_PROVIDER=local
+          LANGFUSE_PUBLIC_KEY=fake
+          LANGFUSE_SECRET_KEY=fake
+          LANGFUSE_HOST=http://localhost
+          EOF
+
+      - name: Run pytest
+        run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression
+
+  # ── Job 4: Backend contract tests (no services needed — import-only) ─────
   backend-contracts:
     name: Backend — contract tests
     runs-on: ubuntu-latest

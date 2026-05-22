@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     status           TEXT DEFAULT 'running',
     vendor_ids       TEXT[],
     contract_value   NUMERIC,
+    currency         TEXT NOT NULL DEFAULT 'GBP',
     approval_tier    INTEGER,
     langsmith_trace  TEXT,
     agent_events     JSONB NOT NULL DEFAULT '[]',

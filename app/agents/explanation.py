@@ -50,10 +50,11 @@ async def _generate_vendor_narrative(
     extraction: ExtractionOutput,
     source_chunks: dict[str, str],
     decision_output: DecisionOutput,
+    currency: str = "GBP",
 ) -> VendorNarrative:
     """Generates narrative sections and verifies every claim is grounded."""
 
-    context_facts = _build_fact_context(extraction)
+    context_facts = _build_fact_context(extraction, currency=currency)
     compliance_summary = _build_compliance_summary(evaluation)
 
     if is_rejected:
@@ -153,21 +154,33 @@ async def _generate_vendor_narrative(
     )
 
 
-def _build_fact_context(extraction: ExtractionOutput) -> str:
+def _fmt_currency(value: float | None, currency: str) -> str:
+    if value is None:
+        return ""
+    return f"{currency} {value:,.0f}"
+
+
+def _build_fact_context(extraction: ExtractionOutput, currency: str = "GBP") -> str:
     lines = []
     for cert in extraction.certifications:
         lines.append(f"Certification: {cert.standard_name} ({cert.status.value})")
     for ins in extraction.insurance:
-        lines.append(f"Insurance: {ins.insurance_type} £{ins.amount_gbp:,.0f}" if ins.amount_gbp else f"Insurance: {ins.insurance_type}")
+        amt = ins.amount if ins.amount is not None else ins.amount_gbp
+        if amt:
+            lines.append(f"Insurance: {ins.insurance_type} {_fmt_currency(amt, currency)}")
+        else:
+            lines.append(f"Insurance: {ins.insurance_type}")
     for sla in extraction.slas:
         lines.append(f"SLA: {sla.priority_level} response={sla.response_minutes}m resolution={sla.resolution_hours}h")
     for proj in extraction.projects:
         lines.append(f"Project: {proj.client_name} ({proj.client_sector})")
     for price in extraction.pricing:
-        if price.total_gbp:
-            lines.append(f"Pricing: Year {price.year} £{price.total_gbp:,.0f}")
-        elif price.amount_gbp:
-            lines.append(f"Pricing: £{price.amount_gbp:,.0f}/yr")
+        total = price.total_amount if price.total_amount is not None else price.total_gbp
+        amt = price.amount if price.amount is not None else price.amount_gbp
+        if total:
+            lines.append(f"Pricing: Year {price.year} {_fmt_currency(total, currency)}")
+        elif amt:
+            lines.append(f"Pricing: {_fmt_currency(amt, currency)}/yr")
         else:
             lines.append(f"Pricing: {price.description or 'amount not specified'}")
     return "\n".join(lines) if lines else "No extracted facts available."
@@ -195,6 +208,7 @@ async def run_explanation_agent(
     evaluation_outputs: dict[str, EvaluationOutput],
     extraction_outputs: dict[str, ExtractionOutput],
     source_chunks: dict[str, str],
+    currency: str = "GBP",
 ) -> tuple[ExplanationOutput, object]:
     """
     decision_output:     DecisionOutput from Decision Agent
@@ -223,6 +237,7 @@ async def run_explanation_agent(
             extraction=extraction,
             source_chunks=source_chunks,
             decision_output=decision_output,
+            currency=currency,
         )
         vendor_narratives.append(narrative)
 

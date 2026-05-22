@@ -15,7 +15,11 @@ if config.config_file_name is not None:
 # Pull DB URL from .env via app settings (overrides alembic.ini placeholder)
 try:
     from app.config import settings
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+    _url = (
+        f"postgresql+psycopg2://{settings.postgres_user}:{settings.postgres_password}"
+        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+    )
+    config.set_main_option("sqlalchemy.url", _url)
 except Exception:
     pass  # fall back to alembic.ini value in CI
 

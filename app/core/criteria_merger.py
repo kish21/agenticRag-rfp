@@ -33,6 +33,132 @@ def _normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", n).strip()
 
 
+async def extract_criteria_from_user_sheet(sheet_bytes: bytes, filename: str) -> dict:
+    """
+    Parse a user-uploaded scoring sheet (CSV/Excel/PDF/DOCX) into the same
+    shape as extract_criteria_from_rfp(): {"mandatory_checks": [...], "scoring_criteria": [...]}.
+    Never raises — returns empty dict on any parse failure.
+    """
+    if not sheet_bytes:
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    try:
+        if ext in ("csv", "xlsx", "xls"):
+            return _parse_sheet_with_pandas(sheet_bytes, ext)
+        elif ext in ("pdf", "docx", "doc"):
+            # Reuse the LLM-based RFP extractor — same prompt, same output shape
+            if ext == "pdf":
+                text = extract_rfp_text(sheet_bytes)
+            else:
+                text = _extract_docx_text(sheet_bytes)
+            return await extract_criteria_from_rfp(text)
+        else:
+            return {"mandatory_checks": [], "scoring_criteria": []}
+    except Exception as e:
+        print(f"User sheet extraction failed ({filename}): {e}")
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+
+def _extract_docx_text(docx_bytes: bytes) -> str:
+    try:
+        import io
+        from docx import Document
+        doc = Document(io.BytesIO(docx_bytes))
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    except Exception:
+        return ""
+
+
+def _parse_sheet_with_pandas(sheet_bytes: bytes, ext: str) -> dict:
+    """
+    Parse CSV/Excel scoring sheet.
+    Columns (case-insensitive): name, type/check_type, weight, description,
+    what_passes, rubric_9_10, rubric_6_8, rubric_3_5, rubric_0_2.
+    Rows with a numeric weight → scoring criteria; others → mandatory checks.
+    """
+    import io
+    try:
+        import pandas as pd
+    except ImportError:
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+    if ext == "csv":
+        df = pd.read_csv(io.BytesIO(sheet_bytes))
+    else:
+        df = pd.read_excel(io.BytesIO(sheet_bytes))
+
+    # Normalise column names
+    df.columns = [str(c).lower().strip().replace(" ", "_") for c in df.columns]
+
+    def _col(preferred: list[str]) -> str | None:
+        for c in preferred:
+            if c in df.columns:
+                return c
+        return None
+
+    name_col   = _col(["name", "criterion", "check_name", "criteria_name"])
+    type_col   = _col(["check_type", "type", "kind"])
+    weight_col = _col(["weight", "score_weight", "scoring_weight"])
+    desc_col   = _col(["description", "desc", "detail"])
+    pass_col   = _col(["what_passes", "pass_criteria", "passing"])
+
+    if not name_col:
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+    mandatory_checks: list[dict] = []
+    scoring_criteria: list[dict] = []
+
+    for _, row in df.iterrows():
+        name = str(row.get(name_col, "")).strip()
+        if not name or name.lower() == "nan":
+            continue
+
+        weight_raw = row.get(weight_col) if weight_col else None
+        try:
+            weight = float(weight_raw) if weight_raw is not None and str(weight_raw) != "nan" else None
+        except (ValueError, TypeError):
+            weight = None
+
+        # Treat as scoring if: weight column exists AND value is a number
+        # OR type column says "scoring"
+        check_type = str(row.get(type_col, "")).lower().strip() if type_col else ""
+        is_scoring = (weight is not None) or ("scor" in check_type)
+
+        desc = str(row.get(desc_col, "")).strip() if desc_col else ""
+        if desc == "nan":
+            desc = ""
+        what_passes = str(row.get(pass_col, "")).strip() if pass_col else ""
+        if what_passes == "nan":
+            what_passes = ""
+
+        if is_scoring:
+            scoring_criteria.append({
+                "name": name,
+                "weight": weight if weight is not None else 0.0,
+                "description": desc,
+                "rubric_9_10": str(row.get("rubric_9_10", "")).strip() or "",
+                "rubric_6_8":  str(row.get("rubric_6_8",  "")).strip() or "",
+                "rubric_3_5":  str(row.get("rubric_3_5",  "")).strip() or "",
+                "rubric_0_2":  str(row.get("rubric_0_2",  "")).strip() or "",
+            })
+        else:
+            mandatory_checks.append({
+                "name": name,
+                "description": desc,
+                "what_passes": what_passes,
+            })
+
+    # Normalise scoring weights to 1.0 if any exist
+    if scoring_criteria:
+        total = sum(c["weight"] for c in scoring_criteria)
+        if total > 0 and abs(total - 1.0) > 0.01:
+            for c in scoring_criteria:
+                c["weight"] = round(c["weight"] / total, 3)
+
+    return {"mandatory_checks": mandatory_checks, "scoring_criteria": scoring_criteria}
+
+
 def get_org_criteria(org_id: str) -> list[dict]:
     engine = get_engine()
     with engine.connect() as conn:
@@ -62,7 +188,7 @@ def get_dept_criteria(org_id: str, department: str) -> list[dict]:
                    rubric, is_locked
             FROM dept_criteria_templates
             WHERE org_id = :org_id
-            AND department = :department
+            AND LOWER(department) = LOWER(:department)
             ORDER BY check_type, created_at
         """), {"org_id": org_id, "department": department}).fetchall()
     return [dict(r._mapping) for r in rows]
@@ -151,11 +277,12 @@ def merge_criteria(
     department: str,
     rfp_id: str,
     org_id: str,
+    user_criteria: dict | None = None,
 ) -> dict:
     """
-    Merges three sources. Priority: org > dept > rfp.
-    Deduplicates by name (case-insensitive).
-    Each criterion gets a source field: org|dept|rfp.
+    Merges four sources. Priority: org > dept > user > rfp.
+    Deduplicates by name (case-insensitive, noise-stripped).
+    Each criterion gets a source field: org|dept|user|rfp.
     Returns dict compatible with EvaluationSetup model.
     """
     mandatory_checks = []
@@ -227,7 +354,41 @@ def merge_criteria(
                 })
                 scoring_names.add(name_key)
 
-    # 3. RFP-extracted criteria (skip duplicates)
+    # 3. User-uploaded criteria (override RFP but not org/dept)
+    for c in (user_criteria or {}).get("mandatory_checks", []):
+        name_key = _normalize_name(c["name"])
+        if name_key not in mandatory_names:
+            uc_id = str(uuid.uuid4())[:8].upper()
+            mandatory_checks.append({
+                "check_id": f"MC-USER-{uc_id}",
+                "name": c["name"],
+                "description": c.get("description", ""),
+                "what_passes": c.get("what_passes", ""),
+                "extraction_target_id": f"ET-USER-{uc_id}",
+                "source": "user",
+                "is_locked": False,
+            })
+            mandatory_names.add(name_key)
+
+    for c in (user_criteria or {}).get("scoring_criteria", []):
+        name_key = _normalize_name(c["name"])
+        if name_key not in scoring_names:
+            uc_id = str(uuid.uuid4())[:8].upper()
+            scoring_criteria.append({
+                "criterion_id": f"SC-USER-{uc_id}",
+                "name": c["name"],
+                "weight": float(c.get("weight", 0.0)),
+                "rubric_9_10": c.get("rubric_9_10", ""),
+                "rubric_6_8":  c.get("rubric_6_8",  ""),
+                "rubric_3_5":  c.get("rubric_3_5",  ""),
+                "rubric_0_2":  c.get("rubric_0_2",  ""),
+                "extraction_target_ids": [],
+                "source": "user",
+                "is_locked": False,
+            })
+            scoring_names.add(name_key)
+
+    # 4. RFP-extracted criteria (skip duplicates against org + dept + user)
     for c in rfp_criteria.get("mandatory_checks", []):
         name_key = _normalize_name(c["name"])
         if name_key not in mandatory_names:
@@ -247,7 +408,7 @@ def merge_criteria(
     for c in rfp_criteria.get("scoring_criteria", []):
         name_key = _normalize_name(c["name"])
         if name_key not in scoring_names:
-            sc_id = str(uuid.uuid4())[:8].upper()
+            sc_id = str(uuid.uuid4())[:8].upper()  # noqa: F841 (reused var name is fine)
             scoring_criteria.append({
                 "criterion_id": f"SC-RFP-{sc_id}",
                 "name": c["name"],

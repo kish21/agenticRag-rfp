@@ -340,9 +340,6 @@ export function applyThemeVars(id: ThemeId): void {
   root.style.setProperty('--color-warning',           c.warning);
   root.style.setProperty('--color-error',             c.error);
   root.style.setProperty('--color-info',              c.info);
-  root.style.setProperty('--font-sans',    "var(--font-jakarta), 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif");
-  root.style.setProperty('--font-display', "var(--font-jakarta), 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif");
-  root.style.setProperty('--font-mono',     t.font.mono);
   root.style.setProperty('--radius',                  t.radius);
   root.style.setProperty('--shadow-sm',               t.shadow.sm);
   root.style.setProperty('--shadow-md',               t.shadow.md);

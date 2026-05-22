@@ -3,6 +3,10 @@
 *.env.local
 *.env.*.local
 
+# Log files — rotate daily, do not commit
+logs/*.jsonl
+logs/*.log
+
 # Python
 venv/
 __pycache__/
@@ -33,6 +37,7 @@ coverage.xml
 # Logs
 *.log
 logs/
+!frontend/app/api/v1/logs/
 langsmith_logs/
 langfuse_logs/
 traces/

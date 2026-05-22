@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 /* ── Default theme vars (slate — Stripe-style) ───────────────────────────────
    Overwritten at runtime by applyThemeVars() in ThemeProvider.
    These values ensure a flash-free first paint before JS hydrates.          */
@@ -107,4 +112,13 @@ tr.hoverable:hover th {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes meridian-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes meridian-canvas-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

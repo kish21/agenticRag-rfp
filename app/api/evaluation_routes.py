@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from app.core.dependencies import get_current_user
 from app.core.auth import TokenData, decode_token
 from app.core.audit import audit
+from app.core.logger import rfp_logger, DevLevel, AgentLevel
 from app.core.rbac import require_run_access, require_admin_role, log_access
 from app.core.output_models import (
     AuditOverride, EvaluationSetup, MandatoryCheck,
@@ -59,7 +60,8 @@ def _db_get_run(run_id: str, org_id: str) -> dict:
                        status, vendor_ids, contract_value,
                        agent_events, agent_log, decision_output,
                        created_at, completed_at,
-                       vendor_names, created_by_email, creator_dept_id
+                       vendor_names, created_by_email, creator_dept_id,
+                       currency
                 FROM evaluation_runs
                 WHERE run_id = CAST(:rid AS uuid)
                   AND org_id = CAST(:oid AS uuid)
@@ -95,7 +97,7 @@ def _db_append_event(run_id: str, event: dict) -> None:
                 SET agent_events = agent_events || CAST(:ev AS jsonb)
                 WHERE run_id = CAST(:rid AS uuid)
             """),
-            {"ev": json.dumps(event), "rid": run_id},
+            {"ev": json.dumps(event).replace("\\u0000", ""), "rid": run_id},
         )
 
 
@@ -109,14 +111,16 @@ def _db_append_log(run_id: str, entry: dict) -> None:
                 SET agent_log = agent_log || CAST(:entry AS jsonb)
                 WHERE run_id = CAST(:rid AS uuid)
             """),
-            {"entry": json.dumps(entry), "rid": run_id},
+            {"entry": json.dumps(entry).replace("\\u0000", ""), "rid": run_id},
         )
 
 
 def _db_save_decision(run_id: str, decision: dict) -> None:
     engine = get_engine()
-    # PostgreSQL rejects  (null byte) in jsonb — strip before saving
-    dec_json = json.dumps(decision).replace(chr(0), "")
+    # PostgreSQL rejects null bytes in jsonb.
+    # json.dumps encodes chr(0) as the 6-char literal  — must strip that,
+    # not chr(0), which is no longer present in the serialized string.
+    dec_json = json.dumps(decision).replace("\\u0000", "")
     with engine.begin() as conn:
         conn.execute(
             sa.text("""
@@ -187,6 +191,8 @@ async def start_evaluation(
     vendor_names: str = Form(default="{}"),
     rfp_file: UploadFile = File(...),
     vendor_files: list[UploadFile] = File(default=[]),
+    criteria_sheet: UploadFile = File(default=None),
+    currency: str = Form(default="GBP"),
     user: TokenData = Depends(get_current_user),
 ):
     """
@@ -204,6 +210,12 @@ async def start_evaluation(
 
     # Read all bytes upfront
     rfp_bytes = await rfp_file.read()
+    criteria_bytes: bytes | None = None
+    criteria_filename: str | None = None
+    if criteria_sheet and criteria_sheet.filename:
+        criteria_bytes = await criteria_sheet.read()
+        criteria_filename = criteria_sheet.filename
+
     vendor_file_map: dict[str, tuple[bytes, str]] = {}
     for vf in vendor_files:
         vbytes = await vf.read()
@@ -217,6 +229,7 @@ async def start_evaluation(
     from app.core.criteria_merger import (
         get_org_criteria, get_dept_criteria,
         extract_rfp_text, extract_criteria_from_rfp,
+        extract_criteria_from_user_sheet,
         merge_criteria,
     )
 
@@ -227,7 +240,12 @@ async def start_evaluation(
     org_criteria  = get_org_criteria(user.org_id)
     dept_criteria = get_dept_criteria(user.org_id, department)
 
-    # Merge org+dept templates only — RFP LLM extraction runs in background
+    # Parse user-uploaded criteria sheet synchronously (pandas/pypdf — fast, no LLM)
+    user_criteria: dict | None = None
+    if criteria_bytes and criteria_filename:
+        user_criteria = await extract_criteria_from_user_sheet(criteria_bytes, criteria_filename)
+
+    # Merge org+dept+user templates — RFP LLM extraction runs in background
     merged = merge_criteria(
         org_criteria=org_criteria,
         dept_criteria=dept_criteria,
@@ -235,6 +253,7 @@ async def start_evaluation(
         department=department,
         rfp_id=rfp_id,
         org_id=user.org_id,
+        user_criteria=user_criteria,
     )
 
     # Build initial EvaluationSetup with defaults — overwritten by background task once LLM finishes
@@ -309,12 +328,12 @@ async def start_evaluation(
                 INSERT INTO evaluation_runs
                     (run_id, org_id, rfp_id, setup_id, rfp_title, department,
                      rfp_filename, rfp_bytes, status, vendor_ids, contract_value,
-                     vendor_names, created_by_email, creator_dept_id)
+                     vendor_names, created_by_email, creator_dept_id, currency)
                 VALUES
                     (CAST(:run_id AS uuid), CAST(:org_id AS uuid), :rfp_id, :setup_id,
                      :rfp_title, :department, :rfp_filename, :rfp_bytes,
                      'pending_confirm', :vendor_ids, :contract_value,
-                     CAST(:vendor_names AS jsonb), :created_by_email, :creator_dept_id)
+                     CAST(:vendor_names AS jsonb), :created_by_email, :creator_dept_id, :currency)
             """),
             {
                 "run_id":           run_id,
@@ -330,6 +349,7 @@ async def start_evaluation(
                 "vendor_names":     vendor_names if vendor_names.strip() else "{}",
                 "created_by_email": user.email,
                 "creator_dept_id":  user.dept_id,
+                "currency":         currency.upper().strip()[:3],
             },
         )
         # Store each vendor file in vendor_documents
@@ -368,7 +388,7 @@ async def start_evaluation(
     background_tasks.add_task(
         _refine_setup_with_llm,
         setup_id, rfp_text, org_criteria, dept_criteria,
-        department, rfp_id, user.org_id,
+        department, rfp_id, user.org_id, user_criteria,
     )
 
     return {"run_id": run_id, "setup_id": setup_id, "rfp_id": rfp_id}
@@ -386,7 +406,7 @@ async def list_runs(user: TokenData = Depends(get_current_user)):
         query = sa.text("""
             SELECT
                 r.run_id::text, r.rfp_id, r.status, r.created_at,
-                r.approval_tier, r.contract_value,
+                r.approval_tier, r.contract_value, r.currency,
                 r.rfp_title, r.department,
                 array_length(r.vendor_ids, 1) AS vendor_count,
                 r.decision_output
@@ -401,7 +421,7 @@ async def list_runs(user: TokenData = Depends(get_current_user)):
         query = sa.text("""
             SELECT
                 r.run_id::text, r.rfp_id, r.status, r.created_at,
-                r.approval_tier, r.contract_value,
+                r.approval_tier, r.contract_value, r.currency,
                 r.rfp_title, r.department,
                 array_length(r.vendor_ids, 1) AS vendor_count,
                 r.decision_output
@@ -433,6 +453,8 @@ async def list_runs(user: TokenData = Depends(get_current_user)):
             "approver_role":     dec.get("approval_routing", {}).get("approver_role") if dec else None,
             "sla_deadline":      dec.get("approval_routing", {}).get("sla_deadline") if dec else None,
             "started_at":        r["created_at"].isoformat() if r["created_at"] else "",
+            "currency":          r.get("currency") or "GBP",
+            "contract_value":    float(r["contract_value"]) if r.get("contract_value") is not None else None,
         })
 
     return {"runs": runs}
@@ -449,6 +471,12 @@ async def get_setup(run_id: str, user: TokenData = Depends(get_current_user)):
     setup = _db_get_setup(run["setup_id"])
     if not setup:
         raise HTTPException(status_code=404, detail="Setup not found")
+    # Inject run-level fields the confirm page needs
+    setup["currency"] = run.get("currency") or "GBP"
+    setup["contract_value"] = float(run["contract_value"]) if run.get("contract_value") is not None else None
+    setup["vendor_count"] = len(run.get("vendor_ids") or [])
+    setup["rfp_title"] = run.get("rfp_title") or ""
+    setup["department"] = run.get("department") or ""
     return setup
 
 
@@ -533,6 +561,7 @@ async def _refine_setup_with_llm(
     department: str,
     rfp_id: str,
     org_id: str,
+    user_criteria: dict | None = None,
 ) -> None:
     """
     Runs after /start returns. Calls the LLM to extract RFP-specific criteria
@@ -551,6 +580,7 @@ async def _refine_setup_with_llm(
             department=department,
             rfp_id=rfp_id,
             org_id=org_id,
+            user_criteria=user_criteria,
         )
         if not merged["mandatory_checks"] and not merged["scoring_criteria"]:
             return  # nothing better than defaults — leave as-is
@@ -633,8 +663,11 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         event = {"agent": agent, "status": status, "message": message, "log_msg": log_msg or message}
         try:
             _db_append_event(run_id, event)
-        except Exception:
-            pass
+            rfp_logger.dev(DevLevel.AGENT, agent, f"{status}: {message}",
+                           data={"status": status}, run_id=run_id, org_id=org_id)
+        except Exception as _e:
+            rfp_logger.dev(DevLevel.ERROR, agent, f"_emit DB write failed: {_e}",
+                           run_id=run_id, org_id=org_id)
         if log_msg:
             entry = {"ts": datetime.now(timezone.utc).isoformat(),
                      "agent": agent, "status": status, "message": log_msg}
@@ -651,6 +684,11 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
                   actor="system", agent=agent, detail={"message": message})
 
     def _fail(agent: str, err: Exception) -> None:
+        import traceback as _tb
+        rfp_logger.dev(DevLevel.ERROR, agent, f"Pipeline blocked: {err}",
+                       data={"traceback": _tb.format_exc()},
+                       run_id=run_id, org_id=org_id)
+        rfp_logger.end_run(run_id=run_id, org_id=org_id, status="blocked")
         _emit(agent, "blocked", str(err),
               log_msg=f"Something went wrong in the {agent} step. The evaluation could not continue.")
         try:
@@ -659,6 +697,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             pass
         audit(org_id=org_id, run_id=run_id, event_type="run.blocked",
               actor="system", detail={"agent": agent, "error": str(err)})
+
+    rfp_logger.start_run(run_id=run_id, org_id=org_id, rfp_id="", vendor_count=0)
 
     from app.core.cost_tracker import set_run_context, get_run_cost as _get_cost, clear_run_cost
     _cost_ctx = set_run_context(run_id=run_id, agent="pipeline")
@@ -670,7 +710,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             row = conn.execute(
                 sa.text("""
                     SELECT rfp_id, rfp_title, department, rfp_filename,
-                           rfp_bytes, vendor_ids, contract_value, setup_id
+                           rfp_bytes, vendor_ids, contract_value, setup_id,
+                           currency
                     FROM evaluation_runs
                     WHERE run_id = CAST(:rid AS uuid)
                 """),
@@ -687,6 +728,7 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         vendor_ids     = list(row[5] or [])
         contract_value = float(row[6] or 0)
         setup_id       = row[7]
+        currency       = row[8] if len(row) > 8 and row[8] else "GBP"
 
         setup_json = _db_get_setup(setup_id)
         if not setup_json:
@@ -695,6 +737,14 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
 
         vendor_file_map = _db_load_vendor_files(run_id)
         n_vendors = len(vendor_ids)
+
+        # Update start_run now that we have real context
+        rfp_logger.dev(DevLevel.AGENT, "Pipeline",
+                       f"Starting pipeline: {n_vendors} vendor(s), RFP '{rfp_title}'",
+                       data={"rfp_id": rfp_id, "vendors": n_vendors,
+                             "criteria": len(evaluation_setup.scoring_criteria),
+                             "mandatory_checks": len(evaluation_setup.mandatory_checks)},
+                       run_id=run_id, org_id=org_id)
 
         # ── 1. Planner ────────────────────────────────────────────────────────
         _emit("planner", "running", "Decomposing evaluation into task DAG",
@@ -763,7 +813,12 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
                 warnings=[],
             )
             retrieval_outputs[vid] = combined
-            print(f"[DEBUG retrieval] vendor={vid} queries={len(queries)} unique_chunks={len(merged_chunks)}")
+            rfp_logger.dev(DevLevel.RAG, "retrieval",
+                           f"Vendor {vid}: {len(merged_chunks)} unique chunks from {len(queries)} queries",
+                           data={"vendor_id": vid, "queries": len(queries),
+                                 "unique_chunks": len(merged_chunks),
+                                 "confidence": combined.confidence},
+                           run_id=run_id, org_id=org_id)
         _emit("retrieval", "done", f"Retrieved chunks for {n_vendors} vendors",
               log_msg=f"Found the most relevant passages from all {n_vendors} vendor proposals.")
 
@@ -781,7 +836,16 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             source_chunks[vid] = "\n".join(
                 c.text for c in retrieval_outputs[vid].chunks
             ) if hasattr(retrieval_outputs[vid], "chunks") else ""
-            print(f"[DEBUG extraction] vendor={vid} slas={len(ext_out.slas)} pricing={len(ext_out.pricing)} facts={len(ext_out.extracted_facts)} completeness={ext_out.extraction_completeness:.2f} hal_risk={ext_out.hallucination_risk:.2f} critic={critic_ext.overall_verdict}")
+            rfp_logger.dev(DevLevel.INFO, "extraction",
+                           f"Vendor {vid}: {len(ext_out.slas)} SLAs, {len(ext_out.pricing)} pricing, {len(ext_out.extracted_facts)} facts",
+                           data={"vendor_id": vid,
+                                 "slas": len(ext_out.slas),
+                                 "pricing": len(ext_out.pricing),
+                                 "facts": len(ext_out.extracted_facts),
+                                 "completeness": round(ext_out.extraction_completeness, 2),
+                                 "hallucination_risk": round(ext_out.hallucination_risk, 2),
+                                 "critic": critic_ext.overall_verdict},
+                           run_id=run_id, org_id=org_id)
         total_facts = sum(
             len(getattr(o, "certifications", []) or []) +
             len(getattr(o, "slas", []) or []) +
@@ -830,7 +894,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         exp_out, _ = await run_explanation_agent(decision_output=dec_out,
                                                   evaluation_outputs=evaluation_outputs,
                                                   extraction_outputs=extraction_outputs,
-                                                  source_chunks=source_chunks)
+                                                  source_chunks=source_chunks,
+                                                  currency=currency)
         _emit("explanation", "done", "Report ready — every claim cited",
               log_msg="Evaluation complete. Full report ready with citations for every finding.")
 
@@ -840,6 +905,12 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
 
         # Persist decision to DB
         _db_save_decision(run_id, dec_out.model_dump(mode="json"))
+        rfp_logger.end_run(run_id=run_id, org_id=org_id, status="complete",
+                           recommended_vendor=(getattr(dec_out, "shortlisted_vendors", None) or [None])[0])
+        rfp_logger.dev(DevLevel.SUCCESS, "Pipeline",
+                       f"Evaluation complete — {n_short} shortlisted, {n_rej} rejected",
+                       data={"shortlisted": n_short, "rejected": n_rej},
+                       run_id=run_id, org_id=org_id)
         audit(org_id=org_id, run_id=run_id, event_type="run.completed",
               actor="system",
               detail={"shortlisted": n_short, "rejected": n_rej,
@@ -945,15 +1016,41 @@ async def get_results(run_id: str, user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
     log_access(run_id, user.org_id, user.email, "view_results")
-    decision = run.get("decision_output")
+    decision = run.get("decision_output") or {}
+
+    # Build flat vendors list for the frontend rankings view
+    vendors = []
+    for v in decision.get("shortlisted_vendors", []):
+        vendors.append({
+            "vendor_name": v.get("vendor_name", v.get("vendor_id", "Unknown")),
+            "decision":    "shortlisted",
+            "total_score": v.get("total_score", 0),
+            "summary":     v.get("recommendation", ""),
+        })
+    for v in decision.get("rejected_vendors", []):
+        vendors.append({
+            "vendor_name": v.get("vendor_name", v.get("vendor_id", "Unknown")),
+            "decision":    "rejected",
+            "total_score": 0,
+            "summary":     "; ".join(v.get("rejection_reasons", [])),
+        })
+
+    approval_routing = decision.get("approval_routing") or {}
+
     return {
-        "run_id":       run_id,
-        "status":       run.get("status"),
-        "rfp_title":    run.get("rfp_title", ""),
-        "department":   run.get("department", ""),
-        "decision":     decision,
-        "agent_log":    run.get("agent_log") or [],
-        "vendor_names": run.get("vendor_names") or {},
+        "run_id":        run_id,
+        "status":        run.get("status"),
+        "rfp_title":     run.get("rfp_title", ""),
+        "department":    run.get("department", ""),
+        "vendors":       vendors,
+        "recommendation": (
+            decision.get("shortlisted_vendors", [{}])[0].get("recommendation", "")
+            if decision.get("shortlisted_vendors") else ""
+        ),
+        "approval_tier": approval_routing.get("approval_tier"),
+        "decision":      decision,
+        "agent_log":     run.get("agent_log") or [],
+        "vendor_names":  run.get("vendor_names") or {},
     }
 
 
@@ -1147,3 +1244,83 @@ async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_curre
         "by_agent": {},
         "source": "persisted",
     }
+
+
+# ── POST /{runId}/cancel ──────────────────────────────────────────────────────
+
+@router.post("/{run_id}/cancel")
+async def cancel_run(run_id: str, user: TokenData = Depends(get_current_user)):
+    """Mark a running evaluation as interrupted so the SSE stream terminates."""
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+
+    if run["status"] not in ("running", "pending"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel a run with status '{run['status']}'.",
+        )
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text("""
+                UPDATE evaluation_runs
+                SET status = 'interrupted', completed_at = NOW()
+                WHERE run_id = CAST(:rid AS uuid)
+                  AND org_id = CAST(:oid AS uuid)
+            """),
+            {"rid": run_id, "oid": user.org_id},
+        )
+
+    return {"run_id": run_id, "status": "interrupted"}
+
+
+# ── DELETE /{runId} ───────────────────────────────────────────────────────────
+
+@router.delete("/{run_id}")
+async def delete_run(run_id: str, user: TokenData = Depends(get_current_user)):
+    """
+    Permanently delete an evaluation run.
+    Blocked if the run status is 'completed' — those are audit records.
+    Blocked if the run is currently 'running' — would orphan the pipeline.
+    """
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+
+    if run["status"] == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Completed runs cannot be deleted — they are audit records.",
+        )
+    if run["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a run that is currently in progress.",
+        )
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        # Delete in FK-safe order — deepest children first, parents last
+        rid = {"rid": run_id}
+        conn.execute(sa.text("DELETE FROM approvals       WHERE run_id = CAST(:rid AS uuid)"), rid)
+        conn.execute(sa.text("DELETE FROM decisions        WHERE run_id = CAST(:rid AS uuid)"), rid)
+        conn.execute(sa.text("DELETE FROM retrieval_log    WHERE run_id = CAST(:rid AS uuid)"), rid)
+        # audit_log keeps a history record (run_id set to NULL rather than deleted)
+        conn.execute(sa.text("UPDATE audit_log SET run_id = NULL WHERE run_id = CAST(:rid AS uuid)"), rid)
+        conn.execute(
+            sa.text("DELETE FROM vendor_documents WHERE rfp_id = :rfp_id AND org_id = CAST(:oid AS uuid)"),
+            {"rfp_id": run["rfp_id"], "oid": user.org_id},
+        )
+        if run.get("setup_id"):
+            conn.execute(sa.text("DELETE FROM extracted_facts WHERE setup_id = :sid"), {"sid": run["setup_id"]})
+        conn.execute(
+            sa.text("DELETE FROM evaluation_runs WHERE run_id = CAST(:rid AS uuid) AND org_id = CAST(:oid AS uuid)"),
+            {"rid": run_id, "oid": user.org_id},
+        )
+        if run.get("setup_id"):
+            conn.execute(sa.text("DELETE FROM evaluation_setups WHERE setup_id = :sid"), {"sid": run["setup_id"]})
+
+    audit(org_id=user.org_id, run_id=run_id, event_type="run.deleted",
+          actor=user.email, detail={"status_at_deletion": run["status"]})
+
+    return {"run_id": run_id, "deleted": True}
