@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.agents.extraction import run_extraction_agent
 from app.agents.ingestion import run_ingestion_agent
 from app.agents.retrieval import run_retrieval_agent
-from app.core.output_models import (
+from app.schemas.output_models import (
     EvaluationSetup,
     ExtractionTarget,
     MandatoryCheck,

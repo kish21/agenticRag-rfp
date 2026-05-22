@@ -17,9 +17,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from app.core.dependencies import get_current_user
-from app.core.auth import TokenData
-from app.core.logger import rfp_logger
+from app.auth.dependencies import get_current_user
+from app.auth.jwt import TokenData
+from app.infra.logger import rfp_logger
 
 router = APIRouter(prefix="/api/v1/logs", tags=["logs"])
 

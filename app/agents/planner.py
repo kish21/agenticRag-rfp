@@ -3,7 +3,7 @@ Planner Agent — decomposes an EvaluationSetup into a typed task DAG.
 Does not retrieve, extract, or evaluate — only plans.
 """
 import uuid
-from app.core.output_models import EvaluationSetup, PlannerOutput, TaskItem
+from app.schemas.output_models import EvaluationSetup, PlannerOutput, TaskItem
 
 
 async def run_planner(

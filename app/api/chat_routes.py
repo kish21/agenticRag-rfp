@@ -13,9 +13,9 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from app.core.dependencies import get_current_user, get_db
-from app.core.auth import TokenData
-from app.core.llm_provider import call_llm
+from app.auth.dependencies import get_current_user, get_db
+from app.auth.jwt import TokenData
+from app.providers.llm import call_llm
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 

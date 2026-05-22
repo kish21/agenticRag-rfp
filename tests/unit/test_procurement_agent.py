@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.output_models import (
+from app.schemas.output_models import (
     ComplianceStatus,
     ComparatorOutput,
     CriterionScore,

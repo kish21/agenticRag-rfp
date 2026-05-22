@@ -10,11 +10,11 @@ GET  /api/v1/auth/me     — current user record from DB
 from fastapi import APIRouter, HTTPException, Response, status, Depends
 from pydantic import BaseModel, EmailStr
 import sqlalchemy as sa
-from app.core.auth import (
+from app.auth.jwt import (
     verify_password, create_access_token,
     hash_password, Token, TokenData,
 )
-from app.core.dependencies import get_current_user, get_db, COOKIE_NAME
+from app.auth.dependencies import get_current_user, get_db, COOKIE_NAME
 from app.config import settings
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])

@@ -25,12 +25,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.core.dependencies import get_current_user
-from app.core.auth import TokenData, decode_token
-from app.core.audit import audit
-from app.core.logger import rfp_logger, DevLevel, AgentLevel
-from app.core.rbac import require_run_access, require_admin_role, log_access
-from app.core.output_models import (
+from app.auth.dependencies import get_current_user
+from app.auth.jwt import TokenData, decode_token
+from app.infra.audit import audit
+from app.infra.logger import rfp_logger, DevLevel, AgentLevel
+from app.auth.rbac import require_run_access, require_admin_role, log_access
+from app.schemas.output_models import (
     AuditOverride, EvaluationSetup, MandatoryCheck,
     ScoringCriterion, ExtractionTarget, RetrievalOutput,
 )
@@ -226,7 +226,7 @@ async def start_evaluation(
         vendor_list = list(vendor_file_map.keys())
 
     # ── Build EvaluationSetup via criteria merger ──────────
-    from app.core.criteria_merger import (
+    from app.domain.criteria import (
         get_org_criteria, get_dept_criteria,
         extract_rfp_text, extract_criteria_from_rfp,
         extract_criteria_from_user_sheet,
@@ -568,8 +568,8 @@ async def _refine_setup_with_llm(
     and overwrites the default setup in the DB. The confirm page shows defaults
     until this completes, then refreshes with LLM-extracted criteria.
     """
-    from app.core.criteria_merger import extract_criteria_from_rfp, merge_criteria
-    from app.core.output_models import MandatoryCheck, ScoringCriterion, ExtractionTarget
+    from app.domain.criteria import extract_criteria_from_rfp, merge_criteria
+    from app.schemas.output_models import MandatoryCheck, ScoringCriterion, ExtractionTarget
     from app.db.fact_store import save_evaluation_setup
     try:
         rfp_criteria = await extract_criteria_from_rfp(rfp_text)
@@ -700,7 +700,7 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
 
     rfp_logger.start_run(run_id=run_id, org_id=org_id, rfp_id="", vendor_count=0)
 
-    from app.core.cost_tracker import set_run_context, get_run_cost as _get_cost, clear_run_cost
+    from app.infra.cost_tracker import set_run_context, get_run_cost as _get_cost, clear_run_cost
     _cost_ctx = set_run_context(run_id=run_id, agent="pipeline")
     _cost_ctx.__enter__()
     try:
@@ -1220,7 +1220,7 @@ async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_curre
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
 
-    from app.core.cost_tracker import get_run_cost as _get_cost
+    from app.infra.cost_tracker import get_run_cost as _get_cost
     acc = _get_cost(run_id)
     if acc is not None:
         return {**acc.summary(), "source": "live"}

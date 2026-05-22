@@ -3,7 +3,7 @@ Prevents the most common day-one failure: evaluating against the wrong document.
 Takes 2 minutes of user time. Saves hours of wasted evaluation.
 """
 import json
-from app.core.llm_provider import call_llm
+from app.providers.llm import call_llm
 
 
 async def extract_rfp_identity(rfp_text: str) -> dict:

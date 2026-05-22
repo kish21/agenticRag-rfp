@@ -94,7 +94,7 @@ def _agent_entry(level: AgentLevel, agent: str, message: str,
 class RFPLogger:
     """
     Singleton.  Import as:
-        from app.core.logger import rfp_logger, DevLevel, AgentLevel
+        from app.infra.logger import rfp_logger, DevLevel, AgentLevel
 
     All public methods are safe no-ops when LOG_ENABLE=false.
     __init__ never raises — bad paths / missing dirs are caught silently.

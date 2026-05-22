@@ -5,7 +5,7 @@ Called immediately after Extraction Agent runs.
 import json
 import uuid as _uuid
 import sqlalchemy as sa
-from app.core.output_models import EvaluationSetup, ExtractionOutput, IngestionOutput
+from app.schemas.output_models import EvaluationSetup, ExtractionOutput, IngestionOutput
 from app.config import settings
 
 _engine = None

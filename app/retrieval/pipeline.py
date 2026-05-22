@@ -18,10 +18,10 @@ from llama_index.core.node_parser import (
     get_leaf_nodes,
 )
 from app.config import settings
-from app.core.embedding_provider import embed_text, embed_batch, get_embedding_dimensions
+from app.providers.embedding import embed_text, embed_batch, get_embedding_dimensions
 
 if TYPE_CHECKING:
-    from app.core.output_models import EvaluationSetup
+    from app.schemas.output_models import EvaluationSetup
 
 
 def get_dense_embedding(text: str) -> list[float]:

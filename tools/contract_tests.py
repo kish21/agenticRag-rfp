@@ -37,7 +37,7 @@ def contract(name):
 
 @contract("All nine agent output models importable")
 def c_output_models():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         PlannerOutput, TaskItem,
         CriticOutput, CriticFlag, CriticSeverity, CriticVerdict,
         IngestionOutput, SectionType,
@@ -54,7 +54,7 @@ def c_output_models():
 
 @contract("ExtractedCertification rejects empty grounding_quote")
 def c_grounding_required():
-    from app.core.output_models import ExtractedCertification, DocumentStatus
+    from app.schemas.output_models import ExtractedCertification, DocumentStatus
     from pydantic import ValidationError
     # Valid
     cert = ExtractedCertification(
@@ -76,7 +76,7 @@ def c_grounding_required():
 
 @contract("AuditOverride enforces reason >= 20 chars")
 def c_override_reason():
-    from app.core.output_models import AuditOverride
+    from app.schemas.output_models import AuditOverride
     from pydantic import ValidationError
     from datetime import datetime
     AuditOverride(
@@ -99,7 +99,7 @@ def c_override_reason():
 
 @contract("CriticOutput hard_flag_count consistent with flags list")
 def c_critic_flag_count():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         CriticOutput, CriticFlag, CriticSeverity, CriticVerdict
     )
     c = CriticOutput(
@@ -127,7 +127,7 @@ def c_critic_flag_count():
 
 @contract("Qdrant collection naming enforces tenant isolation")
 def c_qdrant_naming():
-    from app.core.qdrant_client import collection_name, rfp_collection_name
+    from app.retrieval.qdrant import collection_name, rfp_collection_name
     c1 = collection_name("org-meridian", "vendor-alpha")
     c2 = collection_name("org-meridian", "vendor-beta")
     c3 = collection_name("org-acme", "vendor-alpha")
@@ -138,7 +138,7 @@ def c_qdrant_naming():
 
 @contract("search_dense requires org_id and vendor_id parameters")
 def c_qdrant_search_filters():
-    from app.core.qdrant_client import search_dense
+    from app.retrieval.qdrant import search_dense
     sig = inspect.signature(search_dense)
     params = list(sig.parameters.keys())
     assert "org_id" in params, "search_dense must require org_id"
@@ -163,7 +163,7 @@ def c_critic_functions():
 @contract("Critic blocks rejection without evidence citations")
 def c_critic_rejects_no_evidence():
     from app.agents.critic import critic_after_decision
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         DecisionOutput, RejectionNotice, ApprovalRouting, CriticVerdict
     )
     from datetime import datetime, timedelta
@@ -191,7 +191,7 @@ def c_critic_rejects_no_evidence():
 @contract("Critic catches hallucinated grounding quote programmatically")
 def c_critic_grounding_check():
     from app.agents.critic import critic_after_extraction
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         ExtractionOutput, ExtractedCertification,
         DocumentStatus, CriticVerdict
     )
@@ -269,7 +269,7 @@ def c_no_hardcoded_logic():
 
 @contract("All extracted fact models have source_chunk_id and grounding_quote")
 def c_fact_store_linkage():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         ExtractedCertification, ExtractedInsurance,
         ExtractedSLA, ExtractedProject, ExtractedPricing
     )
@@ -303,7 +303,7 @@ def c_fact_store_schema():
 
 @contract("call_openai_with_backoff importable — no direct OpenAI calls in agents")
 def c_rate_limiter():
-    from app.core.rate_limiter import RateLimiter, call_openai_with_backoff
+    from app.infra.rate_limiter import RateLimiter, call_openai_with_backoff
     assert callable(call_openai_with_backoff)
     # Check agent files do not make direct OpenAI calls
     agents_dir = Path(__file__).parent / "app" / "agents"

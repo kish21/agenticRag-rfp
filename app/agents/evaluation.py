@@ -13,8 +13,8 @@ import json
 import uuid
 from typing import Optional
 
-from app.core.llm_provider import call_llm
-from app.core.output_models import (
+from app.providers.llm import call_llm
+from app.schemas.output_models import (
     ComplianceDecision,
     ComplianceStatus,
     CriterionScore,
@@ -96,8 +96,8 @@ async def _retrieve_top_k_for_check(
     """
     import logging
     from app.agents.retrieval import run_retrieval_agent
-    from app.core.retrieval_critic import judge_retrieval, CriticVerdict
-    from app.core.audit import audit
+    from app.validators.retrieval import judge_retrieval, CriticVerdict
+    from app.infra.audit import audit
     from app.config import settings as cfg
 
     log = logging.getLogger(__name__)
@@ -377,7 +377,7 @@ async def run_evaluation_agent(
     evaluation_id = str(uuid.uuid4())
     warnings: list[str] = []
 
-    from app.core.org_settings import get_org_settings
+    from app.domain.org_settings import get_org_settings
     org_settings = get_org_settings(org_id) if org_id else None
 
     # Reads from PostgreSQL — NOT Qdrant

@@ -12,8 +12,8 @@ Pipeline:
 import uuid
 from datetime import datetime, timedelta
 
-from app.core.llm_provider import call_llm
-from app.core.output_models import (
+from app.providers.llm import call_llm
+from app.schemas.output_models import (
     DecisionOutput, RejectionNotice, ShortlistedVendor, ApprovalRouting,
     EvaluationOutput, ComparatorOutput, ComplianceStatus,
 )

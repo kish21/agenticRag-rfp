@@ -12,9 +12,9 @@ import json
 import re
 import uuid
 
-from app.core.llm_provider import call_llm
+from app.providers.llm import call_llm
 from pydantic import ValidationError
-from app.core.output_models import (
+from app.schemas.output_models import (
     ExplanationOutput, VendorNarrative, GroundedClaim,
     SynthesisLLMResponse,
     DecisionOutput, EvaluationOutput, ExtractionOutput,

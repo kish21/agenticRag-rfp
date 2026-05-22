@@ -6,7 +6,7 @@ Direct database edits are prohibited — this is the only override path.
 import uuid
 from datetime import datetime
 import sqlalchemy as sa
-from app.core.output_models import AuditOverride
+from app.schemas.output_models import AuditOverride
 
 
 def create_override_record(

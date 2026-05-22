@@ -40,7 +40,7 @@ def create_collection(name: str, vector_size: int | None = None):
     Dense: for semantic similarity search (OpenAI embeddings)
     Sparse: for BM25 keyword search
     """
-    from app.core.embedding_provider import get_embedding_dimensions
+    from app.providers.embedding import get_embedding_dimensions
     if vector_size is None:
         vector_size = get_embedding_dimensions()
 
@@ -165,8 +165,8 @@ def search_hybrid(
     interchangeable.
     """
     from qdrant_client import models as qm
-    from app.core.embedding_provider import embed_text
-    from app.core.llamaindex_pipeline import get_sparse_embedding
+    from app.providers.embedding import embed_text
+    from app.retrieval.pipeline import get_sparse_embedding
     from app.config import settings
 
     cfg = settings.platform.retrieval

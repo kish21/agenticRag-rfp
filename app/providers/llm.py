@@ -124,12 +124,12 @@ async def call_llm(
     Agents call this — never the provider SDK directly.
     Returns the text content of the response.
     """
-    from app.core.rate_limiter import call_with_backoff
+    from app.infra.rate_limiter import call_with_backoff
 
     provider = settings.llm_provider.lower()
     client = get_llm_client()
 
-    from app.core.cost_tracker import record_llm_call
+    from app.infra.cost_tracker import record_llm_call
     model_name = get_model_name()
 
     if provider == "anthropic":

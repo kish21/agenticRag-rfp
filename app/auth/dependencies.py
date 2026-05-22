@@ -14,7 +14,7 @@ from typing import Generator
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
-from app.core.auth import decode_token, TokenData
+from app.auth.jwt import decode_token, TokenData
 from app.db.fact_store import get_engine
 
 security = HTTPBearer(auto_error=False)

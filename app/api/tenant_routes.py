@@ -10,8 +10,8 @@ DELETE /api/v1/tenant/users/{user_id}    — deactivate user
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 import sqlalchemy as sa
-from app.core.dependencies import get_current_user, get_db
-from app.core.auth import TokenData
+from app.auth.dependencies import get_current_user, get_db
+from app.auth.jwt import TokenData
 
 router = APIRouter(prefix="/api/v1/tenant", tags=["tenant"])
 

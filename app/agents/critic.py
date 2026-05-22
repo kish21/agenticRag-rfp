@@ -5,7 +5,7 @@ It does NOT retrieve, generate, or fix — it only validates and flags.
 """
 import re
 import uuid
-from app.core.output_models import (
+from app.schemas.output_models import (
     CriticOutput, CriticFlag, CriticSeverity, CriticVerdict,
     RetrievalOutput, ExtractionOutput, EvaluationOutput,
     ComparatorOutput, DecisionOutput, ExplanationOutput,

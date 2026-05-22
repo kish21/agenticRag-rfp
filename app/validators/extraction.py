@@ -10,7 +10,7 @@ import json
 import logging
 from pydantic import BaseModel, Field
 from app.config import settings
-from app.core.llm_provider import call_llm
+from app.providers.llm import call_llm
 
 log = logging.getLogger(__name__)
 

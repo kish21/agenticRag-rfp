@@ -2,7 +2,7 @@
 Append-only audit log writer.
 
 Usage:
-    from app.core.audit import audit
+    from app.infra.audit import audit
 
     audit(
         org_id     = user.org_id,

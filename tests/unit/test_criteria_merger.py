@@ -3,7 +3,7 @@ Tests for criteria_merger.merge_criteria deduplication — issue #22.
 No DB, no LLM: unit-level tests only.
 """
 import pytest
-from app.core.criteria_merger import merge_criteria, _normalize_name
+from app.domain.criteria import merge_criteria, _normalize_name
 
 
 # ── _normalize_name ───────────────────────────────────────────────────────────

@@ -82,7 +82,7 @@ def _count_null_run_id(org_id: str, event_type: str) -> int:
 
 def test_audit_round_trip() -> None:
     """audit() writes event with run_id; reading back by run_id returns it."""
-    from app.core.audit import audit
+    from app.infra.audit import audit
 
     run_id = str(uuid.uuid4())
     org_id = str(uuid.uuid4())
@@ -158,7 +158,7 @@ async def test_retrieval_critic_threads_run_id() -> None:
 async def test_extraction_critic_threads_run_id() -> None:
     """run_extraction_agent emits extraction_critic.verdict WITH run_id."""
     from app.agents.extraction import run_extraction_agent
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         EvaluationSetup, MandatoryCheck, ExtractionTarget, ScoringCriterion,
         RetrievalOutput, RetrievedChunk,
     )

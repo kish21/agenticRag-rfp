@@ -192,7 +192,7 @@ def SK01_CP09():
 
 def SK02_CP01():
     c, o = _run("""python -c "
-from app.core.output_models import (
+from app.schemas.output_models import (
     PlannerOutput, CriticOutput, IngestionOutput, RetrievalOutput,
     ExtractionOutput, EvaluationOutput, ComparatorOutput,
     DecisionOutput, ExplanationOutput, AuditOverride,
@@ -204,7 +204,7 @@ print('all models imported')
 
 def SK02_CP02():
     c, o = _run("""python -c "
-from app.core.rate_limiter import RateLimiter, call_openai_with_backoff
+from app.infra.rate_limiter import RateLimiter, call_openai_with_backoff
 import asyncio
 limiter = RateLimiter(requests_per_minute=10)
 async def test():
@@ -216,7 +216,7 @@ print(asyncio.run(test()))
 
 def SK02_CP03():
     c, o = _run("""python -c "
-from app.core.qdrant_client import get_qdrant_client, collection_name
+from app.retrieval.qdrant import get_qdrant_client, collection_name
 client = get_qdrant_client()
 cols = client.get_collections()
 print('qdrant ok, collections:', len(cols.collections))
@@ -248,7 +248,7 @@ print('all critic functions imported')
 def SK02_CP06():
     c, o = _run("""python -c "
 from app.agents.critic import critic_after_decision
-from app.core.output_models import (
+from app.schemas.output_models import (
     DecisionOutput, RejectionNotice, ShortlistedVendor,
     ApprovalRouting, CriticVerdict
 )
@@ -282,7 +282,7 @@ print('critic blocks rejection without evidence: OK')
 
 def SK02_CP07():
     c, o = _run("""python -c "
-from app.core.rfp_confirmation import format_confirmation_message
+from app.domain.rfp import format_confirmation_message
 msg = format_confirmation_message({
     'reference': 'RFP-2026-IT-001',
     'issuer': 'Meridian Financial Services',
@@ -299,7 +299,7 @@ print('rfp confirmation format ok')
 
 def SK02_CP08():
     c, o = _run("""python -c "
-from app.core.override_mechanism import create_override_record
+from app.domain.override import create_override_record
 from pydantic import ValidationError
 # Test: short reason should fail validation
 try:
@@ -356,8 +356,8 @@ print('fact store ok')
 def SK03_CP03():
     c, o = _run("""python -c "
 import os; os.environ['SKIP_EMBEDDINGS'] = 'true'
-from app.core.llamaindex_pipeline import process_document
-from app.core.output_models import (
+from app.retrieval.pipeline import process_document
+from app.schemas.output_models import (
     EvaluationSetup, MandatoryCheck, ScoringCriterion, ExtractionTarget
 )
 from datetime import datetime
@@ -406,7 +406,7 @@ print('llamaindex pipeline ok, chunks:', len(chunks))
 
 def SK03_CP04():
     c, o = _run("""python -c "
-from app.core.ingestion_validator import compute_content_hash, validate_extracted_text
+from app.validators.ingestion import compute_content_hash, validate_extracted_text
 h = compute_content_hash(b'test content')
 assert len(h) == 64
 ok, reason = validate_extracted_text('This is a valid document with plenty of readable content. ' * 10, 'test.pdf')
@@ -421,7 +421,7 @@ def SK03_CP05():
     c, o = _run("""python -c "
 import os; os.environ['SKIP_EMBEDDINGS'] = 'true'
 from app.agents.ingestion import run_ingestion_agent
-from app.core.output_models import (
+from app.schemas.output_models import (
     EvaluationSetup, MandatoryCheck, ScoringCriterion, ExtractionTarget
 )
 from datetime import datetime
@@ -492,7 +492,7 @@ print('query rewriting ok:', rewritten[:60])
 
 def SK03b_CP02():
     c, o = _run("""python -c "
-from app.core.reranker_provider import rerank
+from app.providers.reranker import rerank
 candidates = [
     {'text': 'The vendor holds ISO 27001 certification issued by BSI.', 'score': 0.7},
     {'text': 'Our team has 20 professionals with IT experience.', 'score': 0.8},
@@ -533,13 +533,13 @@ print('context compression ok, chunks:', len(compressed))
 
 def SK04_CP01():
     return _py(
-        "from app.core.output_models import ExtractionOutput, ExtractedCertification; print('extraction models ok')",
+        "from app.schemas.output_models import ExtractionOutput, ExtractedCertification; print('extraction models ok')",
         "extraction models ok"
     )
 
 def SK04_CP02():
     c, o = _run("""python -c "
-from app.core.output_models import ExtractedCertification
+from app.schemas.output_models import ExtractedCertification
 from pydantic import ValidationError
 # grounding_quote must not be empty
 try:
@@ -559,7 +559,7 @@ except (ValidationError, ValueError):
 def SK04_CP03():
     c, o = _run("""python -c "
 from app.agents.critic import critic_after_extraction
-from app.core.output_models import ExtractionOutput, ExtractedCertification
+from app.schemas.output_models import ExtractionOutput, ExtractedCertification
 extraction = ExtractionOutput(
     extraction_id='ext-001',
     vendor_id='test',
@@ -590,7 +590,7 @@ print('extraction critic ok')
 def SK04_CP04():
     c, o = _run("""python -c "
 from app.agents.critic import critic_after_extraction
-from app.core.output_models import ExtractionOutput, ExtractedCertification, CriticVerdict
+from app.schemas.output_models import ExtractionOutput, ExtractedCertification, CriticVerdict
 extraction = ExtractionOutput(
     extraction_id='ext-002',
     vendor_id='test',
@@ -649,7 +649,7 @@ def SK05_CP02():
 
 def SK05_CP03():
     c, o = _run("""python -c "
-from app.core.output_models import ComplianceDecision, ComplianceStatus, DecisionBasis
+from app.schemas.output_models import ComplianceDecision, ComplianceStatus, DecisionBasis
 d = ComplianceDecision(
     check_id='MC-001',
     vendor_id='beta',
@@ -666,7 +666,7 @@ print('compliance decision model ok')
 
 def SK05_CP04():
     c, o = _run("""python -c "
-from app.core.output_models import CriterionScore
+from app.schemas.output_models import CriterionScore
 s = CriterionScore(
     criterion_id='SC-001',
     vendor_id='alpha',
@@ -695,7 +695,7 @@ print('sk05-cp05 ok')
 
 def SK05_CP06():
     return _py(
-        "from app.core.output_models import ComparatorOutput; print('comparator output model ok')",
+        "from app.schemas.output_models import ComparatorOutput; print('comparator output model ok')",
         "comparator output model ok"
     )
 
@@ -714,7 +714,7 @@ def SK06_CP01():
 
 def SK06_CP02():
     c, o = _run("""python -c "
-from app.core.output_models import RejectionNotice
+from app.schemas.output_models import RejectionNotice
 r = RejectionNotice(
     vendor_id='beta',
     vendor_name='Vendor Beta',
@@ -761,13 +761,13 @@ print('grounding verification ok')
 
 def SK06_CP05():
     return _py(
-        "from app.core.override_mechanism import create_override_record, save_override; print('override mechanism importable')",
+        "from app.domain.override import create_override_record, save_override; print('override mechanism importable')",
         "override mechanism importable"
     )
 
 def SK06_CP06():
     return _py(
-        "from app.core.rfp_confirmation import format_confirmation_message, extract_rfp_identity; print('rfp confirmation importable')",
+        "from app.domain.rfp import format_confirmation_message, extract_rfp_identity; print('rfp confirmation importable')",
         "rfp confirmation importable"
     )
 
@@ -776,7 +776,7 @@ def SK06_CP06():
 
 def SK01b_CP01():
     code, out = _run("""python -c "
-from app.core.auth import create_access_token, decode_token
+from app.auth.jwt import create_access_token, decode_token
 token = create_access_token(
     email='test@test.com',
     org_id='org-001',
@@ -853,7 +853,7 @@ def SK01b_CP04():
 
 def SK01b_CP05():
     code, out = _run("""python -c "
-from app.core.auth import create_access_token, decode_token, require_role, TokenData
+from app.auth.jwt import create_access_token, decode_token, require_role, TokenData
 token = create_access_token(
     email='user@test.com',
     org_id='org-001',
@@ -993,7 +993,7 @@ def SK07_CP05():
 
 def SK08_CP01():
     return _py(
-        "from app.core.langfuse_client import get_langfuse, log_evaluation_run; print('langfuse importable')",
+        "from app.providers.observability import log_evaluation_run; print('langfuse importable')",
         "langfuse importable"
     )
 
@@ -1014,7 +1014,7 @@ def SK08_CP03():
 
 def SK09_CP01():
     return _py(
-        "from app.core.agent_registry import get_agent_config, register_agent, list_agents; print('agent registry importable')",
+        "from app.domain.agent_registry import get_agent_config, register_agent, list_agents; print('agent registry importable')",
         "agent registry importable"
     )
 
@@ -1087,7 +1087,7 @@ def CONFIG_CP02():
     """OrgSettings round-trip: defaults load from product.yaml, preset apply works."""
     c, o = _run("""python -c "
 import uuid
-from app.core.org_settings import get_org_settings, upsert_org_settings
+from app.domain.org_settings import get_org_settings, upsert_org_settings
 from app.config import settings as cfg
 test_org = 'cp-test-' + str(uuid.uuid4())[:8]
 s = get_org_settings(test_org)

@@ -10,7 +10,7 @@ Supported providers:
   local_worker    — On-premise Celery worker (air-gapped/no cloud) [Skill 09]
 
 Usage in agents:
-    from app.core.compute_provider import get_compute_backend
+    from app.providers.compute import get_compute_backend
     extract_fn = get_compute_backend()
     result = await extract_fn(file_bytes=..., filename=..., org_id=..., vendor_id=..., run_id=...)
 """

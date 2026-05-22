@@ -7,8 +7,8 @@ Vendors are ranked from PostgreSQL facts and typed EvaluationOutputs, not from Q
 import json
 import uuid
 
-from app.core.llm_provider import call_llm
-from app.core.output_models import (
+from app.providers.llm import call_llm
+from app.schemas.output_models import (
     ComparatorOutput,
     CriterionComparison,
     EvaluationOutput,

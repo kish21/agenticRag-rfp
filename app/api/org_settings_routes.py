@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Any
 
-from app.core.org_settings import get_org_settings, upsert_org_settings, OrgSettings
-from app.core.dependencies import get_current_user
-from app.core.auth import require_role, TokenData
+from app.domain.org_settings import get_org_settings, upsert_org_settings, OrgSettings
+from app.auth.dependencies import get_current_user
+from app.auth.jwt import require_role, TokenData
 
 router = APIRouter(prefix="/api/v1/org", tags=["org-settings"])
 
@@ -40,7 +40,7 @@ async def reset_org_settings(
     _: None = Depends(require_role("platform_admin", "company_admin")),
 ):
     """Reset org to the default preset (from product.yaml new_org_defaults)."""
-    from app.core.org_settings import invalidate_org_settings
+    from app.domain.org_settings import invalidate_org_settings
     import sqlalchemy as sa
     from app.db.fact_store import get_engine
 

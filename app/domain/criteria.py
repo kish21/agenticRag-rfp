@@ -7,7 +7,7 @@ import json
 import re
 import uuid
 from app.db.fact_store import get_engine
-from app.core.llm_provider import call_llm
+from app.providers.llm import call_llm
 import sqlalchemy as sa
 
 # Common suffixes the LLM appends that don't change the meaning of a check.

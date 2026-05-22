@@ -3,7 +3,7 @@ LLM cost and latency tracking.
 
 Usage:
     # In agent runner / evaluation orchestrator — set context before calling agents:
-    from app.core.cost_tracker import set_run_context, get_run_cost
+    from app.infra.cost_tracker import set_run_context, get_run_cost
 
     with set_run_context(run_id="abc-123"):
         await run_all_agents(...)

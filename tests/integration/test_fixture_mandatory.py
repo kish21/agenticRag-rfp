@@ -19,7 +19,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from app.agents.evaluation import _evaluate_mandatory_check, _llm_verify_threshold
-from app.core.output_models import (
+from app.schemas.output_models import (
     ComplianceStatus, MandatoryCheck, ExtractionTarget,
 )
 

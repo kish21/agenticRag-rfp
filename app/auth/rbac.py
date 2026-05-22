@@ -11,7 +11,7 @@ Override actions (confirm / override endpoint) require department_admin or above
 """
 import json
 from fastapi import HTTPException
-from app.core.auth import TokenData
+from app.auth.jwt import TokenData
 
 _WIDE_ROLES = {"platform_admin", "company_admin", "department_admin"}
 

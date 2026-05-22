@@ -44,7 +44,7 @@ from app.agents.planner import run_planner
 from app.agents.critic import (
     critic_after_extraction, critic_after_decision, critic_after_explanation
 )
-from app.core.agent_registry import register_agent, get_agent_config, list_agents
+from app.domain.agent_registry import register_agent, get_agent_config, list_agents
 
 check("run_planner is callable", inspect.isfunction(run_planner))
 check("critic_after_extraction is callable", inspect.isfunction(critic_after_extraction))
@@ -63,7 +63,7 @@ check("GET /api/v1/admin/agents route exists",
       "/api/v1/admin/agents" in routes)
 
 # ── 4. LLM provider is shared — HR uses same call_llm() as procurement ─
-from app.core.llm_provider import call_llm
+from app.providers.llm import call_llm
 check("call_llm shared between HR and procurement agents",
       inspect.isfunction(call_llm) or callable(call_llm))
 
