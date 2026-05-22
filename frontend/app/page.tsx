@@ -234,38 +234,56 @@ export default function HomePage() {
 
   useEffect(() => {
     if (shellState !== "running" || !activeRunId) return;
-    const base = process.env.NEXT_PUBLIC_API_SSE_URL ?? "";
-    const es = new EventSource(`${base}/api/v1/evaluate/${activeRunId}/status`, { withCredentials: true });
-    esRef.current = es;
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
 
-    es.onmessage = e => {
-      try {
-        const ev = JSON.parse(e.data) as Record<string, unknown>;
-        // heartbeat — keep-alive, ignore
-        if (ev.type === "heartbeat") return;
-        // done — pipeline finished (complete/blocked/failed/interrupted)
-        if (ev.type === "done") {
-          setShellState("completed");
-          setCanvasPage("results");
-          es.close();
-          return;
-        }
-        // agent event
-        const agentEv = ev as unknown as AgentEvent;
-        if (agentEv.agent) {
-          setAgentEvents(prev => [...prev, agentEv]);
-          setAgentStatuses(prev => ({ ...prev, [agentEv.agent]: { status: agentEv.status, message: agentEv.message } }));
-          if (agentEv.agent === "explanation" && agentEv.status === "done") {
+    function connect() {
+      if (closed) return;
+      es = new EventSource(`/api/v1/evaluate/${activeRunId}/status`, { withCredentials: true });
+      esRef.current = es;
+
+      es.onmessage = e => {
+        try {
+          const ev = JSON.parse(e.data) as Record<string, unknown>;
+          if (ev.type === "heartbeat") return;
+          if (ev.type === "done") {
+            closed = true;
+            es?.close();
             setShellState("completed");
             setCanvasPage("results");
-            es.close();
+            return;
           }
-        }
-      } catch { /* malformed event — skip */ }
-    };
+          const agentEv = ev as unknown as AgentEvent;
+          if (agentEv.agent) {
+            setAgentEvents(prev => [...prev, agentEv]);
+            setAgentStatuses(prev => ({ ...prev, [agentEv.agent]: { status: agentEv.status, message: agentEv.message } }));
+            if (agentEv.agent === "explanation" && agentEv.status === "done") {
+              closed = true;
+              es?.close();
+              setShellState("completed");
+              setCanvasPage("results");
+            }
+          }
+        } catch { /* malformed event — skip */ }
+      };
 
-    es.onerror = (e) => { console.error("[SSE] stream error", e); es.close(); };
-    return () => { es.close(); esRef.current = null; };
+      es.onerror = () => {
+        es?.close();
+        esRef.current = null;
+        if (!closed) {
+          retryTimer = setTimeout(connect, 2000);
+        }
+      };
+    }
+
+    connect();
+    return () => {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      es?.close();
+      esRef.current = null;
+    };
   }, [shellState, activeRunId]);
 
   // ── Dev log SSE ───────────────────────────────────────────────────────────

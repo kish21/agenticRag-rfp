@@ -661,8 +661,11 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         event = {"agent": agent, "status": status, "message": message, "log_msg": log_msg or message}
         try:
             _db_append_event(run_id, event)
-        except Exception:
-            pass
+            rfp_logger.dev(DevLevel.AGENT, agent, f"{status}: {message}",
+                           data={"status": status}, run_id=run_id, org_id=org_id)
+        except Exception as _e:
+            rfp_logger.dev(DevLevel.ERROR, agent, f"_emit DB write failed: {_e}",
+                           run_id=run_id, org_id=org_id)
         if log_msg:
             entry = {"ts": datetime.now(timezone.utc).isoformat(),
                      "agent": agent, "status": status, "message": log_msg}
