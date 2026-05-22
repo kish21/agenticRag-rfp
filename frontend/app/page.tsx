@@ -25,7 +25,7 @@ interface EvalRun {
 
 interface AgentEvent {
   agent: string;
-  status: "pending" | "running" | "done" | "blocked" | "interrupted" | "failed" | "completed";
+  status: "pending" | "running" | "done" | "blocked" | "interrupted" | "failed" | "completed" | "complete";
   message: string;
 }
 
@@ -76,6 +76,7 @@ const ROLE_DISPLAY: Record<string, string> = {
 };
 
 const STATUS_DOT: Record<string, string> = {
+  complete:    "var(--color-success)",
   completed:   "var(--color-success)",
   running:     "var(--color-info)",
   pending:     "var(--color-warning)",
@@ -294,7 +295,7 @@ export default function HomePage() {
 
   function openRun(run: EvalRun) {
     setActiveRunId(run.run_id);
-    if (run.status === "completed") {
+    if (run.status === "completed" || run.status === "complete") {
       setShellState("completed");
       setCanvasPage("results");
     } else if (run.status === "running") {
@@ -423,7 +424,7 @@ export default function HomePage() {
   function renderWelcome() {
     const total     = runs.length;
     const running   = runs.filter(r => r.status === "running").length;
-    const completed = runs.filter(r => r.status === "completed").length;
+    const completed = runs.filter(r => r.status === "completed" || r.status === "complete").length;
     const hasChatMessages = chatMessages.length > 0;
 
     return (
