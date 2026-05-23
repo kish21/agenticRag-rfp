@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
-import { useThemeContext } from "@/components/ThemeProvider";
+import { useThemeContext } from "@/components/layout/ThemeProvider";
 import { useBreakpoint } from "@/lib/hooks";
 import { api, setUserInfo } from "@/lib/api";
 

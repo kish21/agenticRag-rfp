@@ -1,3 +1,14 @@
+export function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+export function greet(email: string): string {
+  const name = email.split("@")[0].replace(/[._-]/g, " ");
+  const h = new Date().getHours();
+  const period = h < 12 ? "morning" : h < 17 ? "afternoon" : "evening";
+  return `Good ${period}, ${name}.`;
+}
+
 /**
  * Format a monetary value using the ISO 4217 currency code.
  * Falls back to showing the code as a prefix if Intl.NumberFormat doesn't

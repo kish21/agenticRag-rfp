@@ -1,7 +1,7 @@
 import datetime
 import httpx
 
-from app.core.observability_provider import log_critic_flag
+from app.providers.observability import log_critic_flag
 
 _ALERT_THRESHOLD_PCT = 2.0
 _LOOKBACK_HOURS = 1
@@ -19,7 +19,7 @@ async def check_rate_limit_health(
     window_start = now - datetime.timedelta(hours=_LOOKBACK_HOURS)
 
     # Read rate-limit counters from the in-process rate limiter state
-    from app.core.rate_limiter import RateLimiter  # lazy import — avoids circular
+    from app.infra.rate_limiter import RateLimiter  # lazy import — avoids circular
 
     rl: RateLimiter = RateLimiter.get_instance()
     total_calls: int = rl.get_call_count(since=window_start)

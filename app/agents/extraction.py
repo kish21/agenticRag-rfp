@@ -16,8 +16,8 @@ from datetime import date
 from typing import Optional
 
 from app.config import settings
-from app.core.llm_provider import call_llm
-from app.core.output_models import (
+from app.providers.llm import call_llm
+from app.schemas.output_models import (
     CriticVerdict,
     DocumentStatus,
     EvaluationSetup,
@@ -474,8 +474,8 @@ async def run_extraction_agent(
     # Caps at extraction_critic_max_retries per type. Emits one audit event per fact.
     retried_fact_types: set[str] = set()
     if org_id:
-        from app.core.extraction_critic import judge_extraction
-        from app.core.audit import audit as _audit
+        from app.validators.extraction import judge_extraction
+        from app.infra.audit import audit as _audit
 
         # Build: fact_type → [(criterion_name, what_passes)] from mandatory checks
         target_by_id = {t.target_id: t for t in (evaluation_setup.extraction_targets or [])}

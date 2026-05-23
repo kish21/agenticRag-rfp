@@ -2,8 +2,8 @@ import datetime
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
-from app.core.qdrant_client import get_qdrant_client
-from app.core.observability_provider import log_evaluation_run
+from app.retrieval.qdrant import get_qdrant_client
+from app.providers.observability import log_evaluation_run
 
 
 _DEFAULT_RETENTION_DAYS = 90

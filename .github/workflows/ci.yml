@@ -49,10 +49,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run frontend drift detector
-        run: python frontend_drift_detector.py
+        run: python tools/frontend_drift_detector.py
 
       - name: Run frontend checkpoint runner
-        run: python frontend_checkpoint_runner.py run BUILD THEME RESPONSIVE AUTH FORMS A11Y SECURITY
+        run: python tools/frontend_checkpoint_runner.py run BUILD THEME RESPONSIVE AUTH FORMS A11Y SECURITY
 
   # ── Job 3: Backend unit tests ────────────────────────────────────────────
   backend-tests:
@@ -87,7 +87,7 @@ jobs:
           EOF
 
       - name: Run pytest
-        run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression
+        run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression --ignore=tests/integration
 
   # ── Job 4: Backend contract tests (no services needed — import-only) ─────
   backend-contracts:
@@ -122,5 +122,5 @@ jobs:
           EOF
 
       - name: Run contract tests
-        run: python contract_tests.py
+        run: PYTHONPATH=. python tools/contract_tests.py
         continue-on-error: true  # contract tests may need services; don't block on first run

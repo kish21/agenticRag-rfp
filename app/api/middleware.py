@@ -11,7 +11,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from jose import JWTError
-from app.core.auth import decode_token
+from app.auth.jwt import decode_token
 import sqlalchemy as sa
 from app.db.fact_store import get_engine
 

@@ -30,7 +30,7 @@ def _mark_orphaned_runs() -> None:
     try:
         import sqlalchemy as sa
         from app.db.fact_store import get_engine
-        from app.core.audit import audit
+        from app.infra.audit import audit
         engine = get_engine()
         with engine.begin() as conn:
             rows = conn.execute(

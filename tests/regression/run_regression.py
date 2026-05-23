@@ -38,7 +38,7 @@ def test(qid: str, description: str):
 
 @test("Q01", "RetrievalOutput model validates with required fields")
 def q01():
-    from app.core.output_models import RetrievalOutput, RetrievedChunk
+    from app.schemas.output_models import RetrievalOutput, RetrievedChunk
     chunk = RetrievedChunk(
         chunk_id="c1", qdrant_point_id="c1", text="ISO 27001 certification held",
         section_id="s1", section_title="Certifications", section_type="requirement_response",
@@ -59,7 +59,7 @@ def q01():
 
 @test("Q02", "Empty retrieval triggers Critic soft flag for non-mandatory")
 def q02():
-    from app.core.output_models import RetrievalOutput, CriticVerdict
+    from app.schemas.output_models import RetrievalOutput, CriticVerdict
     from app.agents.critic import critic_after_retrieval
     out = RetrievalOutput(
         query_id="q2", original_query="test", rewritten_query="test",
@@ -74,7 +74,7 @@ def q02():
 
 @test("Q03", "Empty retrieval on mandatory query triggers Critic hard block")
 def q03():
-    from app.core.output_models import RetrievalOutput, CriticVerdict
+    from app.schemas.output_models import RetrievalOutput, CriticVerdict
     from app.agents.critic import critic_after_retrieval
     out = RetrievalOutput(
         query_id="q3", original_query="ISO 27001 mandatory", rewritten_query="ISO 27001",
@@ -112,7 +112,7 @@ def q05():
 
 @test("Q06", "ComplianceDecision FAIL status set correctly")
 def q06():
-    from app.core.output_models import ComplianceDecision, ComplianceStatus, DecisionBasis
+    from app.schemas.output_models import ComplianceDecision, ComplianceStatus, DecisionBasis
     d = ComplianceDecision(
         check_id="MC-001", vendor_id="v1",
         decision=ComplianceStatus.FAIL,
@@ -126,7 +126,7 @@ def q06():
 
 @test("Q07", "Critic blocks evaluation with contradictions in evidence")
 def q07():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         EvaluationOutput, ComplianceDecision, ComplianceStatus,
         DecisionBasis, CriterionScore, ExtractionOutput, CriticVerdict
     )
@@ -161,7 +161,7 @@ def q07():
 
 @test("Q08", "RejectionNotice requires non-empty evidence_citations")
 def q08():
-    from app.core.output_models import RejectionNotice
+    from app.schemas.output_models import RejectionNotice
     r = RejectionNotice(
         vendor_id="v1", vendor_name="Vendor One",
         failed_checks=["MC-001"],
@@ -175,7 +175,7 @@ def q08():
 
 @test("Q09", "Critic hard blocks decision with empty evidence_citations")
 def q09():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         DecisionOutput, RejectionNotice, ApprovalRouting, CriticVerdict
     )
     from app.agents.critic import critic_after_decision
@@ -204,7 +204,7 @@ def q09():
 
 @test("Q10", "All-vendors-rejected triggers escalation")
 def q10():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         DecisionOutput, RejectionNotice, ApprovalRouting, CriticVerdict
     )
     from app.agents.critic import critic_after_decision
@@ -235,7 +235,7 @@ def q10():
 
 @test("Q11", "CriterionScore weighted_contribution calculated correctly")
 def q11():
-    from app.core.output_models import CriterionScore
+    from app.schemas.output_models import CriterionScore
     score = CriterionScore(
         criterion_id="C1", vendor_id="v1", raw_score=8,
         weighted_contribution=0.8, confidence=0.9,
@@ -249,7 +249,7 @@ def q11():
 
 @test("Q12", "High variance score triggers Critic soft flag")
 def q12():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         EvaluationOutput, ComplianceDecision, ComplianceStatus,
         DecisionBasis, CriterionScore, ExtractionOutput
     )
@@ -283,7 +283,7 @@ def q12():
 
 @test("Q13", "EvaluationSetup weights must sum to 1.0")
 def q13():
-    from app.core.output_models import EvaluationSetup, ScoringCriterion, MandatoryCheck, ExtractionTarget
+    from app.schemas.output_models import EvaluationSetup, ScoringCriterion, MandatoryCheck, ExtractionTarget
     from datetime import datetime
     import pytest
     try:
@@ -314,7 +314,7 @@ def q13():
 
 @test("Q14", "EvaluationSetup with valid weights passes validation")
 def q14():
-    from app.core.output_models import EvaluationSetup, ScoringCriterion, MandatoryCheck, ExtractionTarget
+    from app.schemas.output_models import EvaluationSetup, ScoringCriterion, MandatoryCheck, ExtractionTarget
     from datetime import datetime
     setup = EvaluationSetup(
         setup_id="s2", org_id="org1", department="IT",
@@ -343,7 +343,7 @@ def q14():
 
 @test("Q15", "ComparatorOutput model validates with ranking")
 def q15():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         ComparatorOutput, CriterionComparison, VendorCriterionComparison
     )
     vc = VendorCriterionComparison(
@@ -372,7 +372,7 @@ def q15():
 
 @test("Q16", "Unstable ranking triggers Critic soft flag")
 def q16():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         ComparatorOutput, CriterionComparison, VendorCriterionComparison
     )
     from app.agents.critic import critic_after_comparator
@@ -401,7 +401,7 @@ def q16():
 
 @test("Q17", "Empty ranking triggers Critic hard block")
 def q17():
-    from app.core.output_models import ComparatorOutput, CriticVerdict
+    from app.schemas.output_models import ComparatorOutput, CriticVerdict
     from app.agents.critic import critic_after_comparator
     out = ComparatorOutput(
         comparison_id="cmp3", rfp_id="rfp1",
@@ -419,7 +419,7 @@ def q17():
 
 @test("Q18", "All agent output models are importable and Pydantic v2")
 def q18():
-    from app.core.output_models import (
+    from app.schemas.output_models import (
         PlannerOutput, IngestionOutput, RetrievalOutput, ExtractionOutput,
         EvaluationOutput, ComparatorOutput, DecisionOutput, ExplanationOutput,
         CriticOutput
@@ -453,7 +453,7 @@ def q19():
 
 @test("Q20", "AuditOverride enforces minimum 20-char reason")
 def q20():
-    from app.core.output_models import AuditOverride
+    from app.schemas.output_models import AuditOverride
     from datetime import datetime
     # Short reason must fail
     try:

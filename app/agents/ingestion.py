@@ -9,14 +9,14 @@ Handles:
 import io
 import uuid
 import zipfile
-from app.core.output_models import IngestionOutput, EvaluationSetup
-from app.core.llamaindex_pipeline import process_document
-from app.core.ingestion_validator import (
+from app.schemas.output_models import IngestionOutput, EvaluationSetup
+from app.retrieval.pipeline import process_document
+from app.validators.ingestion import (
     compute_content_hash,
     validate_extracted_text,
     validate_zip_contents,
 )
-from app.core.qdrant_client import (
+from app.retrieval.qdrant import (
     get_qdrant_client,
     collection_name,
     create_collection,

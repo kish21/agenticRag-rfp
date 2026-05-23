@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.core.agent_registry import register_agent, get_agent_config, list_agents
-from app.core.dependencies import get_current_user
-from app.core.auth import require_role, TokenData
+from app.domain.agent_registry import register_agent, get_agent_config, list_agents
+from app.auth.dependencies import get_current_user
+from app.auth.jwt import require_role, TokenData
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 

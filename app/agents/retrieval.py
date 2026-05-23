@@ -13,14 +13,14 @@ import asyncio
 import time
 import uuid
 
-from app.core.llm_provider import call_llm
-from app.core.output_models import RetrievalOutput, RetrievedChunk
-from app.core.qdrant_client import collection_name, search_dense, search_hybrid
-from app.core.llamaindex_pipeline import get_dense_embedding
-from app.core.reranker_provider import rerank as rerank_candidates
+from app.providers.llm import call_llm
+from app.schemas.output_models import RetrievalOutput, RetrievedChunk
+from app.retrieval.qdrant import collection_name, search_dense, search_hybrid
+from app.retrieval.pipeline import get_dense_embedding
+from app.providers.reranker import rerank as rerank_candidates
 from app.agents.critic import critic_after_retrieval
 from app.config import settings
-from app.core.audit import log_retrieval
+from app.infra.audit import log_retrieval
 
 
 # ---------------------------------------------------------------------------
