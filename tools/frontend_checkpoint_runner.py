@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if sys.platform == "win32":
     os.system("")  # enables VT100 in cmd/PowerShell
 
-FRONTEND_DIR = Path(__file__).parent / "frontend"
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 # ── Checkpoint result ─────────────────────────────────────────────────────────
 
@@ -349,10 +349,10 @@ def cp_security() -> list[CP]:
         results.append(CP("SEC1", "Security scan (drift detector importable)", False))
 
     # SEC2: .env.local not committed
-    env_local = Path(__file__).parent / "frontend" / ".env.local"
+    env_local = Path(__file__).parent.parent / "frontend" / ".env.local"
     # Check git tracking
     code, out = run_cmd(["git", "ls-files", "--error-unmatch", "frontend/.env.local"],
-                        Path(__file__).parent)
+                        Path(__file__).parent.parent)
     not_tracked = code != 0
     results.append(CP("SEC2", ".env.local not tracked by git", not_tracked,
         "frontend/.env.local is tracked by git — add to .gitignore" if not not_tracked else ""))

@@ -6,10 +6,12 @@ import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useThemeContext } from "@/components/layout/ThemeProvider";
 import { ThemePicker } from "@/components/layout/ThemePicker";
 import { isLoggedIn, getUserInfo, type UserInfo } from "@/lib/api";
+import { useBreakpoint } from "@/lib/hooks";
 
 export default function SettingsPage() {
   const router = useRouter();
   const { isDark } = useThemeContext();
+  const bp = useBreakpoint();
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export default function SettingsPage() {
     <div style={{
       minHeight: "100vh",
       background: "var(--bg-gradient)",
-      padding: "40px 40px",
+      padding: bp === "mobile" ? "24px 20px" : bp === "tablet" ? "32px 24px" : "48px 32px",
     }}>
       <div style={{ maxWidth: 640 }}>
 
