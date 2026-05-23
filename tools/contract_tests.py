@@ -290,7 +290,15 @@ def c_fact_store_schema():
     except ImportError:
         print("    (fact_store not built yet)")
         return
-    facts = get_vendor_facts("nonexistent-org", "nonexistent-vendor")
+    from unittest.mock import patch, MagicMock
+    empty_result = {k: [] for k in ("certifications","insurance","slas","projects","pricing","extracted_facts")}
+    with patch("app.db.fact_store.get_engine") as mock_engine:
+        mock_conn = MagicMock()
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.execute.return_value.mappings.return_value.all.return_value = []
+        mock_engine.return_value.connect.return_value = mock_conn
+        facts = get_vendor_facts("nonexistent-org", "nonexistent-vendor")
     assert isinstance(facts, dict)
     required = {"certifications","insurance","slas","projects","pricing"}
     assert required.issubset(set(facts.keys())), \
