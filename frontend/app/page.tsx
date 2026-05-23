@@ -25,7 +25,7 @@ type CanvasPage = "welcome" | "upload-form" | "confirm" | "progress" | "results"
 
 export default function HomePage() {
   const router = useRouter();
-  const { isDark } = useThemeContext();
+  useThemeContext();
   const bp = useBreakpoint();
   const isMobile = bp === "mobile";
   const isTablet = bp === "tablet";
@@ -81,9 +81,8 @@ export default function HomePage() {
 
   const chatVisible = shellState !== "running" && canvasPage !== "confirm";
 
-  // ── Background colours (TODO next pass: replace with CSS vars) ────────────
-  const sidebarBg = isDark ? "rgba(8,10,18,0.98)" : "rgba(247,249,252,0.98)";
-  const navBg     = isDark ? "rgba(8,10,18,0.95)" : "rgba(247,249,252,0.95)";
+  const sidebarBg = "var(--color-surface)";
+  const navBg     = "var(--color-surface)";
 
   // ── Chat session helpers ──────────────────────────────────────────────────
 

@@ -123,4 +123,3 @@ jobs:
 
       - name: Run contract tests
         run: PYTHONPATH=. python tools/contract_tests.py
-        continue-on-error: true  # contract tests may need services; don't block on first run
