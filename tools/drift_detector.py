@@ -19,8 +19,8 @@ Usage:
 import os, sys, re, json
 from pathlib import Path
 
-ROOT = Path(__file__).parent
-BUILD_STATE = ROOT / "build_state.json"
+ROOT = Path(__file__).parent.parent
+BUILD_STATE = ROOT / ".claude" / "build_state.json"
 
 # Files expected per skill
 SKILL_FILES = {
