@@ -143,7 +143,8 @@ async def test_vendor_fails_mandatory_check():
     facts_mock = MagicMock(return_value=MOCK_FACTS_NO_CERT)
 
     with patch("app.agents.evaluation.call_llm", call_llm_mock), \
-         patch("app.agents.evaluation.get_vendor_facts", facts_mock):
+         patch("app.agents.evaluation.get_vendor_facts", facts_mock), \
+         patch("app.domain.org_settings.get_org_settings", MagicMock(return_value=None)):
         from app.agents.evaluation import run_evaluation_agent
         output, critic = await run_evaluation_agent(
             vendor_id="vendor-beta",
@@ -183,7 +184,8 @@ async def test_vendor_passes_mandatory_check():
     facts_mock = MagicMock(return_value=MOCK_FACTS)
 
     with patch("app.agents.evaluation.call_llm", call_llm_mock), \
-         patch("app.agents.evaluation.get_vendor_facts", facts_mock):
+         patch("app.agents.evaluation.get_vendor_facts", facts_mock), \
+         patch("app.domain.org_settings.get_org_settings", MagicMock(return_value=None)):
         from app.agents.evaluation import run_evaluation_agent
         output, critic = await run_evaluation_agent(
             vendor_id="vendor-alpha",
@@ -214,7 +216,8 @@ async def test_criterion_score_has_variance():
     facts_mock = MagicMock(return_value=MOCK_FACTS)
 
     with patch("app.agents.evaluation.call_llm", call_llm_mock), \
-         patch("app.agents.evaluation.get_vendor_facts", facts_mock):
+         patch("app.agents.evaluation.get_vendor_facts", facts_mock), \
+         patch("app.domain.org_settings.get_org_settings", MagicMock(return_value=None)):
         from app.agents.evaluation import run_evaluation_agent
         output, _ = await run_evaluation_agent(
             vendor_id="vendor-gamma",

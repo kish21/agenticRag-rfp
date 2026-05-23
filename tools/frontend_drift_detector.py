@@ -24,7 +24,7 @@ if sys.platform == "win32":
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-FRONTEND_DIR = Path(__file__).parent / "frontend"
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 SCAN_DIRS    = ["app", "components"]
 
 # Files intentionally exempt from hex-colour check (hardcoded dark brand panels)
