@@ -104,7 +104,7 @@ async def call_with_backoff(fn, max_attempts: int = 5):
 async def call_openai_with_backoff(client, **kwargs):
     """
     Legacy name — wraps client.chat.completions.create() with rate limiting.
-    New code should call call_llm() from app.core.llm_provider instead.
+    New code should call call_llm() from app.providers.llm instead.
     """
     await _rate_limiter.acquire()
 

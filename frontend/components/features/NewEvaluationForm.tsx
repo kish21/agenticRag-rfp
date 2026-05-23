@@ -4,9 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { FONT, DISPLAY } from "@/lib/theme";
 import { useBreakpoint } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { FileDropZone } from "@/components/FileDropZone";
-import { MultiFileDropZone } from "@/components/MultiFileDropZone";
-import { VendorCard } from "@/components/VendorCard";
+import { FileDropZone } from "./FileDropZone";
+import { MultiFileDropZone } from "./MultiFileDropZone";
+import { VendorCard } from "./VendorCard";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

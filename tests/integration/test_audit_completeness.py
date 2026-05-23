@@ -135,7 +135,7 @@ async def test_retrieval_critic_threads_run_id() -> None:
         new_callable=AsyncMock,
         return_value=(mock_output, MagicMock()),
     ), patch(
-        "app.core.retrieval_critic.judge_retrieval",
+        "app.validators.retrieval.judge_retrieval",
         new_callable=AsyncMock,
         return_value=mock_verdict,
     ):
@@ -266,7 +266,7 @@ async def test_extraction_critic_threads_run_id() -> None:
         new_callable=AsyncMock,
         return_value=llm_extraction,
     ), patch(
-        "app.core.extraction_critic.call_llm",
+        "app.validators.extraction.call_llm",
         new_callable=AsyncMock,
         return_value=critic_verdict_json,
     ), patch(
@@ -314,7 +314,7 @@ async def test_no_null_run_id_for_known_run() -> None:
         new_callable=AsyncMock,
         return_value=(mock_output, MagicMock()),
     ), patch(
-        "app.core.retrieval_critic.judge_retrieval",
+        "app.validators.retrieval.judge_retrieval",
         new_callable=AsyncMock,
         return_value=mock_verdict,
     ):

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useParams } from "next/navigation";
-import { ConfirmSetupPage } from "@/components/ConfirmSetupPage";
+import { ConfirmSetupPage } from "@/components/features/ConfirmSetupPage";
 
 export default function Page() {
   const router = useRouter();

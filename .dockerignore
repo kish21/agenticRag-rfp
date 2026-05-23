@@ -1,0 +1,61 @@
+# Secrets
+.env
+.env.*
+*.env.local
+
+# Python runtime
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests and dev tools (not needed in prod image)
+tests/
+tools/
+scripts/
+scratch/
+
+# Data and logs
+data/
+logs/
+output/
+*.db
+*.jsonl
+*.log
+
+# Frontend source (served separately or pre-built)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Docs and design assets
+docs/
+*.md
+*.rar
+*.zip
+
+# Git and CI
+.git/
+.github/
+.gitignore
+.pre-commit-config.yaml
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Claude Code session files
+.claude/
+
+# Alembic history (schema applied at runtime via main.py lifespan)
+# Keep alembic/ — migrations run on startup

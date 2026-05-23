@@ -1,7 +1,7 @@
 # CLAUDE.md
 # Read this completely at the start of every session.
 # These are constraints, not suggestions.
-# Last updated: 2026-05-02
+# Last updated: 2026-05-23
 
 ---
 
@@ -218,7 +218,7 @@ Import rule: never import from app.core (deleted). Use the sub-package paths abo
 ## FILE OWNERSHIP MAP
 
 ```
-Skill 01: requirements.txt, .env, docker-compose.yml, app/config.py, app/main.py
+Skill 01: requirements.txt, .env, docker-compose.yml, app/config/ (loader.py + platform.yaml + product.yaml), app/main.py
 Skill 02: app/agents/planner.py, app/agents/critic.py
           app/retrieval/qdrant.py, app/infra/rate_limiter.py
           app/api/auth_routes.py, app/api/evaluation_routes.py, deploy/modal.py
