@@ -67,9 +67,10 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.app_api_key else ["http://localhost:3000"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=settings.allowed_origins,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+        allow_credentials=True,
     )
 
     app.include_router(auth_router)
@@ -82,11 +83,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {
-            "status": "healthy",
-            "version": "1.0.0",
-            "skill": "01b-auth",
-        }
+        return {"status": "healthy", "version": "1.0.0"}
 
     return app
 

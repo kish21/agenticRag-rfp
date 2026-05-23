@@ -155,6 +155,7 @@ class Settings(BaseModel):
 
     # ── App ───────────────────────────────────────────────────────────
     app_api_key: str = ""
+    allowed_origins: list[str] = ["http://localhost:3000"]
 
     # ── Qdrant ────────────────────────────────────────────────────────
     qdrant_host: str = "localhost"
@@ -274,6 +275,7 @@ def load_settings() -> Settings:
         "cohere_api_key":             _e("COHERE_API_KEY"),
         "cohere_rerank_model":        _e("COHERE_RERANK_MODEL", "rerank-english-v3.0"),
         "app_api_key":                _e("APP_API_KEY"),
+        "allowed_origins":            [o.strip() for o in _e("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()],
         "qdrant_host":                _e("QDRANT_HOST", "localhost"),
         "qdrant_port":                _ei("QDRANT_PORT", 6333),
         "qdrant_collection_prefix":   _e("QDRANT_COLLECTION_PREFIX", "platform"),
