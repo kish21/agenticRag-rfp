@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Info
 from app.config import settings
 from app.api.auth_routes import router as auth_router
 from app.api.admin_routes import router as admin_router
@@ -80,6 +82,9 @@ def create_app() -> FastAPI:
     app.include_router(org_settings_router)
     app.include_router(chat_router)
     app.include_router(log_router)
+
+    Info("fastapi_app", "FastAPI application info").info({"app_name": "platform_api"})
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
     @app.get("/health")
     async def health():

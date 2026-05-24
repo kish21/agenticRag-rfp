@@ -42,6 +42,7 @@ passlib[bcrypt]==1.7.4
 fastapi==0.136.1
 uvicorn[standard]==0.34.3
 python-multipart==0.0.18    # required by fastapi for file uploads
+prometheus-fastapi-instrumentator==7.1.0  # exposes /metrics for Prometheus scraping
 
 # ── Document parsing ──────────────────────────────────────
 pypdf==5.4.0
