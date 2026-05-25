@@ -5,10 +5,13 @@ Run once after changing a prompt YAML:
     python tools/push_prompts.py
 
 Each prompt is versioned automatically by LangSmith (commit hash returned).
+
+NOTE: If you see SSL errors on Windows (corporate network / SSL proxy),
+run this from WSL, GitHub Actions, or any Linux/server environment where
+the cert chain is clean. The local YAML fallback always works for dev.
 """
 
 import os
-import ssl
 import sys
 from pathlib import Path
 
@@ -17,9 +20,14 @@ import yaml
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-# Dev utility: corporate/self-signed certs block LangSmith on some machines.
-# This only affects this push script — never set in production app code.
-ssl._create_default_https_context = ssl._create_unverified_context  # noqa: S501
+# python-certifi-win32 patches certifi to include Windows trusted root CAs.
+# This fixes SSL failures on machines with corporate/self-signed certs.
+# Install once: pip install python-certifi-win32
+try:
+    import certifi_win32 as _cw32  # type: ignore[import-untyped]  # side-effect: patches certifi with Windows CAs
+    _ = _cw32
+except ImportError:
+    pass
 
 
 def main() -> None:
