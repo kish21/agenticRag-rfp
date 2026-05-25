@@ -723,6 +723,16 @@ Return only the JSON list, no prose or markdown."""
                     "is_locked":             False,
                 }
                 mandatory.append(new_check)
+                # Add corresponding extraction target so Pydantic validator passes
+                merged.setdefault("extraction_targets", []).append({
+                    "target_id":      f"ET-GEN-{mc_id}",
+                    "name":           s.get("name", ""),
+                    "description":    s.get("what_passes", s.get("description", "")),
+                    "fact_type":      "custom",
+                    "is_mandatory":   True,
+                    "feeds_check_id": f"MC-GEN-{mc_id}",
+                    "source":         "generated",
+                })
                 gaps_report["mandatory_checks_suggested"].append({
                     "name":   s.get("name", ""),
                     "source": "generated",
