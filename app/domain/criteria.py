@@ -586,6 +586,155 @@ def merge_criteria(
     }
 
 
+async def detect_and_fill_gaps(merged: dict, department: str) -> tuple[dict, dict]:
+    """
+    After merge_criteria(), scan for gaps and fill them via LLM.
+
+    Gap 1 — scoring criterion with all four score guide bands blank:
+             LLM generates bands based on criterion name + department domain.
+    Gap 2 — no mandatory checks at all:
+             LLM suggests 3-5 common mandatory checks for the domain.
+
+    All generated content is marked source=generated and returned in gaps_report.
+    Nothing is saved to the database here — customer must confirm first (#117).
+
+    Returns: (enriched_merged, gaps_report)
+    """
+    scoring   = merged.get("scoring_criteria", [])
+    mandatory = merged.get("mandatory_checks", [])
+    gaps_report: dict = {
+        "has_gaps": False,
+        "score_guides_generated": [],
+        "mandatory_checks_suggested": [],
+    }
+
+    # ── Gap 1: missing score guide bands ──────────────────────────────────────
+    criteria_missing_guides = [
+        sc for sc in scoring
+        if not any([
+            sc.get("rubric_9_10"), sc.get("rubric_6_8"),
+            sc.get("rubric_3_5"),  sc.get("rubric_0_2"),
+        ])
+    ]
+
+    if criteria_missing_guides:
+        gaps_report["has_gaps"] = True
+        names_list = "\n".join(f"- {sc['name']}" for sc in criteria_missing_guides)
+
+        prompt = f"""You are building an enterprise procurement evaluation system.
+
+For each scoring criterion below, generate four score guide bands that tell an evaluator
+exactly what vendor evidence earns each score. Be specific to the domain: {department}.
+
+Criteria to generate score guides for:
+{names_list}
+
+Return ONLY valid JSON as a list:
+[
+  {{
+    "name": "exact criterion name from the list above",
+    "rubric_9_10": "specific evidence required for a top score (9-10)",
+    "rubric_6_8":  "specific evidence required for a good score (6-8)",
+    "rubric_3_5":  "specific evidence required for an average score (3-5)",
+    "rubric_0_2":  "what makes a poor or failing score (0-2)"
+  }}
+]
+
+Rules:
+- Be specific — name thresholds, timeframes, quantities where relevant
+- Tailor to {department} domain context
+- Return only the JSON list, no prose or markdown"""
+
+        try:
+            response = await call_llm(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            clean = response.strip()
+            if "```" in clean:
+                parts = clean.split("```")
+                clean = parts[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            generated_guides: list[dict] = json.loads(clean.strip())
+
+            # Apply generated guides back to the criteria
+            generated_by_name = {_normalize_name(g["name"]): g for g in generated_guides}
+            for sc in scoring:
+                match = generated_by_name.get(_normalize_name(sc["name"]))
+                if match:
+                    sc["rubric_9_10"] = match.get("rubric_9_10", "")
+                    sc["rubric_6_8"]  = match.get("rubric_6_8",  "")
+                    sc["rubric_3_5"]  = match.get("rubric_3_5",  "")
+                    sc["rubric_0_2"]  = match.get("rubric_0_2",  "")
+                    sc["score_guide_source"] = "generated"
+                    gaps_report["score_guides_generated"].append({
+                        "criterion_name": sc["name"],
+                        "source": "generated",
+                    })
+        except Exception as e:
+            print(f"  Gap detection: score guide generation failed — {e}")
+
+    # ── Gap 2: no mandatory checks at all ─────────────────────────────────────
+    if not mandatory:
+        gaps_report["has_gaps"] = True
+
+        prompt = f"""You are building an enterprise procurement evaluation system for {department}.
+
+The customer has uploaded an RFP and a scoring sheet but neither contains any mandatory
+pass/fail requirements.
+
+Suggest 3 to 5 common mandatory checks that are standard for {department} procurement
+in a regulated financial services organisation.
+
+Return ONLY valid JSON as a list:
+[
+  {{
+    "name": "short check name",
+    "description": "what the vendor must demonstrate",
+    "what_passes": "what constitutes passing this check"
+  }}
+]
+
+Return only the JSON list, no prose or markdown."""
+
+        try:
+            response = await call_llm(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            clean = response.strip()
+            if "```" in clean:
+                parts = clean.split("```")
+                clean = parts[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            suggested: list[dict] = json.loads(clean.strip())
+
+            for s in suggested:
+                mc_id = str(uuid.uuid4())[:8].upper()
+                new_check = {
+                    "check_id":              f"MC-GEN-{mc_id}",
+                    "name":                  s.get("name", ""),
+                    "description":           s.get("description", ""),
+                    "what_passes":           s.get("what_passes", ""),
+                    "extraction_target_id":  f"ET-GEN-{mc_id}",
+                    "source":                "generated",
+                    "is_locked":             False,
+                }
+                mandatory.append(new_check)
+                gaps_report["mandatory_checks_suggested"].append({
+                    "name":   s.get("name", ""),
+                    "source": "generated",
+                })
+        except Exception as e:
+            print(f"  Gap detection: mandatory check suggestion failed — {e}")
+
+    merged["scoring_criteria"] = scoring
+    merged["mandatory_checks"] = mandatory
+    return merged, gaps_report
+
+
 def _build_targets(
     mandatory_checks: list[dict],
     scoring_criteria: list[dict],

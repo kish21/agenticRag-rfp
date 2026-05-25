@@ -240,7 +240,7 @@ async def run_rfp(rfp_path: str, vendor_pdfs: list[str], criteria_path: str | No
         kv("User mandatory checks", len((user_criteria or {}).get("mandatory_checks", [])))
         kv("User scoring criteria", len((user_criteria or {}).get("scoring_criteria", [])))
 
-    from app.domain.criteria import extract_criteria_from_rfp
+    from app.domain.criteria import extract_criteria_from_rfp, detect_and_fill_gaps
     print("\n  Extracting criteria from RFP text via LLM…")
     rfp_criteria = await extract_criteria_from_rfp(rfp_text)
     kv("RFP mandatory checks", len(rfp_criteria.get("mandatory_checks", [])))
@@ -255,6 +255,21 @@ async def run_rfp(rfp_path: str, vendor_pdfs: list[str], criteria_path: str | No
         org_id=SMOKE_ORG_ID,
         user_criteria=user_criteria,
     )
+
+    print("\n  Running gap detection…")
+    merged, gaps_report = await detect_and_fill_gaps(merged, SMOKE_DEPARTMENT)
+    if gaps_report["has_gaps"]:
+        section("GAPS DETECTED + FILLED")
+        if gaps_report["score_guides_generated"]:
+            print(f"  Score guides generated for {len(gaps_report['score_guides_generated'])} criteria:")
+            for g in gaps_report["score_guides_generated"]:
+                print(f"    ⚠  {g['criterion_name']}  [source: generated — needs customer review]")
+        if gaps_report["mandatory_checks_suggested"]:
+            print(f"\n  Mandatory checks suggested ({len(gaps_report['mandatory_checks_suggested'])}):")
+            for m in gaps_report["mandatory_checks_suggested"]:
+                print(f"    ⚠  {m['name']}  [source: generated — needs customer review]")
+    else:
+        kv("Gap detection", "no gaps found — all criteria have score guides")
 
     from app.schemas.output_models import (
         EvaluationSetup, MandatoryCheck, ScoringCriterion, ExtractionTarget,
@@ -400,6 +415,7 @@ async def run_rfp(rfp_path: str, vendor_pdfs: list[str], criteria_path: str | No
         "rfp_id":      rfp_id,
         "setup_id":    setup_id,
         "vendor_ids":  vendor_list,
+        "gaps_report": gaps_report,
     })
     save_state(state)
     print(f"\n  run_id:    {run_id}")

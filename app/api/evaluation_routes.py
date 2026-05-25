@@ -109,7 +109,7 @@ async def start_evaluation(
     if criteria_bytes and criteria_filename:
         user_criteria = await extract_criteria_from_user_sheet(criteria_bytes, criteria_filename)
 
-    from app.domain.criteria import extract_criteria_from_rfp
+    from app.domain.criteria import extract_criteria_from_rfp, detect_and_fill_gaps
     rfp_criteria = await extract_criteria_from_rfp(rfp_text)
 
     merged = merge_criteria(
@@ -121,6 +121,8 @@ async def start_evaluation(
         org_id=user.org_id,
         user_criteria=user_criteria,
     )
+
+    merged, gaps_report = await detect_and_fill_gaps(merged, department)
 
     mandatory_checks = merged["mandatory_checks"] or [
         MandatoryCheck(
@@ -239,6 +241,14 @@ async def start_evaluation(
                     "content_hash": content_hash,
                 },
             )
+
+    if gaps_report.get("has_gaps"):
+        with engine.begin() as conn:
+            conn.execute(sa.text("""
+                UPDATE evaluation_runs
+                SET gaps_report = CAST(:gaps AS jsonb)
+                WHERE run_id = CAST(:run_id AS uuid)
+            """), {"gaps": json.dumps(gaps_report), "run_id": run_id})
 
     audit(org_id=user.org_id, run_id=run_id, event_type="run.created", actor=user.email,
           detail={"rfp_title": rfp_title, "department": department,
