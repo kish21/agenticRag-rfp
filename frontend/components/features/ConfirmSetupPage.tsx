@@ -9,6 +9,7 @@ import { SOURCE_LABEL, SOURCE_COLOR, ALL_SOURCES } from "./_confirm/confirmStyle
 import { round3, genId, findDupPairs } from "./_confirm/confirmHelpers";
 import { Spinner } from "./_confirm/Spinner";
 import { SourceSection } from "./_confirm/SourceSection";
+import { GapsSection } from "./_confirm/GapsSection";
 import type { SourceKey, MandatoryCheck, ScoringCriterion, EvaluationSetup, DupPair } from "./_confirm/types";
 
 interface CostEstimate {
@@ -90,6 +91,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
   const [rfpCheckError, setRfpCheckError] = useState(false);
   const [dupPairs, setDupPairs] = useState<DupPair[]>([]);
   const [dismissedDups, setDismissedDups] = useState<Set<string>>(new Set());
+  const [gapsAcknowledged, setGapsAcknowledged] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollCountRef = useRef(0);
 
@@ -214,6 +216,14 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
       return;
     }
 
+    const gaps = setup.gaps_report;
+    const hasGaps = gaps?.has_gaps &&
+      (gaps.score_guides_generated.length + gaps.mandatory_checks_suggested.length) > 0;
+    if (hasGaps && !gapsAcknowledged) {
+      setConfirmError("Please review and acknowledge the AI-generated criteria before confirming.");
+      return;
+    }
+
     const total = setup.scoring_criteria.reduce((s, c) => s + (c.weight || 0), 0);
     if (Math.abs(total - 1.0) > 0.02) {
       setWeightWarning(true);
@@ -267,6 +277,10 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
   const estMinutes = Math.max(2, Math.ceil((setup.vendor_count ?? 1) * totalCriteria * 0.05));
   const mandatoryCount = setup.mandatory_checks.length;
   const visibleDups = dupPairs.filter(p => !dismissedDups.has(p.idA + p.idB));
+  const gaps = setup.gaps_report;
+  const hasGaps = !!(gaps?.has_gaps &&
+    (gaps.score_guides_generated.length + gaps.mandatory_checks_suggested.length) > 0);
+  const confirmBlocked = confirming || (hasGaps && !gapsAcknowledged);
 
   return (
     <>
@@ -484,7 +498,16 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           </div>
         ))}
 
-        {/* 4 source sections */}
+        {/* Gaps / AI-generated section */}
+        {setup.gaps_report?.has_gaps && (
+          <GapsSection
+            gaps={setup.gaps_report}
+            acknowledged={gapsAcknowledged}
+            onAcknowledge={setGapsAcknowledged}
+          />
+        )}
+
+        {/* Source sections */}
         {ALL_SOURCES.map(src => (
           <SourceSection
             key={src}
@@ -639,24 +662,33 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
         )}
 
         {/* Confirm button */}
+        {hasGaps && !gapsAcknowledged && (
+          <p style={{
+            fontFamily: FONT, fontSize: 12, color: "var(--color-warning)",
+            marginBottom: 12, display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <span>⚠</span>
+            Acknowledge the AI-generated criteria above before confirming.
+          </p>
+        )}
         <button
-          type="button" onClick={handleConfirm} disabled={confirming}
+          type="button" onClick={handleConfirm} disabled={confirmBlocked}
           style={{
             width: "100%", padding: "13px 24px",
-            backgroundColor: confirming ? "var(--color-surface)" : "var(--color-accent)",
-            color: confirming ? "var(--color-text-muted)" : "var(--color-accent-foreground)",
+            backgroundColor: confirmBlocked ? "var(--color-surface)" : "var(--color-accent)",
+            color: confirmBlocked ? "var(--color-text-muted)" : "var(--color-accent-foreground)",
             borderTop: "1px solid var(--color-border)",
             borderBottom: "1px solid var(--color-border)",
             borderLeft: "1px solid var(--color-border)",
             borderRight: "1px solid var(--color-border)",
             borderRadius: "var(--radius)",
             fontFamily: FONT, fontWeight: 600, fontSize: 14,
-            cursor: confirming ? "not-allowed" : "pointer",
+            cursor: confirmBlocked ? "not-allowed" : "pointer",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            boxShadow: confirming ? "none" : "var(--shadow-sm)",
+            boxShadow: confirmBlocked ? "none" : "var(--shadow-sm)",
             transition: "opacity 150ms ease-out, transform 150ms ease-out",
           }}
-          onMouseEnter={e => { if (!confirming) { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+          onMouseEnter={e => { if (!confirmBlocked) { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
           onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
         >
           {confirming && <Spinner size={13} color="var(--color-text-muted)" />}

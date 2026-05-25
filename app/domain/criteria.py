@@ -8,6 +8,7 @@ import re
 import uuid
 from app.db.fact_store import get_engine
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 import sqlalchemy as sa
 
 # Common suffixes the LLM appends that don't change the meaning of a check.
@@ -105,41 +106,7 @@ async def _llm_interpret_sheet(sheet_bytes: bytes, ext: str) -> dict:
         print(f"  LLM sheet fallback: could not read file — {e}")
         return {"mandatory_checks": [], "scoring_criteria": []}
 
-    prompt = f"""You are reading a vendor evaluation scoring sheet uploaded by a procurement team.
-The sheet may use any column names, any industry terminology, any language.
-
-Your job: extract all evaluation criteria and return ONLY valid JSON in this exact shape:
-{{
-  "mandatory_checks": [
-    {{
-      "name": "short criterion name",
-      "description": "what the vendor must provide",
-      "what_passes": "what constitutes passing this check"
-    }}
-  ],
-  "scoring_criteria": [
-    {{
-      "name": "criterion name",
-      "weight": 0.35,
-      "description": "what is being scored",
-      "rubric_9_10": "evidence required for outstanding score",
-      "rubric_6_8": "evidence required for good score",
-      "rubric_3_5": "evidence required for adequate score",
-      "rubric_0_2": "evidence required for poor score"
-    }}
-  ]
-}}
-
-Rules:
-- mandatory_checks: rows marked MANDATORY, PASS/FAIL, required, obligatoire, or similar
-- scoring_criteria: rows with a numeric weight or percentage
-- weights must be decimals summing to 1.0 (convert percentages: 35% = 0.35)
-- if rubric bands are not in the sheet, leave those fields as empty strings
-- if no weight is stated but multiple scoring rows exist, distribute evenly
-- return ONLY JSON — no prose, no markdown fences
-
-SHEET CONTENT:
-{sheet_text[:4000]}"""
+    prompt = get_prompt("interpret_criteria_sheet", sheet_text=sheet_text[:4000])
 
     try:
         response = await call_llm(
@@ -326,40 +293,7 @@ async def extract_criteria_from_rfp(rfp_text: str) -> dict:
     if not rfp_text or len(rfp_text.strip()) < 100:
         return {"mandatory_checks": [], "scoring_criteria": []}
 
-    prompt = f"""Read this RFP and extract evaluation criteria.
-
-Return ONLY valid JSON:
-{{
-  "mandatory_checks": [
-    {{
-      "name": "short name",
-      "description": "what vendor must provide",
-      "what_passes": "what constitutes passing",
-      "page_reference": "section/page if found"
-    }}
-  ],
-  "scoring_criteria": [
-    {{
-      "name": "criterion name",
-      "weight": 0.35,
-      "description": "what is scored",
-      "rubric_9_10": "outstanding evidence",
-      "rubric_6_8": "good evidence",
-      "rubric_3_5": "adequate evidence",
-      "rubric_0_2": "poor or absent",
-      "page_reference": "section/page if found"
-    }}
-  ]
-}}
-
-Rules:
-- weights must sum to 1.0
-- convert percentages to decimals (35% = 0.35)
-- if no weight stated distribute evenly
-- return only JSON no prose or markdown
-
-RFP TEXT:
-{rfp_text[:6000]}"""
+    prompt = get_prompt("extract_rfp_criteria", rfp_text=rfp_text[:6000])
 
     try:
         response = await call_llm(
@@ -621,29 +555,11 @@ async def detect_and_fill_gaps(merged: dict, department: str) -> tuple[dict, dic
         gaps_report["has_gaps"] = True
         names_list = "\n".join(f"- {sc['name']}" for sc in criteria_missing_guides)
 
-        prompt = f"""You are building an enterprise procurement evaluation system.
-
-For each scoring criterion below, generate four score guide bands that tell an evaluator
-exactly what vendor evidence earns each score. Be specific to the domain: {department}.
-
-Criteria to generate score guides for:
-{names_list}
-
-Return ONLY valid JSON as a list:
-[
-  {{
-    "name": "exact criterion name from the list above",
-    "rubric_9_10": "specific evidence required for a top score (9-10)",
-    "rubric_6_8":  "specific evidence required for a good score (6-8)",
-    "rubric_3_5":  "specific evidence required for an average score (3-5)",
-    "rubric_0_2":  "what makes a poor or failing score (0-2)"
-  }}
-]
-
-Rules:
-- Be specific — name thresholds, timeframes, quantities where relevant
-- Tailor to {department} domain context
-- Return only the JSON list, no prose or markdown"""
+        prompt = get_prompt(
+            "generate_score_guides",
+            department=department,
+            criteria_names=names_list,
+        )
 
         try:
             response = await call_llm(
@@ -679,24 +595,7 @@ Rules:
     if not mandatory:
         gaps_report["has_gaps"] = True
 
-        prompt = f"""You are building an enterprise procurement evaluation system for {department}.
-
-The customer has uploaded an RFP and a scoring sheet but neither contains any mandatory
-pass/fail requirements.
-
-Suggest 3 to 5 common mandatory checks that are standard for {department} procurement
-in a regulated financial services organisation.
-
-Return ONLY valid JSON as a list:
-[
-  {{
-    "name": "short check name",
-    "description": "what the vendor must demonstrate",
-    "what_passes": "what constitutes passing this check"
-  }}
-]
-
-Return only the JSON list, no prose or markdown."""
+        prompt = get_prompt("suggest_mandatory_checks", department=department)
 
         try:
             response = await call_llm(

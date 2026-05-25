@@ -1,4 +1,4 @@
-export type SourceKey = "org" | "dept" | "user" | "rfp";
+export type SourceKey = "org" | "dept" | "user" | "rfp" | "generated";
 
 export interface MandatoryCheck {
   check_id: string;
@@ -24,6 +24,12 @@ export interface ScoringCriterion {
   is_locked: boolean;
 }
 
+export interface GapsReport {
+  has_gaps: boolean;
+  score_guides_generated: Array<{ criterion_name: string; source: string }>;
+  mandatory_checks_suggested: Array<{ criterion_name: string; source: string }>;
+}
+
 export interface EvaluationSetup {
   mandatory_checks: MandatoryCheck[];
   scoring_criteria: ScoringCriterion[];
@@ -34,6 +40,7 @@ export interface EvaluationSetup {
   vendor_count?: number;
   rfp_title?: string;
   department?: string;
+  gaps_report?: GapsReport;
 }
 
 export interface DupPair {

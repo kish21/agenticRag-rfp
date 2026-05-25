@@ -1,0 +1,42 @@
+name: meridian/extract-rfp-criteria
+description: >
+  Extracts mandatory checks and scoring criteria from RFP text.
+  Returns structured JSON with weights, descriptions, and score guide bands.
+version: "1"
+template: |
+  Read this RFP and extract evaluation criteria.
+
+  Return ONLY valid JSON:
+  {
+    "mandatory_checks": [
+      {
+        "name": "short name",
+        "description": "what vendor must provide",
+        "what_passes": "what constitutes passing",
+        "page_reference": "section/page if found"
+      }
+    ],
+    "scoring_criteria": [
+      {
+        "name": "criterion name",
+        "weight": 0.35,
+        "description": "what is scored",
+        "rubric_9_10": "outstanding evidence",
+        "rubric_6_8": "good evidence",
+        "rubric_3_5": "adequate evidence",
+        "rubric_0_2": "poor or absent",
+        "page_reference": "section/page if found"
+      }
+    ]
+  }
+
+  Rules:
+  - weights must sum to 1.0
+  - convert percentages to decimals (35% = 0.35)
+  - if no weight stated distribute evenly
+  - return only JSON no prose or markdown
+
+  RFP TEXT:
+  {rfp_text}
+input_variables:
+  - rfp_text

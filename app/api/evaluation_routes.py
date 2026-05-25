@@ -349,6 +349,12 @@ async def get_setup(run_id: str, user: TokenData = Depends(get_current_user)):
     setup["vendor_count"] = len(run.get("vendor_ids") or [])
     setup["rfp_title"] = run.get("rfp_title") or ""
     setup["department"] = run.get("department") or ""
+    gaps = run.get("gaps_report")
+    setup["gaps_report"] = gaps if isinstance(gaps, dict) else (json.loads(gaps) if gaps else {
+        "has_gaps": False,
+        "score_guides_generated": [],
+        "mandatory_checks_suggested": [],
+    })
     return setup
 
 

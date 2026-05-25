@@ -2,20 +2,22 @@ import { FONT } from "@/lib/theme";
 import type { SourceKey } from "./types";
 
 export const SOURCE_LABEL: Record<SourceKey, string> = {
-  org:  "Organisation",
-  dept: "Department",
-  user: "Your Criteria",
-  rfp:  "RFP-Extracted",
+  org:       "Organisation",
+  dept:      "Department",
+  user:      "Your Criteria",
+  rfp:       "RFP-Extracted",
+  generated: "AI Generated",
 };
 
 export const SOURCE_COLOR: Record<SourceKey, string> = {
-  org:  "var(--color-accent)",
-  dept: "var(--color-info)",
-  user: "var(--color-warning)",
-  rfp:  "var(--color-success)",
+  org:       "var(--color-accent)",
+  dept:      "var(--color-info)",
+  user:      "var(--color-success)",
+  rfp:       "var(--color-info)",
+  generated: "var(--color-warning)",
 };
 
-export const ALL_SOURCES: SourceKey[] = ["org", "dept", "user", "rfp"];
+export const ALL_SOURCES: SourceKey[] = ["org", "dept", "user", "rfp", "generated"];
 
 export const labelCss: React.CSSProperties = {
   display: "block",

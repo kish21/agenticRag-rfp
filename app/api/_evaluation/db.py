@@ -19,7 +19,7 @@ def _db_get_run(run_id: str, org_id: str) -> dict:
                        agent_events, agent_log, decision_output,
                        created_at, completed_at,
                        vendor_names, created_by_email, creator_dept_id,
-                       currency
+                       currency, gaps_report
                 FROM evaluation_runs
                 WHERE run_id = CAST(:rid AS uuid)
                   AND org_id = CAST(:oid AS uuid)
