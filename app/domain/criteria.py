@@ -521,6 +521,25 @@ def merge_criteria(
             })
             scoring_names.add(name_key)
 
+    # 5. Score guide enrichment pass
+    # For any merged criterion with blank score guide bands, copy them from the RFP
+    # if the RFP extracted the same criterion with scoring bands.
+    # This covers: CSV has criterion + weight but no score guide; RFP has the guide.
+    rfp_scoring_by_name = {
+        _normalize_name(c["name"]): c
+        for c in rfp_criteria.get("scoring_criteria", [])
+    }
+    for sc in scoring_criteria:
+        name_key = _normalize_name(sc["name"])
+        rfp_match = rfp_scoring_by_name.get(name_key)
+        if not rfp_match:
+            continue
+        # Only fill in bands that are currently blank
+        for band in ("rubric_9_10", "rubric_6_8", "rubric_3_5", "rubric_0_2"):
+            if not sc.get(band) and rfp_match.get(band):
+                sc[band] = rfp_match[band]
+                sc["score_guide_source"] = "rfp"  # audit trail
+
     # If no scoring criteria found fall back to even distribution
     if not scoring_criteria:
         return {

@@ -319,9 +319,19 @@ async def run_rfp(rfp_path: str, vendor_pdfs: list[str], criteria_path: str | No
     kv("source",            evaluation_setup.source)
     print("\n  Scoring criteria:")
     for sc in scoring_criteria_list:
-        w = getattr(sc, "weight", "?")
-        n = getattr(sc, "name", "?")
-        print(f"    {n:<45}  weight={w}")
+        w  = getattr(sc, "weight", "?")
+        n  = getattr(sc, "name", "?")
+        r9 = getattr(sc, "rubric_9_10", "")
+        r6 = getattr(sc, "rubric_6_8",  "")
+        r3 = getattr(sc, "rubric_3_5",  "")
+        r0 = getattr(sc, "rubric_0_2",  "")
+        has_guide = any([r9, r6, r3, r0])
+        guide_tag = "  [score guide: YES]" if has_guide else "  [score guide: MISSING]"
+        print(f"\n    {n}  weight={w}{guide_tag}")
+        if r9: print(f"      Top score:     {r9[:100]}")
+        if r6: print(f"      Good score:    {r6[:100]}")
+        if r3: print(f"      Average score: {r3[:100]}")
+        if r0: print(f"      Poor score:    {r0[:100]}")
 
     # ── Persist to PostgreSQL (same as the API) ────────────────────────────────
     from app.db.fact_store import get_engine, save_evaluation_setup
