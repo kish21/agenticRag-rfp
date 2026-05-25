@@ -2,15 +2,26 @@
 """
 smoke_test.py — Step-pause-verify pipeline runner for all 9 agents
 ===================================================================
+Mirrors the exact same code path as the UI (POST /api/v1/evaluate/start).
 Runs one agent at a time, persists state between runs, prints verbose
 output so the broken agent can be identified.
 
 Usage:
     python tools/smoke_test.py --reset
-    python tools/smoke_test.py --agent ingestion --pdf data/documents/test_vendor_apex.pdf
+
+    # Step 1 — mirrors POST /api/v1/evaluate/start exactly
+    python tools/smoke_test.py --agent rfp \\
+        --rfp data/documents/RFP_IT_Managed_Services_MFS_2026.pdf \\
+        --criteria data/documents/Vendor_Selection_Criteria_MFS.csv \\
+        --vendor-pdf data/documents/Acme_ClearPath_Proposal.pdf \\
+        --vendor-pdf data/documents/nightbuilb_Apex_Technology_Proposal.pdf
+
+    # Steps 2–9 — one vendor at a time, then shared agents
+    python tools/smoke_test.py --agent ingestion --vendor Acme_ClearPath_Proposal
+    python tools/smoke_test.py --agent ingestion --vendor nightbuilb_Apex_Technology_Proposal
     python tools/smoke_test.py --agent extraction
     python tools/smoke_test.py --agent retrieval
-    python tools/smoke_test.py --agent planner  --criteria data/test_criteria.csv
+    python tools/smoke_test.py --agent planner
     python tools/smoke_test.py --agent evaluation
     python tools/smoke_test.py --agent comparator
     python tools/smoke_test.py --agent decision
@@ -36,9 +47,12 @@ STATE_FILE  = ROOT / ".smoke_test_state.json"
 sys.path.insert(0, str(ROOT))
 
 # ── Fixed smoke test identifiers ──────────────────────────────────────────────
-SMOKE_ORG_ID    = "00000000-0000-0000-0000-000000000001"
-SMOKE_VENDOR_ID = "smoke_vendor_apex"
-SMOKE_RFP_ID    = "smoke_rfp_001"
+SMOKE_ORG_ID        = "00000000-0000-0000-0000-000000000001"
+SMOKE_VENDOR_ID     = "smoke_vendor_apex"
+SMOKE_RFP_ID        = "smoke_rfp_001"
+SMOKE_DEPARTMENT    = "IT"
+SMOKE_RFP_TITLE     = "IT Managed Services 2026"
+SMOKE_CONTRACT_VALUE= 750_000.0
 
 # ── Default CSV criteria (used if no --criteria file provided) ────────────────
 DEFAULT_CRITERIA_CSV = """\
@@ -165,27 +179,268 @@ def do_reset() -> None:
     print("\n[OK] Reset complete. Ready for: --agent ingestion --pdf <path>\n")
 
 
-# ── Agent 1: Ingestion ─────────────────────────────────────────────────────────
+# ── Step 0: RFP setup — mirrors POST /api/v1/evaluate/start exactly ───────────
 
-async def run_ingestion(pdf_path: str, state: dict) -> None:
-    section("AGENT 1 — INGESTION")
+async def run_rfp(rfp_path: str, vendor_pdfs: list[str], criteria_path: str | None, state: dict) -> None:
+    section("STEP 0 — RFP SETUP  (mirrors POST /api/v1/evaluate/start)")
 
-    pdf = Path(pdf_path)
-    if not pdf.exists():
-        print(f"[ABORT] PDF not found: {pdf}")
+    rfp_pdf = Path(rfp_path)
+    if not rfp_pdf.exists():
+        print(f"[ABORT] RFP PDF not found: {rfp_pdf}")
         sys.exit(1)
 
-    file_bytes = pdf.read_bytes()
-    doc_id     = str(uuid.uuid4())
-    run_id     = str(uuid.uuid4())
-    vendor_id  = SMOKE_VENDOR_ID
-    org_id     = SMOKE_ORG_ID
+    rfp_bytes = rfp_pdf.read_bytes()
+    kv("RFP file",  rfp_pdf.name)
+    kv("RFP size",  f"{len(rfp_bytes):,} bytes")
 
-    kv("PDF file", pdf.name)
+    criteria_bytes: bytes | None = None
+    criteria_filename: str | None = None
+    if criteria_path:
+        cp = Path(criteria_path)
+        if cp.exists():
+            criteria_bytes   = cp.read_bytes()
+            criteria_filename = cp.name
+            kv("Criteria file", cp.name)
+        else:
+            print(f"[WARN] Criteria file not found: {cp} — continuing without it")
+
+    vendor_file_map: dict[str, tuple[bytes, str]] = {}
+    for vpath in vendor_pdfs:
+        vp = Path(vpath)
+        if not vp.exists():
+            print(f"[ABORT] Vendor PDF not found: {vp}")
+            sys.exit(1)
+        vid = vp.stem
+        vendor_file_map[vid] = (vp.read_bytes(), vp.name)
+        kv(f"Vendor PDF", f"{vp.name}  →  vendor_id={vid}")
+
+    run_id   = str(uuid.uuid4())
+    rfp_id   = f"rfp-{run_id[:8]}"
+    setup_id = f"setup-{run_id[:8]}"
+    vendor_list = list(vendor_file_map.keys())
+
+    # ── Criteria extraction (same calls as the API) ────────────────────────────
+    from app.domain.criteria import (
+        get_org_criteria, get_dept_criteria,
+        extract_rfp_text, extract_criteria_from_user_sheet,
+        merge_criteria,
+    )
+
+    section("EXTRACTING RFP TEXT + CRITERIA")
+    rfp_text      = extract_rfp_text(rfp_bytes)
+    org_criteria  = get_org_criteria(SMOKE_ORG_ID)
+    dept_criteria = get_dept_criteria(SMOKE_ORG_ID, SMOKE_DEPARTMENT)
+    kv("RFP text chars",   len(rfp_text))
+    kv("Org criteria",     len(org_criteria))
+    kv("Dept criteria",    len(dept_criteria))
+
+    user_criteria: dict | None = None
+    if criteria_bytes and criteria_filename:
+        user_criteria = await extract_criteria_from_user_sheet(criteria_bytes, criteria_filename)
+        kv("User mandatory checks", len((user_criteria or {}).get("mandatory_checks", [])))
+        kv("User scoring criteria", len((user_criteria or {}).get("scoring_criteria", [])))
+
+    merged = merge_criteria(
+        org_criteria=org_criteria,
+        dept_criteria=dept_criteria,
+        rfp_criteria={},
+        department=SMOKE_DEPARTMENT,
+        rfp_id=rfp_id,
+        org_id=SMOKE_ORG_ID,
+        user_criteria=user_criteria,
+    )
+
+    from app.schemas.output_models import (
+        EvaluationSetup, MandatoryCheck, ScoringCriterion, ExtractionTarget,
+    )
+
+    def _to_model(cls, raw):
+        if isinstance(raw, cls):
+            return raw
+        try:
+            return cls(**raw)
+        except Exception:
+            return raw
+
+    mandatory_checks     = [_to_model(MandatoryCheck,     c) for c in (merged["mandatory_checks"] or [])]
+    scoring_criteria_list= [_to_model(ScoringCriterion,   c) for c in (merged["scoring_criteria"] or [])]
+    extraction_targets   = [_to_model(ExtractionTarget,    c) for c in (merged.get("extraction_targets") or [])]
+
+    if not mandatory_checks:
+        mandatory_checks = [MandatoryCheck(
+            check_id="chk-default-001",
+            name="Legal entity registration",
+            description="Vendor must be a registered legal entity.",
+            what_passes="Registration number provided.",
+            extraction_target_id="ext-legal-default",
+        )]
+    if not scoring_criteria_list:
+        scoring_criteria_list = [
+            ScoringCriterion(criterion_id="crit-default-tech",   name="Technical capability", weight=0.50,
+                             rubric_9_10="Fully meets requirements.", rubric_6_8="Meets most.",
+                             rubric_3_5="Partially meets.", rubric_0_2="Does not meet.",
+                             extraction_target_ids=["ext-sla-default"]),
+            ScoringCriterion(criterion_id="crit-default-comm",   name="Commercial value",      weight=0.50,
+                             rubric_9_10="Best value.", rubric_6_8="Competitive.",
+                             rubric_3_5="Above-market.", rubric_0_2="Pricing absent.",
+                             extraction_target_ids=["ext-pricing-default"]),
+        ]
+
+    evaluation_setup = EvaluationSetup(
+        setup_id=setup_id,
+        org_id=SMOKE_ORG_ID,
+        department=SMOKE_DEPARTMENT,
+        rfp_id=rfp_id,
+        rfp_confirmed=False,
+        confirmed_by="smoke-test",
+        confirmed_at=None,
+        source=merged.get("source", "merged"),
+        mandatory_checks=mandatory_checks,
+        scoring_criteria=scoring_criteria_list,
+        extraction_targets=extraction_targets,
+        total_weight=round(sum(
+            float(c.weight) if hasattr(c, "weight") else float(c.get("weight", 0))
+            for c in scoring_criteria_list
+        ), 3),
+    )
+
+    section("EVALUATION SETUP BUILT")
+    kv("setup_id",          setup_id)
+    kv("mandatory checks",  len(mandatory_checks))
+    kv("scoring criteria",  len(scoring_criteria_list))
+    kv("extraction targets",len(extraction_targets))
+    kv("total_weight",      evaluation_setup.total_weight)
+    kv("source",            evaluation_setup.source)
+    print("\n  Scoring criteria:")
+    for sc in scoring_criteria_list:
+        w = getattr(sc, "weight", "?")
+        n = getattr(sc, "name", "?")
+        print(f"    {n:<45}  weight={w}")
+
+    # ── Persist to PostgreSQL (same as the API) ────────────────────────────────
+    from app.db.fact_store import get_engine, save_evaluation_setup
+    import hashlib, sqlalchemy as sa
+
+    section("SAVING TO POSTGRESQL")
+    setup_dict = evaluation_setup.model_dump(mode="json")
+    save_evaluation_setup(setup_dict, org_id=SMOKE_ORG_ID)
+    kv("evaluation_setup", "saved")
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(sa.text("""
+            INSERT INTO evaluation_runs
+                (run_id, org_id, rfp_id, setup_id, rfp_title, department,
+                 rfp_filename, rfp_bytes, status, vendor_ids, contract_value,
+                 vendor_names, created_by_email, creator_dept_id, currency)
+            VALUES
+                (CAST(:run_id AS uuid), CAST(:org_id AS uuid), :rfp_id, :setup_id,
+                 :rfp_title, :department, :rfp_filename, :rfp_bytes,
+                 'pending_confirm', :vendor_ids, :contract_value,
+                 CAST(:vendor_names AS jsonb), :created_by_email, :creator_dept_id, :currency)
+        """), {
+            "run_id":           run_id,
+            "org_id":           SMOKE_ORG_ID,
+            "rfp_id":           rfp_id,
+            "setup_id":         setup_id,
+            "rfp_title":        SMOKE_RFP_TITLE,
+            "department":       SMOKE_DEPARTMENT,
+            "rfp_filename":     rfp_pdf.name,
+            "rfp_bytes":        rfp_bytes,
+            "vendor_ids":       vendor_list,
+            "contract_value":   SMOKE_CONTRACT_VALUE,
+            "vendor_names":     "{}",
+            "created_by_email": "smoke@test.local",
+            "creator_dept_id":  None,
+            "currency":         "GBP",
+        })
+        kv("evaluation_runs", "inserted")
+
+        for vid, (vbytes, vfilename) in vendor_file_map.items():
+            content_hash = hashlib.sha256(vbytes).hexdigest()
+            conn.execute(sa.text("""
+                INSERT INTO vendor_documents
+                    (org_id, vendor_id, rfp_id, setup_id, filename,
+                     file_name, file_bytes, content_hash)
+                VALUES
+                    (CAST(:org_id AS uuid), :vendor_id, :rfp_id, :setup_id,
+                     :filename, :file_name, :file_bytes, :content_hash)
+                ON CONFLICT (org_id, vendor_id, rfp_id, content_hash) DO NOTHING
+            """), {
+                "org_id":        SMOKE_ORG_ID,
+                "vendor_id":     vid,
+                "rfp_id":        rfp_id,
+                "setup_id":      setup_id,
+                "filename":      vfilename,
+                "file_name":     vfilename,
+                "file_bytes":    vbytes,
+                "content_hash":  content_hash,
+            })
+            kv(f"vendor_documents[{vid}]", "inserted")
+
+    state.update({
+        "run_id":      run_id,
+        "org_id":      SMOKE_ORG_ID,
+        "rfp_id":      rfp_id,
+        "setup_id":    setup_id,
+        "vendor_ids":  vendor_list,
+    })
+    save_state(state)
+    vendor_args = " ".join(f"--vendor-pdf {p}" for p in vendor_pdfs)
+    print(f"\n[OK] RFP SETUP DONE — {len(vendor_list)} vendor(s) registered.")
+    print(f"     Next: --agent ingestion --vendor {vendor_list[0]}\n")
+
+
+# ── Agent 1: Ingestion ─────────────────────────────────────────────────────────
+
+async def run_ingestion(vendor_id_or_pdf: str, state: dict) -> None:
+    section("AGENT 1 — INGESTION")
+
+    org_id = state.get("org_id", SMOKE_ORG_ID)
+    rfp_id = state.get("rfp_id")
+    doc_id = str(uuid.uuid4())
+
+    # Resolve vendor bytes: from DB (after --agent rfp) or from a direct --pdf path
+    file_bytes: bytes | None = None
+    filename: str = ""
+    vendor_id: str = ""
+
+    if vendor_id_or_pdf and Path(vendor_id_or_pdf).exists():
+        # Legacy / override: direct PDF path
+        pdf = Path(vendor_id_or_pdf)
+        file_bytes = pdf.read_bytes()
+        filename   = pdf.name
+        vendor_id  = pdf.stem
+    elif vendor_id_or_pdf:
+        # vendor_id passed — read bytes from vendor_documents table
+        from app.db.fact_store import get_engine
+        import sqlalchemy as sa
+        engine = get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(sa.text("""
+                SELECT file_bytes, file_name FROM vendor_documents
+                WHERE org_id = CAST(:org_id AS uuid)
+                  AND vendor_id = :vendor_id
+                ORDER BY created_at DESC LIMIT 1
+            """), {"org_id": org_id, "vendor_id": vendor_id_or_pdf}).fetchone()
+        if not row:
+            print(f"[ABORT] No vendor document found for vendor_id={vendor_id_or_pdf}")
+            print("        Run --agent rfp first, or pass a --pdf path directly.")
+            sys.exit(1)
+        file_bytes = bytes(row[0])
+        filename   = row[1]
+        vendor_id  = vendor_id_or_pdf
+    else:
+        print("[ABORT] --agent ingestion requires --vendor <vendor_id> or --pdf <path>")
+        sys.exit(1)
+
+    run_id = state.get("run_id", str(uuid.uuid4()))
+
+    kv("PDF file",  filename)
     kv("File size", f"{len(file_bytes):,} bytes")
-    kv("doc_id", doc_id)
+    kv("doc_id",    doc_id)
     kv("vendor_id", vendor_id)
-    kv("org_id", org_id)
+    kv("org_id",    org_id)
 
     from app.agents.ingestion import run_ingestion_agent
     from app.agents.critic import critic_after_ingestion
@@ -193,7 +448,7 @@ async def run_ingestion(pdf_path: str, state: dict) -> None:
     print("\n  Running ingestion agent…")
     output = await run_ingestion_agent(
         file_bytes=file_bytes,
-        filename=pdf.name,
+        filename=filename,
         vendor_id=vendor_id,
         org_id=org_id,
         doc_id=doc_id,
@@ -223,17 +478,26 @@ async def run_ingestion(pdf_path: str, state: dict) -> None:
         print("\n[HARD BLOCK] Ingestion critic blocked. Fix issues above before continuing.")
         sys.exit(1)
 
-    # Persist state
+    # Accumulate per-vendor ingestion state (supports multiple vendors)
+    ingested = state.get("ingested_vendors", {})
+    ingested[vendor_id] = {"doc_id": doc_id, "chunk_count": len(chunks)}
     state.update({
-        "run_id":    run_id,
-        "org_id":    org_id,
-        "vendor_id": vendor_id,
-        "doc_id":    doc_id,
+        "run_id":             run_id,
+        "org_id":             org_id,
+        "vendor_id":          vendor_id,   # last ingested — used by extraction
+        "doc_id":             doc_id,
+        "ingested_vendors":   ingested,
         "ingestion_chunk_ids": [c.chunk_id for c in chunks],
         "ingestion_chunk_count": len(chunks),
     })
     save_state(state)
-    print(f"\n[OK] INGESTION DONE — {len(chunks)} chunks indexed. Ready for: --agent extraction\n")
+    remaining = [v for v in state.get("vendor_ids", []) if v not in ingested]
+    if remaining:
+        print(f"\n[OK] INGESTION DONE — {len(chunks)} chunks indexed.")
+        print(f"     Next vendor to ingest: --agent ingestion --vendor {remaining[0]}\n")
+    else:
+        print(f"\n[OK] INGESTION DONE — {len(chunks)} chunks indexed. All vendors ingested.")
+        print(f"     Next: --agent extraction\n")
 
 
 # ── Agent 2: Extraction ────────────────────────────────────────────────────────
@@ -373,24 +637,43 @@ async def run_retrieval(state: dict) -> None:
 
 # ── Agent 4: Planner ──────────────────────────────────────────────────────────
 
-async def run_planner(criteria_csv: str | None, state: dict) -> None:
+async def run_planner(state: dict) -> None:
     section("AGENT 4 — PLANNER")
 
-    org_id = require_state("org_id", state, "planner")
+    org_id   = require_state("org_id",   state, "planner")
+    setup_id = require_state("setup_id", state, "planner")
 
-    import csv, io
-    csv_text = Path(criteria_csv).read_text() if criteria_csv and Path(criteria_csv).exists() else DEFAULT_CRITERIA_CSV
-    reader = list(csv.DictReader(io.StringIO(csv_text)))
+    # Load EvaluationSetup from PostgreSQL — same object the UI built in run_rfp
+    from app.db.fact_store import get_engine
+    from app.schemas.output_models import EvaluationSetup
+    import sqlalchemy as sa
 
-    section("CRITERIA LOADED")
-    for row in reader:
-        print(f"  {row.get('criterion_id',''):<6} {row.get('name',''):<35} weight={row.get('weight','?')}")
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(sa.text("""
+            SELECT setup_json FROM evaluation_setups
+            WHERE setup_id = :setup_id AND org_id = CAST(:org_id AS uuid)
+            LIMIT 1
+        """), {"setup_id": setup_id, "org_id": org_id}).fetchone()
+
+    if not row:
+        print(f"[ABORT] EvaluationSetup not found for setup_id={setup_id}")
+        print("        Run --agent rfp first.")
+        sys.exit(1)
+
+    import json
+    evaluation_setup = EvaluationSetup(**json.loads(row[0]))
+    vendor_ids = state.get("vendor_ids", [SMOKE_VENDOR_ID])
+
+    section("CRITERIA FROM DATABASE")
+    for sc in evaluation_setup.scoring_criteria:
+        print(f"  {getattr(sc,'criterion_id',''):<20} {getattr(sc,'name',''):<40} weight={getattr(sc,'weight','?')}")
 
     from app.agents.planner import run_planner_agent
     print("\n  Running planner agent…")
     output = await run_planner_agent(
-        criteria=reader,
-        vendor_ids=[SMOKE_VENDOR_ID],
+        criteria=[sc.model_dump() for sc in evaluation_setup.scoring_criteria],
+        vendor_ids=vendor_ids,
         org_id=org_id,
     )
 
@@ -412,7 +695,6 @@ async def run_planner(criteria_csv: str | None, state: dict) -> None:
 
     state.update({
         "planner_task_count": len(tasks),
-        "criteria_rows": reader,
     })
     save_state(state)
     print(f"\n[OK] PLANNER DONE — {len(tasks)} tasks in DAG. Ready for: --agent evaluation\n")
@@ -661,11 +943,17 @@ async def run_explanation(state: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Smoke test — step-pause-verify runner")
-    parser.add_argument("--reset",    action="store_true", help="Wipe smoke test data and state")
-    parser.add_argument("--agent",    choices=["ingestion","extraction","retrieval","planner",
-                                               "evaluation","comparator","decision","explanation"])
-    parser.add_argument("--pdf",      help="Path to vendor PDF (required for --agent ingestion)")
-    parser.add_argument("--criteria", help="Path to criteria CSV (optional, uses default if omitted)")
+    parser.add_argument("--reset",      action="store_true", help="Wipe smoke test data and state")
+    parser.add_argument("--agent",      choices=["rfp","ingestion","extraction","retrieval","planner",
+                                                 "evaluation","comparator","decision","explanation"])
+    # --agent rfp args
+    parser.add_argument("--rfp",        help="Path to RFP PDF (required for --agent rfp)")
+    parser.add_argument("--vendor-pdf", dest="vendor_pdfs", action="append", default=[],
+                        help="Path to a vendor PDF (repeat for multiple vendors)")
+    parser.add_argument("--criteria",   help="Path to criteria CSV (optional for --agent rfp)")
+    # --agent ingestion args
+    parser.add_argument("--vendor",     help="vendor_id to ingest (from vendor_documents table)")
+    parser.add_argument("--pdf",        help="Direct PDF path override for ingestion (legacy)")
     args = parser.parse_args()
 
     if args.reset:
@@ -678,19 +966,26 @@ def main() -> None:
 
     state = load_state()
 
+    # Resolve ingestion target: --vendor (from DB) takes priority over --pdf
+    ingestion_target = args.vendor or args.pdf or ""
+
     agent_map = {
-        "ingestion":   lambda: run_ingestion(args.pdf or "", state),
+        "rfp":         lambda: run_rfp(args.rfp or "", args.vendor_pdfs, args.criteria, state),
+        "ingestion":   lambda: run_ingestion(ingestion_target, state),
         "extraction":  lambda: run_extraction(state),
         "retrieval":   lambda: run_retrieval(state),
-        "planner":     lambda: run_planner(args.criteria, state),
+        "planner":     lambda: run_planner(state),
         "evaluation":  lambda: run_evaluation(state),
         "comparator":  lambda: run_comparator(state),
         "decision":    lambda: run_decision(state),
         "explanation": lambda: run_explanation(state),
     }
 
-    if args.agent == "ingestion" and not args.pdf:
-        print("[ABORT] --agent ingestion requires --pdf <path>")
+    if args.agent == "rfp" and not args.rfp:
+        print("[ABORT] --agent rfp requires --rfp <path>")
+        sys.exit(1)
+    if args.agent == "ingestion" and not ingestion_target:
+        print("[ABORT] --agent ingestion requires --vendor <vendor_id> or --pdf <path>")
         sys.exit(1)
 
     asyncio.run(agent_map[args.agent]())
