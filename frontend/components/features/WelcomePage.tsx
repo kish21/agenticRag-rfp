@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { type UserInfo } from "@/lib/api";
 import { type EvalRun, type ChatMessage } from "@/lib/types";
@@ -44,10 +45,31 @@ export function WelcomePage({
   onStartNewEval, onOpenRun,
   onSaveCriteria, onSavedCriteriaChange, onCriteriaEditModeChange,
 }: WelcomePageProps) {
+  const [searchQ,      setSearchQ]      = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
   const total     = runs.length;
   const running   = runs.filter(r => r.status === "running").length;
   const completed = runs.filter(r => r.status === "completed" || r.status === "complete").length;
   const hasChatMessages = chatMessages.length > 0;
+
+  const normalise  = (s: string) => s.toLowerCase().replace(/[-_]/g, " ");
+  const STATUS_GROUPS: Record<string, string[]> = {
+    all:       [],
+    running:   ["running"],
+    complete:  ["completed", "complete"],
+    pending:   ["pending_confirm"],
+    failed:    ["failed", "interrupted"],
+  };
+  const filteredRuns = runs.filter(r => {
+    const q = normalise(searchQ);
+    const matchesSearch = !q
+      || normalise(r.rfp_title || "").includes(q)
+      || normalise(r.status).includes(q);
+    const allowed = STATUS_GROUPS[statusFilter];
+    const matchesStatus = !allowed?.length || allowed.includes(r.status);
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <div style={{ maxWidth: 680 }}>
@@ -338,61 +360,121 @@ export function WelcomePage({
         {/* Recent evaluations */}
         {total > 0 && (
           <>
-            <p style={{
-              fontFamily: FONT, fontWeight: 600, fontSize: 10,
-              letterSpacing: "0.1em", textTransform: "uppercase",
-              color: "var(--color-text-muted)", marginBottom: 12,
-            }}>
-              Recent evaluations
-            </p>
-            <div style={{
-              backgroundColor: "var(--color-surface)",
-              borderTop: "1px solid var(--color-border)",
-              borderBottom: "1px solid var(--color-border)",
-              borderLeft: "1px solid var(--color-border)",
-              borderRight: "1px solid var(--color-border)",
-              borderRadius: "var(--radius)",
-              boxShadow: "var(--shadow-sm)",
-              overflow: "hidden",
-            }}>
-              {runs.slice(0, 6).map((run, i) => (
-                <div
-                  key={run.run_id}
-                  onClick={() => onOpenRun(run)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={e => { if (e.key === "Enter") onOpenRun(run); }}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "12px 16px",
-                    borderBottom: i < Math.min(runs.length, 6) - 1 ? "1px solid var(--color-border)" : "none",
-                    cursor: "pointer",
-                    transition: "background-color 150ms ease-out",
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "var(--color-surface-hover)"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
-                >
-                  <div>
-                    <p style={{ fontFamily: FONT, fontWeight: 500, fontSize: 13, color: "var(--color-text-primary)" }}>
-                      {run.rfp_title || "Untitled RFP"}
-                    </p>
-                    <p style={{ fontFamily: MONO, fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                      {run.created_at ? fmtDate(run.created_at) : ""} · {run.vendor_count ?? 0} vendor{run.vendor_count !== 1 ? "s" : ""}
-                    </p>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                    <div style={{
-                      width: 6, height: 6, borderRadius: "50%",
-                      backgroundColor: STATUS_DOT[run.status] ?? "var(--color-text-muted)",
-                    }} />
-                    <span style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-secondary)" }}>
-                      {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
-                    </span>
-                    <span style={{ color: "var(--color-text-muted)", fontSize: 14, marginLeft: 4 }}>→</span>
-                  </div>
-                </div>
-              ))}
+            {/* Search + filter bar */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+              <label htmlFor="run-search" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>
+                Search evaluations
+              </label>
+              <input
+                id="run-search"
+                type="search"
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                placeholder="Search…"
+                style={{
+                  flex: 1, minWidth: 0,
+                  padding: "7px 10px",
+                  backgroundColor: "var(--color-background)",
+                  borderTop: "1px solid var(--color-border)",
+                  borderBottom: "1px solid var(--color-border)",
+                  borderLeft: "1px solid var(--color-border)",
+                  borderRight: "1px solid var(--color-border)",
+                  borderRadius: "var(--radius)",
+                  fontFamily: FONT, fontSize: 12,
+                  color: "var(--color-text-primary)",
+                  outline: "none",
+                  transition: "border-color 150ms ease-out",
+                }}
+                onFocus={e => { e.currentTarget.style.borderColor = "var(--color-accent)"; }}
+                onBlur={e => { e.currentTarget.style.borderColor = "var(--color-border)"; }}
+              />
+              <label htmlFor="run-status-filter" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>
+                Filter by status
+              </label>
+              <select
+                id="run-status-filter"
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                style={{
+                  padding: "7px 10px",
+                  backgroundColor: "var(--color-background)",
+                  borderTop: "1px solid var(--color-border)",
+                  borderBottom: "1px solid var(--color-border)",
+                  borderLeft: "1px solid var(--color-border)",
+                  borderRight: "1px solid var(--color-border)",
+                  borderRadius: "var(--radius)",
+                  fontFamily: FONT, fontSize: 12,
+                  color: "var(--color-text-primary)",
+                  cursor: "pointer",
+                  outline: "none",
+                  flexShrink: 0,
+                }}
+              >
+                <option value="all">All</option>
+                <option value="complete">Complete</option>
+                <option value="running">Running</option>
+                <option value="pending">Pending</option>
+                <option value="failed">Failed</option>
+              </select>
             </div>
+
+            {filteredRuns.length > 0 ? (
+              <div style={{
+                backgroundColor: "var(--color-surface)",
+                borderTop: "1px solid var(--color-border)",
+                borderBottom: "1px solid var(--color-border)",
+                borderLeft: "1px solid var(--color-border)",
+                borderRight: "1px solid var(--color-border)",
+                borderRadius: "var(--radius)",
+                boxShadow: "var(--shadow-sm)",
+                overflow: "hidden",
+              }}>
+                {filteredRuns.map((run, i) => (
+                  <div
+                    key={run.run_id}
+                    onClick={() => onOpenRun(run)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => { if (e.key === "Enter") onOpenRun(run); }}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "12px 16px",
+                      borderBottom: i < filteredRuns.length - 1 ? "1px solid var(--color-border)" : "none",
+                      cursor: "pointer",
+                      transition: "background-color 150ms ease-out",
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "var(--color-surface-hover)"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
+                  >
+                    <div>
+                      <p style={{ fontFamily: FONT, fontWeight: 500, fontSize: 13, color: "var(--color-text-primary)" }}>
+                        {run.rfp_title || "Untitled RFP"}
+                      </p>
+                      <p style={{ fontFamily: MONO, fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+                        {(run.started_at || run.created_at) ? fmtDate(run.started_at || run.created_at) : ""}
+                        {" · "}
+                        {run.vendor_count ?? 0} vendor{run.vendor_count !== 1 ? "s" : ""}
+                        {run.total_cost_usd != null ? ` · $${run.total_cost_usd.toFixed(3)}` : ""}
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <div style={{
+                        width: 6, height: 6, borderRadius: "50%",
+                        backgroundColor: STATUS_DOT[run.status] ?? "var(--color-text-muted)",
+                      }} />
+                      <span style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
+                      </span>
+                      <span style={{ color: "var(--color-text-muted)", fontSize: 14, marginLeft: 4 }}>→</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ fontFamily: FONT, fontSize: 13, color: "var(--color-text-muted)", padding: "16px 0" }}>
+                No evaluations match your search.
+              </p>
+            )}
           </>
         )}
 

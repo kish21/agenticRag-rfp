@@ -5,52 +5,65 @@ import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { useBreakpoint } from "@/lib/hooks";
 import { api } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import { SOURCE_LABEL, SOURCE_COLOR, ALL_SOURCES } from "./_confirm/confirmStyles";
+import { round3, genId, findDupPairs } from "./_confirm/confirmHelpers";
+import { Spinner } from "./_confirm/Spinner";
+import { SourceSection } from "./_confirm/SourceSection";
+import type { SourceKey, MandatoryCheck, ScoringCriterion, EvaluationSetup, DupPair } from "./_confirm/types";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface MandatoryCheck {
-  check_id: string;
-  name: string;
-  description: string;
-  what_passes: string;
-  extraction_target_id: string;
-  source: string;
-  is_locked: boolean;
+interface CostEstimate {
+  estimated_cost_low_usd: number;
+  estimated_cost_high_usd: number;
+  model: string;
+  vendor_count: number;
 }
 
-interface ScoringCriterion {
-  criterion_id: string;
-  name: string;
-  weight: number;
-  description?: string;
-  rubric_9_10?: string;
-  rubric_6_8?: string;
-  rubric_3_5?: string;
-  rubric_0_2?: string;
-  extraction_target_ids?: string[];
-  source: string;
-  is_locked: boolean;
-}
+function CostEstimateBanner({ runId }: { runId: string }) {
+  const [est, setEst] = useState<CostEstimate | null>(null);
 
-interface EvaluationSetup {
-  mandatory_checks: MandatoryCheck[];
-  scoring_criteria: ScoringCriterion[];
-  total_weight: number;
-  source: string;
-  currency?: string;
-  contract_value?: number | null;
-  vendor_count?: number;
-  rfp_title?: string;
-  department?: string;
-}
+  useEffect(() => {
+    api.get<CostEstimate>(`/api/v1/evaluate/${runId}/cost-estimate`)
+      .then(setEst)
+      .catch(() => {});
+  }, [runId]);
 
-type SourceKey = "org" | "dept" | "user" | "rfp";
+  if (!est) return null;
 
-interface DupPair {
-  a: { name: string; source: SourceKey };
-  b: { name: string; source: SourceKey };
-  idA: string;
-  idB: string;
+  const low  = `$${est.estimated_cost_low_usd.toFixed(3)}`;
+  const high = `$${est.estimated_cost_high_usd.toFixed(3)}`;
+
+  return (
+    <div style={{
+      marginBottom: 20, padding: "10px 16px",
+      display: "flex", alignItems: "center", gap: 10,
+      backgroundColor: "var(--color-surface)",
+      borderTop: "1px solid var(--color-border)",
+      borderBottom: "1px solid var(--color-border)",
+      borderLeft: "3px solid var(--color-info)",
+      borderRight: "1px solid var(--color-border)",
+      borderRadius: "var(--radius)",
+    }}>
+      <div>
+        <span style={{
+          fontFamily: FONT, fontWeight: 600, fontSize: 12,
+          color: "var(--color-text-primary)",
+        }}>
+          Estimated LLM cost:{" "}
+        </span>
+        <span style={{
+          fontFamily: MONO, fontWeight: 700, fontSize: 12,
+          color: "var(--color-info)", fontVariantNumeric: "tabular-nums",
+        }}>
+          {low} – {high}
+        </span>
+        <span style={{
+          fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)", marginLeft: 6,
+        }}>
+          for {est.vendor_count} vendor{est.vendor_count !== 1 ? "s" : ""} · {est.model}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 interface ConfirmSetupPageProps {
@@ -58,430 +71,6 @@ interface ConfirmSetupPageProps {
   onConfirmed: () => void;
   onBack: () => void;
   onAuth401: () => void;
-}
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-
-const SOURCE_LABEL: Record<SourceKey, string> = {
-  org:  "Organisation",
-  dept: "Department",
-  user: "Your Criteria",
-  rfp:  "RFP-Extracted",
-};
-
-const SOURCE_COLOR: Record<SourceKey, string> = {
-  org:  "var(--color-accent)",
-  dept: "var(--color-info)",
-  user: "var(--color-warning)",
-  rfp:  "var(--color-success)",
-};
-
-const ALL_SOURCES: SourceKey[] = ["org", "dept", "user", "rfp"];
-
-const labelCss: React.CSSProperties = {
-  display: "block",
-  fontFamily: FONT, fontSize: 11, fontWeight: 600,
-  letterSpacing: "0.07em", textTransform: "uppercase",
-  color: "var(--color-text-muted)", marginBottom: 6,
-};
-
-const inputCss: React.CSSProperties = {
-  width: "100%", boxSizing: "border-box",
-  padding: "7px 10px",
-  backgroundColor: "var(--color-background)",
-  borderTop: "1px solid var(--color-border)",
-  borderBottom: "1px solid var(--color-border)",
-  borderLeft: "1px solid var(--color-border)",
-  borderRight: "1px solid var(--color-border)",
-  borderRadius: "var(--radius)",
-  fontFamily: FONT, fontSize: 13,
-  color: "var(--color-text-primary)",
-  transition: "border-color 150ms ease-out",
-};
-
-function focusBorder(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
-  const el = e.currentTarget;
-  el.style.borderTopColor = "var(--color-accent)";
-  el.style.borderBottomColor = "var(--color-accent)";
-  el.style.borderLeftColor = "var(--color-accent)";
-  el.style.borderRightColor = "var(--color-accent)";
-}
-
-function blurBorder(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
-  const el = e.currentTarget;
-  el.style.borderTopColor = "var(--color-border)";
-  el.style.borderBottomColor = "var(--color-border)";
-  el.style.borderLeftColor = "var(--color-border)";
-  el.style.borderRightColor = "var(--color-border)";
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function round3(n: number): number {
-  return Math.round(n * 1000) / 1000;
-}
-
-function genId(source: SourceKey, type: "mandatory" | "scoring"): string {
-  const prefix = type === "mandatory" ? "MC" : "SC";
-  const rand = Math.random().toString(36).slice(2, 10).toUpperCase();
-  return `${prefix}-${source.toUpperCase()}-${rand}`;
-}
-
-function normName(n: string): string {
-  return n.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function isNearDup(a: string, b: string): boolean {
-  const wa = normName(a).split(" ").filter(Boolean);
-  const wb = normName(b).split(" ").filter(Boolean);
-  if (wa.length < 3 || wb.length < 3) return false;
-  const wbStr = wb.join(" ");
-  for (let i = 0; i <= wa.length - 3; i++) {
-    if (wbStr.includes(wa.slice(i, i + 3).join(" "))) return true;
-  }
-  return false;
-}
-
-function findDupPairs(setup: EvaluationSetup): DupPair[] {
-  const all: Array<{ name: string; source: SourceKey; id: string; type: "mandatory" | "scoring" }> = [
-    ...setup.mandatory_checks.map(c => ({ name: c.name, source: c.source as SourceKey, id: c.check_id, type: "mandatory" as const })),
-    ...setup.scoring_criteria.map(c => ({ name: c.name, source: c.source as SourceKey, id: c.criterion_id, type: "scoring" as const })),
-  ];
-  const pairs: DupPair[] = [];
-  for (let i = 0; i < all.length; i++) {
-    for (let j = i + 1; j < all.length; j++) {
-      if (all[i].source !== all[j].source && isNearDup(all[i].name, all[j].name)) {
-        pairs.push({ a: all[i], b: all[j], idA: all[i].id, idB: all[j].id });
-      }
-    }
-  }
-  return pairs;
-}
-
-// ── Spinner ───────────────────────────────────────────────────────────────────
-
-function Spinner({ size = 12, color = "var(--color-text-muted)" }: { size?: number; color?: string }) {
-  return (
-    <div style={{
-      width: size, height: size, flexShrink: 0,
-      borderTop: `2px solid ${color}`,
-      borderBottom: "2px solid transparent",
-      borderLeft: "2px solid transparent",
-      borderRight: "2px solid transparent",
-      borderRadius: "50%",
-      animation: "csp-spin 0.7s linear infinite",
-    }} />
-  );
-}
-
-// ── Criterion row (expandable) ────────────────────────────────────────────────
-
-function CriterionRow({
-  item,
-  type,
-  onUpdate,
-  onRemove,
-}: {
-  item: MandatoryCheck | ScoringCriterion;
-  type: "mandatory" | "scoring";
-  onUpdate: (next: MandatoryCheck | ScoringCriterion) => void;
-  onRemove: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const locked = item.is_locked;
-  const source = (item.source || "rfp") as SourceKey;
-  const sourceColor = SOURCE_COLOR[source] ?? "var(--color-text-muted)";
-  const weight = type === "scoring" ? (item as ScoringCriterion).weight : null;
-  const itemId = type === "mandatory"
-    ? (item as MandatoryCheck).check_id
-    : (item as ScoringCriterion).criterion_id;
-
-  return (
-    <div style={{
-      borderBottom: "1px solid var(--color-border)",
-      opacity: locked ? 0.7 : 1,
-    }}>
-      {/* Row header */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded(v => !v)}
-        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setExpanded(v => !v); }}
-        style={{
-          display: "flex", alignItems: "center", gap: 10,
-          padding: "11px 16px", cursor: "pointer",
-          transition: "background-color 150ms ease-out",
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "var(--color-surface-hover)"; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
-      >
-        {locked ? (
-          <span style={{ fontSize: 12, flexShrink: 0, color: "var(--color-text-muted)" }}>🔒</span>
-        ) : (
-          <span style={{
-            fontSize: 10, flexShrink: 0, color: "var(--color-text-muted)",
-            transform: expanded ? "rotate(90deg)" : "none",
-            transition: "transform 150ms ease-out",
-            display: "inline-block",
-          }}>▶</span>
-        )}
-        <span style={{
-          fontFamily: FONT, fontWeight: 500, fontSize: 13,
-          color: "var(--color-text-primary)", flex: 1, minWidth: 0,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          {item.name}
-        </span>
-        {type === "scoring" && weight !== null && (
-          <span style={{
-            fontFamily: MONO, fontWeight: 600, fontSize: 12,
-            color: "var(--color-text-secondary)", flexShrink: 0,
-            fontVariantNumeric: "tabular-nums",
-          }}>
-            {(weight * 100).toFixed(0)}%
-          </span>
-        )}
-        <span style={{
-          fontFamily: FONT, fontWeight: 600, fontSize: 9,
-          letterSpacing: "0.08em", textTransform: "uppercase",
-          color: type === "mandatory" ? "var(--color-warning)" : "var(--color-info)",
-          padding: "1px 6px",
-          borderTop: `1px solid ${type === "mandatory" ? "var(--color-warning)" : "var(--color-info)"}`,
-          borderBottom: `1px solid ${type === "mandatory" ? "var(--color-warning)" : "var(--color-info)"}`,
-          borderLeft: `1px solid ${type === "mandatory" ? "var(--color-warning)" : "var(--color-info)"}`,
-          borderRight: `1px solid ${type === "mandatory" ? "var(--color-warning)" : "var(--color-info)"}`,
-          borderRadius: 3, flexShrink: 0,
-        }}>
-          {type === "mandatory" ? "required" : "scoring"}
-        </span>
-        {!locked && (
-          <button
-            type="button"
-            onClick={e => { e.stopPropagation(); onRemove(); }}
-            aria-label={`Remove ${item.name}`}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: "var(--color-text-muted)", fontSize: 16,
-              padding: "0 2px", flexShrink: 0, lineHeight: 1,
-              transition: "color 150ms ease-out",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = "var(--color-error)"; }}
-            onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
-          >×</button>
-        )}
-      </div>
-
-      {/* Expanded detail */}
-      {expanded && (
-        <div style={{ padding: "0 16px 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-          <div>
-            <label htmlFor={`name-${itemId}`} style={labelCss}>Name</label>
-            <input
-              id={`name-${itemId}`} type="text" value={item.name} disabled={locked}
-              onChange={e => onUpdate({ ...item, name: e.target.value })}
-              style={{ ...inputCss, opacity: locked ? 0.6 : 1, cursor: locked ? "not-allowed" : "text" }}
-              onFocus={locked ? undefined : focusBorder}
-              onBlur={locked ? undefined : blurBorder}
-            />
-          </div>
-          <div>
-            <label htmlFor={`desc-${itemId}`} style={labelCss}>Description</label>
-            <textarea
-              id={`desc-${itemId}`} rows={2} value={item.description || ""} disabled={locked}
-              onChange={e => onUpdate({ ...item, description: e.target.value })}
-              style={{ ...inputCss, resize: "vertical", lineHeight: 1.55, minHeight: 52, opacity: locked ? 0.6 : 1, cursor: locked ? "not-allowed" : "text" }}
-              onFocus={locked ? undefined : focusBorder}
-              onBlur={locked ? undefined : blurBorder}
-            />
-          </div>
-          {type === "mandatory" && (
-            <div>
-              <label htmlFor={`pass-${itemId}`} style={labelCss}>What passes</label>
-              <textarea
-                id={`pass-${itemId}`} rows={2}
-                value={(item as MandatoryCheck).what_passes || ""} disabled={locked}
-                onChange={e => onUpdate({ ...item, what_passes: e.target.value } as MandatoryCheck)}
-                style={{ ...inputCss, resize: "vertical", lineHeight: 1.55, minHeight: 52, opacity: locked ? 0.6 : 1, cursor: locked ? "not-allowed" : "text" }}
-                onFocus={locked ? undefined : focusBorder}
-                onBlur={locked ? undefined : blurBorder}
-              />
-            </div>
-          )}
-          {type === "scoring" && (
-            <div>
-              <label htmlFor={`wt-${itemId}`} style={labelCss}>Weight (0–1)</label>
-              <input
-                id={`wt-${itemId}`} type="number" min={0} max={1} step={0.001}
-                value={(item as ScoringCriterion).weight} disabled={locked}
-                onChange={e => onUpdate({ ...item, weight: parseFloat(e.target.value) || 0 } as ScoringCriterion)}
-                style={{ ...inputCss, width: 120, opacity: locked ? 0.6 : 1, cursor: locked ? "not-allowed" : "text", fontFamily: MONO }}
-                onFocus={locked ? undefined : focusBorder}
-                onBlur={locked ? undefined : blurBorder}
-              />
-            </div>
-          )}
-          {locked && (
-            <p style={{ fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.5 }}>
-              🔒 Organisation policy — read-only
-            </p>
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", backgroundColor: sourceColor, flexShrink: 0 }} />
-            <span style={{ fontFamily: FONT, fontSize: 11, color: "var(--color-text-muted)" }}>
-              Source: {SOURCE_LABEL[source] ?? source}
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Source section ────────────────────────────────────────────────────────────
-
-function SourceSection({
-  sourceKey,
-  mandatoryChecks,
-  scoringCriteria,
-  showRfpSpinner,
-  onUpdateMandatory,
-  onRemoveMandatory,
-  onUpdateScoring,
-  onRemoveScoring,
-  onAddMandatory,
-  onAddScoring,
-}: {
-  sourceKey: SourceKey;
-  mandatoryChecks: MandatoryCheck[];
-  scoringCriteria: ScoringCriterion[];
-  showRfpSpinner?: boolean;
-  onUpdateMandatory: (id: string, next: MandatoryCheck) => void;
-  onRemoveMandatory: (id: string) => void;
-  onUpdateScoring: (id: string, next: ScoringCriterion) => void;
-  onRemoveScoring: (id: string) => void;
-  onAddMandatory?: () => void;
-  onAddScoring?: () => void;
-}) {
-  const color = SOURCE_COLOR[sourceKey];
-  const label = SOURCE_LABEL[sourceKey];
-  const totalItems = mandatoryChecks.length + scoringCriteria.length;
-  const canAdd = !!(onAddMandatory || onAddScoring);
-
-  return (
-    <div style={{ marginBottom: 24 }}>
-      {/* Section header */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "10px 16px",
-        backgroundColor: "var(--color-surface-hover)",
-        borderTop: `2px solid ${color}`,
-        borderBottom: "1px solid var(--color-border)",
-        borderLeft: "1px solid var(--color-border)",
-        borderRight: "1px solid var(--color-border)",
-        borderRadius: "var(--radius) var(--radius) 0 0",
-      }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: color, flexShrink: 0 }} />
-        <span style={{
-          fontFamily: DISPLAY, fontWeight: 800, fontSize: 11,
-          letterSpacing: "0.08em", textTransform: "uppercase",
-          color: "var(--color-text-primary)", flex: 1,
-        }}>
-          {label}
-        </span>
-        {showRfpSpinner ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Spinner size={10} color="var(--color-success)" />
-            <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-success)" }}>Extracting…</span>
-          </div>
-        ) : (
-          <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>
-            {mandatoryChecks.length} required · {scoringCriteria.length} scoring
-          </span>
-        )}
-      </div>
-
-      {/* Rows */}
-      <div style={{
-        backgroundColor: "var(--color-surface)",
-        borderTop: "none",
-        borderBottom: "1px solid var(--color-border)",
-        borderLeft: "1px solid var(--color-border)",
-        borderRight: "1px solid var(--color-border)",
-        borderRadius: canAdd ? "0" : "0 0 var(--radius) var(--radius)",
-        boxShadow: canAdd ? "none" : "var(--shadow-sm)",
-      }}>
-        {totalItems === 0 ? (
-          <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)", padding: "16px", lineHeight: 1.55 }}>
-            No {label.toLowerCase()} criteria for this evaluation.
-          </p>
-        ) : (
-          <>
-            {mandatoryChecks.map(mc => (
-              <CriterionRow
-                key={mc.check_id} item={mc} type="mandatory"
-                onUpdate={next => onUpdateMandatory(mc.check_id, next as MandatoryCheck)}
-                onRemove={() => onRemoveMandatory(mc.check_id)}
-              />
-            ))}
-            {scoringCriteria.map(sc => (
-              <CriterionRow
-                key={sc.criterion_id} item={sc} type="scoring"
-                onUpdate={next => onUpdateScoring(sc.criterion_id, next as ScoringCriterion)}
-                onRemove={() => onRemoveScoring(sc.criterion_id)}
-              />
-            ))}
-          </>
-        )}
-      </div>
-
-      {/* Inline add buttons (#50) */}
-      {canAdd && (
-        <div style={{
-          display: "flex", gap: 8, padding: "8px 16px",
-          backgroundColor: "var(--color-surface)",
-          borderBottom: "1px solid var(--color-border)",
-          borderLeft: "1px solid var(--color-border)",
-          borderRight: "1px solid var(--color-border)",
-          borderRadius: "0 0 var(--radius) var(--radius)",
-          boxShadow: "var(--shadow-sm)",
-        }}>
-          {onAddMandatory && (
-            <button
-              type="button" onClick={onAddMandatory}
-              style={{
-                background: "none", border: "none", cursor: "pointer", padding: "4px 0",
-                fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)",
-                display: "flex", alignItems: "center", gap: 4,
-                transition: "color 150ms ease-out",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = "var(--color-text-primary)"; }}
-              onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
-            >
-              + Required check
-            </button>
-          )}
-          {onAddMandatory && onAddScoring && (
-            <span style={{ color: "var(--color-border)", fontFamily: MONO, fontSize: 12 }}>·</span>
-          )}
-          {onAddScoring && (
-            <button
-              type="button" onClick={onAddScoring}
-              style={{
-                background: "none", border: "none", cursor: "pointer", padding: "4px 0",
-                fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)",
-                display: "flex", alignItems: "center", gap: 4,
-                transition: "color 150ms ease-out",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = "var(--color-text-primary)"; }}
-              onMouseLeave={e => { e.currentTarget.style.color = "var(--color-text-muted)"; }}
-            >
-              + Scoring criterion
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -497,10 +86,10 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState("");
   const [weightWarning, setWeightWarning] = useState(false);
-  const [rfpConfirmed, setRfpConfirmed] = useState(false);        // #52
-  const [rfpCheckError, setRfpCheckError] = useState(false);      // #52
-  const [dupPairs, setDupPairs] = useState<DupPair[]>([]);         // #51
-  const [dismissedDups, setDismissedDups] = useState<Set<string>>(new Set()); // #51
+  const [rfpConfirmed, setRfpConfirmed] = useState(false);
+  const [rfpCheckError, setRfpCheckError] = useState(false);
+  const [dupPairs, setDupPairs] = useState<DupPair[]>([]);
+  const [dismissedDups, setDismissedDups] = useState<Set<string>>(new Set());
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollCountRef = useRef(0);
 
@@ -523,7 +112,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
       setSetup(data);
       if (!isRefresh) {
         setLoading(false);
-        setDupPairs(findDupPairs(data)); // #51 — compute once on initial load
+        setDupPairs(findDupPairs(data));
       }
       if (data.source === "merged" || data.source === "merged_empty") {
         if (pollCountRef.current < 10) {
@@ -537,7 +126,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
         }
       } else {
         setRfpPolling(false);
-        if (isRefresh) setDupPairs(findDupPairs(data)); // refresh dups once LLM-refined
+        if (isRefresh) setDupPairs(findDupPairs(data));
       }
     } catch (err) {
       if (!isRefresh) {
@@ -578,7 +167,6 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
     });
   }
 
-  // #50 — inline add
   function addMandatory(source: SourceKey) {
     const id = genId(source, "mandatory");
     const blank: MandatoryCheck = {
@@ -621,7 +209,6 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
     setConfirmError("");
     setRfpCheckError(false);
 
-    // #52 — RFP identity check
     if (!rfpConfirmed) {
       setRfpCheckError(true);
       return;
@@ -756,7 +343,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           </div>
         )}
 
-        {/* #48 — Summary card */}
+        {/* Summary card */}
         <div style={{
           display: "grid",
           gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
@@ -788,7 +375,10 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           ))}
         </div>
 
-        {/* #52 — RFP identity checkbox */}
+        {/* Cost estimate banner */}
+        <CostEstimateBanner runId={runId} />
+
+        {/* RFP identity confirmation */}
         {(setup.rfp_title || setup.department) && (
           <div style={{
             marginBottom: 20, padding: "14px 16px",
@@ -800,9 +390,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
             borderRadius: "var(--radius)",
             boxShadow: "var(--shadow-sm)",
           }}>
-            <label style={{
-              display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
-            }}>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
               <input
                 type="checkbox"
                 checked={rfpConfirmed}
@@ -831,7 +419,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           </div>
         )}
 
-        {/* #53 — Mandatory rejection notice */}
+        {/* Mandatory rejection notice */}
         {mandatoryCount > 0 && (
           <div style={{
             marginBottom: 20, padding: "10px 14px",
@@ -846,9 +434,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
             <span style={{ fontSize: 14, flexShrink: 0 }}>⚑</span>
             <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.55, margin: 0 }}>
               A vendor failing{" "}
-              <strong style={{ color: "var(--color-warning)", fontWeight: 600 }}>
-                any 1
-              </strong>{" "}
+              <strong style={{ color: "var(--color-warning)", fontWeight: 600 }}>any 1</strong>{" "}
               of these{" "}
               <strong style={{ color: "var(--color-text-primary)", fontWeight: 600 }}>
                 {mandatoryCount} mandatory check{mandatoryCount !== 1 ? "s" : ""}
@@ -858,7 +444,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           </div>
         )}
 
-        {/* #51 — Near-duplicate warnings */}
+        {/* Near-duplicate warnings */}
         {visibleDups.map(pair => (
           <div
             key={pair.idA + pair.idB}
@@ -915,7 +501,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           />
         ))}
 
-        {/* #49 — Weight bar chart */}
+        {/* Weight bar chart */}
         {setup.scoring_criteria.length > 0 && (
           <div style={{
             marginBottom: 16, padding: "14px 16px",
@@ -1020,7 +606,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           </div>
         )}
 
-        {/* Weight warning banner */}
+        {/* Weight warning */}
         {weightWarning && (
           <div role="alert" style={{
             marginBottom: 16, padding: "10px 14px",

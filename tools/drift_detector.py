@@ -24,20 +24,20 @@ BUILD_STATE = ROOT / ".claude" / "build_state.json"
 
 # Files expected per skill
 SKILL_FILES = {
-    "SK01": ["app/config.py", "app/main.py", "requirements.txt", "docker-compose.yml", ".env", ".gitignore"],
-    "SK02": ["app/core/output_models.py", "app/core/rate_limiter.py", "app/core/qdrant_client.py",
+    "SK01": ["app/config/loader.py", "app/main.py", "requirements.txt", "docker-compose.yml", ".env", ".gitignore"],
+    "SK02": ["app/schemas/output_models.py", "app/infra/rate_limiter.py", "app/retrieval/qdrant.py",
              "app/agents/planner.py", "app/agents/critic.py",
-             "app/core/rfp_confirmation.py", "app/core/override_mechanism.py"],
+             "app/domain/rfp.py", "app/domain/override.py"],
     "SK03": ["app/db/schema.sql", "app/db/fact_store.py",
-             "app/core/llamaindex_pipeline.py", "app/core/ingestion_validator.py",
+             "app/retrieval/pipeline.py", "app/validators/ingestion.py",
              "app/agents/ingestion.py"],
     "SK03b": ["app/agents/retrieval.py"],
     "SK04": ["app/agents/extraction.py"],
     "SK05": ["app/agents/evaluation.py", "app/agents/comparator.py"],
     "SK06": ["app/agents/decision.py", "app/agents/explanation.py"],
     "SK07": ["app/output/pdf_report.py", "tests/regression/run_regression.py"],
-    "SK08": ["app/core/langfuse_client.py", "app/jobs/cleanup.py", "app/jobs/rate_monitor.py"],
-    "SK09": ["app/core/agent_registry.py", "app/api/admin_routes.py", "app/agents/hr_agent_config.py"],
+    "SK08": ["app/providers/observability.py", "app/jobs/cleanup.py", "app/jobs/rate_monitor.py"],
+    "SK09": ["app/domain/agent_registry.py", "app/api/admin_routes.py", "app/agents/hr_agent_config.py"],
 }
 
 # Content rules — must/must-not checks

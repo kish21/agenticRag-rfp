@@ -4,6 +4,9 @@ export interface EvalRun {
   status: string;
   vendor_count: number;
   created_at: string;
+  started_at?: string;
+  total_cost_usd?: number | null;
+  currency?: string;
 }
 
 export interface AgentEvent {
@@ -16,12 +19,17 @@ export interface VendorScore {
   vendor_name: string;
   decision: string;
   total_score: number;
+  score_confidence?: number | null;
+  recommendation?: string | null;
   summary?: string;
 }
 
 export interface EvalResults {
   recommendation?: string;
   approval_tier?: string;
+  decision_confidence?: number | null;
+  requires_human_review?: boolean;
+  review_reasons?: string[];
   vendors?: VendorScore[];
 }
 

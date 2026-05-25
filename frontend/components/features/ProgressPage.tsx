@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { AGENTS, AGENT_LABELS } from "@/lib/constants";
 
@@ -9,10 +10,28 @@ interface ProgressPageProps {
   onCancel: () => void;
 }
 
+function fmtSeconds(s: number): string {
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r > 0 ? `${m}m ${r}s` : `${m}m`;
+}
+
 export function ProgressPage({ agentStatuses, isMobile, onCancel }: ProgressPageProps) {
+  const startRef    = useRef<number>(Date.now());
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const done  = Object.values(agentStatuses).filter(a => a.status === "done").length;
   const total = AGENTS.length;
   const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  const avgPerAgent  = done > 0 ? elapsed / done : null;
+  const remaining    = avgPerAgent != null ? Math.round(avgPerAgent * (total - done)) : null;
 
   return (
     <div style={{ maxWidth: 620 }}>
@@ -43,9 +62,17 @@ export function ProgressPage({ agentStatuses, isMobile, onCancel }: ProgressPage
             transition: "width 600ms ease-out",
           }} />
         </div>
-        <p style={{ fontFamily: MONO, fontSize: 11, color: "var(--color-text-muted)" }}>
-          {done}/{total} agents complete
-        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <p style={{ fontFamily: MONO, fontSize: 11, color: "var(--color-text-muted)" }}>
+            {done}/{total} agents complete
+          </p>
+          <p style={{ fontFamily: MONO, fontSize: 11, color: "var(--color-text-muted)" }}>
+            {fmtSeconds(elapsed)} elapsed
+            {remaining != null && done > 0 && done < total
+              ? ` · ~${fmtSeconds(remaining)} remaining`
+              : ""}
+          </p>
+        </div>
       </div>
 
       <div style={{
