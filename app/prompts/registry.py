@@ -23,10 +23,10 @@ _PROMPTS_DIR = Path(__file__).parent
 # Key format: "agent/prompt_name"  matches LangSmith Hub namespace: meridian/agent/prompt-name
 _REGISTRY: dict[str, tuple[str, str]] = {
     # ── Setup (pre-agent) ──────────────────────────────────────────────────────
-    "setup/extract_rfp_criteria":    ("meridian/setup-extract-rfp-criteria",    "setup/extract_rfp_criteria.yaml"),
-    "setup/generate_score_guides":   ("meridian/setup-generate-score-guides",   "setup/generate_score_guides.yaml"),
-    "setup/suggest_mandatory_checks":("meridian/setup-suggest-mandatory-checks","setup/suggest_mandatory_checks.yaml"),
-    "setup/interpret_criteria_sheet":("meridian/setup-interpret-criteria-sheet","setup/interpret_criteria_sheet.yaml"),
+    "setup/extract_rfp_criteria":    ("setup-extract-rfp-criteria",    "setup/extract_rfp_criteria.yaml"),
+    "setup/generate_score_guides":   ("setup-generate-score-guides",   "setup/generate_score_guides.yaml"),
+    "setup/suggest_mandatory_checks":("setup-suggest-mandatory-checks","setup/suggest_mandatory_checks.yaml"),
+    "setup/interpret_criteria_sheet":("setup-interpret-criteria-sheet","setup/interpret_criteria_sheet.yaml"),
 }
 
 # In-process cache: name → raw template string

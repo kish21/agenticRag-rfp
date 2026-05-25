@@ -1,4 +1,4 @@
-name: meridian/setup-suggest-mandatory-checks
+name: setup-suggest-mandatory-checks
 description: >
   Suggests 3-5 mandatory pass/fail checks for a procurement domain when
   neither the customer CSV nor the RFP defines any mandatory requirements.

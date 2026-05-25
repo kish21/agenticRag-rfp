@@ -43,7 +43,11 @@ def main() -> None:
         print(f"ERROR: missing dependency — {e}")
         sys.exit(1)
 
-    client = Client()
+    import requests, urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    session = requests.Session()
+    session.verify = False
+    client = Client(session=session)
     prompts_dir = ROOT / "app" / "prompts"
     yaml_files = sorted(prompts_dir.rglob("*.yaml"))
 
