@@ -37,6 +37,11 @@ async def extract_criteria_from_user_sheet(sheet_bytes: bytes, filename: str) ->
     """
     Parse a user-uploaded scoring sheet (CSV/Excel/PDF/DOCX) into the same
     shape as extract_criteria_from_rfp(): {"mandatory_checks": [...], "scoring_criteria": [...]}.
+
+    Strategy:
+    1. CSV/Excel  → try pandas column-name matching first (fast, free)
+                  → if no scoring criteria found, fall back to LLM interpretation
+    2. PDF/DOCX   → LLM interpretation directly
     Never raises — returns empty dict on any parse failure.
     """
     if not sheet_bytes:
@@ -45,9 +50,14 @@ async def extract_criteria_from_user_sheet(sheet_bytes: bytes, filename: str) ->
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     try:
         if ext in ("csv", "xlsx", "xls"):
-            return _parse_sheet_with_pandas(sheet_bytes, ext)
+            result = _parse_sheet_with_pandas(sheet_bytes, ext)
+            # If pandas found no scoring criteria the column names didn't match —
+            # fall back to LLM which can interpret any header format or language
+            if not result.get("scoring_criteria"):
+                print(f"  Sheet parser found no scoring criteria in '{filename}' — trying LLM fallback…")
+                result = await _llm_interpret_sheet(sheet_bytes, ext)
+            return result
         elif ext in ("pdf", "docx", "doc"):
-            # Reuse the LLM-based RFP extractor — same prompt, same output shape
             if ext == "pdf":
                 text = extract_rfp_text(sheet_bytes)
             else:
@@ -57,6 +67,93 @@ async def extract_criteria_from_user_sheet(sheet_bytes: bytes, filename: str) ->
             return {"mandatory_checks": [], "scoring_criteria": []}
     except Exception as e:
         print(f"User sheet extraction failed ({filename}): {e}")
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+
+async def _llm_interpret_sheet(sheet_bytes: bytes, ext: str) -> dict:
+    """
+    LLM fallback for scoring sheets with non-standard headers.
+    Converts the sheet to plain text and asks the LLM to extract criteria.
+    Works for any column naming convention, any industry, any language.
+    """
+    import io
+    try:
+        import pandas as pd
+    except ImportError:
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+    try:
+        if ext == "csv":
+            df = pd.read_csv(io.BytesIO(sheet_bytes))
+        else:
+            df = pd.read_excel(io.BytesIO(sheet_bytes))
+
+        # Convert to plain readable text so the LLM can interpret any format
+        sheet_text = df.to_string(index=False, na_rep="")
+    except Exception as e:
+        print(f"  LLM sheet fallback: could not read file — {e}")
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+    prompt = f"""You are reading a vendor evaluation scoring sheet uploaded by a procurement team.
+The sheet may use any column names, any industry terminology, any language.
+
+Your job: extract all evaluation criteria and return ONLY valid JSON in this exact shape:
+{{
+  "mandatory_checks": [
+    {{
+      "name": "short criterion name",
+      "description": "what the vendor must provide",
+      "what_passes": "what constitutes passing this check"
+    }}
+  ],
+  "scoring_criteria": [
+    {{
+      "name": "criterion name",
+      "weight": 0.35,
+      "description": "what is being scored",
+      "rubric_9_10": "evidence required for outstanding score",
+      "rubric_6_8": "evidence required for good score",
+      "rubric_3_5": "evidence required for adequate score",
+      "rubric_0_2": "evidence required for poor score"
+    }}
+  ]
+}}
+
+Rules:
+- mandatory_checks: rows marked MANDATORY, PASS/FAIL, required, obligatoire, or similar
+- scoring_criteria: rows with a numeric weight or percentage
+- weights must be decimals summing to 1.0 (convert percentages: 35% = 0.35)
+- if rubric bands are not in the sheet, leave those fields as empty strings
+- if no weight is stated but multiple scoring rows exist, distribute evenly
+- return ONLY JSON — no prose, no markdown fences
+
+SHEET CONTENT:
+{sheet_text[:4000]}"""
+
+    try:
+        response = await call_llm(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+        )
+        clean = response.strip()
+        if "```" in clean:
+            parts = clean.split("```")
+            clean = parts[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        result = json.loads(clean.strip())
+
+        # Normalise weights to 1.0
+        scoring = result.get("scoring_criteria", [])
+        if scoring:
+            total = sum(float(c.get("weight", 0)) for c in scoring)
+            if total > 0 and abs(total - 1.0) > 0.01:
+                for c in scoring:
+                    c["weight"] = round(float(c.get("weight", 0)) / total, 3)
+
+        return result
+    except Exception as e:
+        print(f"  LLM sheet interpretation failed: {e}")
         return {"mandatory_checks": [], "scoring_criteria": []}
 
 

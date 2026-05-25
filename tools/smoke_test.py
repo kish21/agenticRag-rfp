@@ -240,10 +240,16 @@ async def run_rfp(rfp_path: str, vendor_pdfs: list[str], criteria_path: str | No
         kv("User mandatory checks", len((user_criteria or {}).get("mandatory_checks", [])))
         kv("User scoring criteria", len((user_criteria or {}).get("scoring_criteria", [])))
 
+    from app.domain.criteria import extract_criteria_from_rfp
+    print("\n  Extracting criteria from RFP text via LLM…")
+    rfp_criteria = await extract_criteria_from_rfp(rfp_text)
+    kv("RFP mandatory checks", len(rfp_criteria.get("mandatory_checks", [])))
+    kv("RFP scoring criteria", len(rfp_criteria.get("scoring_criteria", [])))
+
     merged = merge_criteria(
         org_criteria=org_criteria,
         dept_criteria=dept_criteria,
-        rfp_criteria={},
+        rfp_criteria=rfp_criteria,
         department=SMOKE_DEPARTMENT,
         rfp_id=rfp_id,
         org_id=SMOKE_ORG_ID,
@@ -386,7 +392,9 @@ async def run_rfp(rfp_path: str, vendor_pdfs: list[str], criteria_path: str | No
         "vendor_ids":  vendor_list,
     })
     save_state(state)
-    vendor_args = " ".join(f"--vendor-pdf {p}" for p in vendor_pdfs)
+    print(f"\n  run_id:    {run_id}")
+    print(f"  rfp_id:    {rfp_id}")
+    print(f"  setup_id:  {setup_id}")
     print(f"\n[OK] RFP SETUP DONE — {len(vendor_list)} vendor(s) registered.")
     print(f"     Next: --agent ingestion --vendor {vendor_list[0]}\n")
 

@@ -109,10 +109,13 @@ async def start_evaluation(
     if criteria_bytes and criteria_filename:
         user_criteria = await extract_criteria_from_user_sheet(criteria_bytes, criteria_filename)
 
+    from app.domain.criteria import extract_criteria_from_rfp
+    rfp_criteria = await extract_criteria_from_rfp(rfp_text)
+
     merged = merge_criteria(
         org_criteria=org_criteria,
         dept_criteria=dept_criteria,
-        rfp_criteria={},
+        rfp_criteria=rfp_criteria,
         department=department,
         rfp_id=rfp_id,
         org_id=user.org_id,
