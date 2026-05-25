@@ -24,8 +24,19 @@ def _normalize_name(name: str) -> str:
     Lowercase + strip noise suffixes + collapse punctuation/whitespace.
     Used as the dedup key so 'ISO 27001' and 'ISO 27001 Certification'
     collapse to the same key and don't both survive into the setup.
+
+    Also handles:
+    - Parenthesised acronyms: 'Service Level Commitments (SLA)' → 'service level commitments'
+    - Ampersand vs and: 'Technical Capability & Security' → 'technical capability and security'
+    - Currency/threshold suffixes: '>= £5M', '>= €5M' stripped
     """
     n = name.lower().strip()
+    # Remove parenthesised content entirely — acronyms like (SLA), (ISO), (KPI)
+    n = re.sub(r"\([^)]*\)", "", n).strip()
+    # Normalise ampersand to "and"
+    n = n.replace("&", "and")
+    # Strip threshold suffixes like ">= £5m", ">= €5m", ">= $5m"
+    n = re.sub(r">=?\s*[£€$]?\s*\d+[mk]?", "", n).strip()
     for suffix in _NOISE_SUFFIXES:
         if n.endswith(suffix):
             n = n[: -len(suffix)].strip()
