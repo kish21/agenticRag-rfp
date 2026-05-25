@@ -1,4 +1,4 @@
-name: meridian/extract-rfp-criteria
+name: meridian/setup/extract-rfp-criteria
 description: >
   Extracts mandatory checks and scoring criteria from RFP text.
   Returns structured JSON with weights, descriptions, and score guide bands.

@@ -37,7 +37,7 @@ def main() -> None:
 
     client = Client()
     prompts_dir = ROOT / "app" / "prompts"
-    yaml_files = sorted(prompts_dir.glob("*.yaml"))
+    yaml_files = sorted(prompts_dir.rglob("*.yaml"))
 
     if not yaml_files:
         print("No YAML files found in app/prompts/")

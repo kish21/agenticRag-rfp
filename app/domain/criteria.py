@@ -106,7 +106,7 @@ async def _llm_interpret_sheet(sheet_bytes: bytes, ext: str) -> dict:
         print(f"  LLM sheet fallback: could not read file — {e}")
         return {"mandatory_checks": [], "scoring_criteria": []}
 
-    prompt = get_prompt("interpret_criteria_sheet", sheet_text=sheet_text[:4000])
+    prompt = get_prompt("setup/interpret_criteria_sheet", sheet_text=sheet_text[:4000])
 
     try:
         response = await call_llm(
@@ -293,7 +293,7 @@ async def extract_criteria_from_rfp(rfp_text: str) -> dict:
     if not rfp_text or len(rfp_text.strip()) < 100:
         return {"mandatory_checks": [], "scoring_criteria": []}
 
-    prompt = get_prompt("extract_rfp_criteria", rfp_text=rfp_text[:6000])
+    prompt = get_prompt("setup/extract_rfp_criteria", rfp_text=rfp_text[:6000])
 
     try:
         response = await call_llm(
@@ -556,7 +556,7 @@ async def detect_and_fill_gaps(merged: dict, department: str) -> tuple[dict, dic
         names_list = "\n".join(f"- {sc['name']}" for sc in criteria_missing_guides)
 
         prompt = get_prompt(
-            "generate_score_guides",
+            "setup/generate_score_guides",
             department=department,
             criteria_names=names_list,
         )
@@ -595,7 +595,7 @@ async def detect_and_fill_gaps(merged: dict, department: str) -> tuple[dict, dic
     if not mandatory:
         gaps_report["has_gaps"] = True
 
-        prompt = get_prompt("suggest_mandatory_checks", department=department)
+        prompt = get_prompt("setup/suggest_mandatory_checks", department=department)
 
         try:
             response = await call_llm(

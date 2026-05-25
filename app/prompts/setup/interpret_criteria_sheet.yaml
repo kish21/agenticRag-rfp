@@ -1,4 +1,4 @@
-name: meridian/interpret-criteria-sheet
+name: meridian/setup/interpret-criteria-sheet
 description: >
   Interprets a customer spreadsheet that uses non-standard column headers
   and extracts scoring criteria and mandatory checks in the canonical format.

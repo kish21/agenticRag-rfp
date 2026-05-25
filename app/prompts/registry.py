@@ -20,11 +20,13 @@ import yaml
 _PROMPTS_DIR = Path(__file__).parent
 
 # Map short names → (langsmith_identifier, local_yaml_file)
+# Key format: "agent/prompt_name"  matches LangSmith Hub namespace: meridian/agent/prompt-name
 _REGISTRY: dict[str, tuple[str, str]] = {
-    "extract_rfp_criteria":    ("meridian/extract-rfp-criteria",    "extract_rfp_criteria.yaml"),
-    "generate_score_guides":   ("meridian/generate-score-guides",    "generate_score_guides.yaml"),
-    "suggest_mandatory_checks":("meridian/suggest-mandatory-checks", "suggest_mandatory_checks.yaml"),
-    "interpret_criteria_sheet":("meridian/interpret-criteria-sheet", "interpret_criteria_sheet.yaml"),
+    # ── Setup (pre-agent) ──────────────────────────────────────────────────────
+    "setup/extract_rfp_criteria":    ("meridian/setup/extract-rfp-criteria",    "setup/extract_rfp_criteria.yaml"),
+    "setup/generate_score_guides":   ("meridian/setup/generate-score-guides",   "setup/generate_score_guides.yaml"),
+    "setup/suggest_mandatory_checks":("meridian/setup/suggest-mandatory-checks","setup/suggest_mandatory_checks.yaml"),
+    "setup/interpret_criteria_sheet":("meridian/setup/interpret-criteria-sheet","setup/interpret_criteria_sheet.yaml"),
 }
 
 # In-process cache: name → raw template string
@@ -93,9 +95,11 @@ def get_prompt(name: str, **variables: str) -> str:
             template = _load_from_langsmith(langsmith_id)
             if template:
                 _cache[name] = template
+                print(f"  [prompt] {name} <- LangSmith Hub ({langsmith_id})")
 
         if name not in _cache:
             _cache[name] = _load_from_yaml(yaml_file)
+            print(f"  [prompt] {name} <- local YAML (LangSmith unavailable)")
 
     template = _cache[name]
 

@@ -1,4 +1,4 @@
-name: meridian/generate-score-guides
+name: meridian/setup/generate-score-guides
 description: >
   Generates four score guide bands (9-10, 6-8, 3-5, 0-2) for scoring criteria
   that have no rubric defined in either the customer CSV or the RFP.
