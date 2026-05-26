@@ -345,12 +345,44 @@ ALL = [
 ]
 MAP = {fn.__name__.replace("c_",""): fn for fn in ALL}
 
+def _write_junit(output_path: str):
+    import xml.etree.ElementTree as ET
+    from pathlib import Path
+    import time as _time
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    failures = sum(1 for _, p, _ in RESULTS if not p)
+    suite = ET.Element("testsuite", {
+        "name": "contract-tests",
+        "tests": str(len(RESULTS)),
+        "failures": str(failures),
+        "errors": "0",
+    })
+    for name, passed, error in RESULTS:
+        case = ET.SubElement(suite, "testcase", {
+            "classname": "contracts",
+            "name": name,
+        })
+        if not passed:
+            ET.SubElement(case, "failure", {"message": (error or "")[:200]}).text = error or ""
+    tree = ET.ElementTree(ET.Element("testsuites"))
+    tree.getroot().append(suite)
+    ET.indent(tree, space="  ")
+    tree.write(output_path, encoding="unicode", xml_declaration=True)
+    print(f"  JUnit XML written -> {output_path}")
+
+
 def main():
+    junit_path = None
+    args = sys.argv[1:]
+    if "--junit" in args:
+        args.remove("--junit")
+        junit_path = "test-results/contracts.xml"
+
     print("\n" + "="*60)
     print("CONTRACT TESTS — Nine-agent architecture")
     print("="*60)
-    if len(sys.argv) > 1:
-        n = sys.argv[1].lower()
+    if args:
+        n = args[0].lower()
         if n in MAP: MAP[n]()
         else: print(f"Unknown: {n}\nAvailable: {list(MAP.keys())}")
         return
@@ -367,6 +399,8 @@ def main():
             if not ok:
                 print(f"\n  FAILED: {n}\n    {(e or '')[:200]}")
     print("="*60)
+    if junit_path:
+        _write_junit(junit_path)
     sys.exit(0 if passed == len(RESULTS) else 1)
 
 if __name__ == "__main__":

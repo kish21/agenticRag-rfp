@@ -461,7 +461,7 @@ async def run_ingestion(vendor_id_or_pdf: str, state: dict) -> None:
                 SELECT file_bytes, file_name FROM vendor_documents
                 WHERE org_id = CAST(:org_id AS uuid)
                   AND vendor_id = :vendor_id
-                ORDER BY created_at DESC LIMIT 1
+                ORDER BY ingested_at DESC LIMIT 1
             """), {"org_id": org_id, "vendor_id": vendor_id_or_pdf}).fetchone()
         if not row:
             print(f"[ABORT] No vendor document found for vendor_id={vendor_id_or_pdf}")
@@ -484,31 +484,41 @@ async def run_ingestion(vendor_id_or_pdf: str, state: dict) -> None:
 
     from app.agents.ingestion import run_ingestion_agent
     from app.agents.critic import critic_after_ingestion
+    from app.schemas.output_models import EvaluationSetup
+    from app.db.fact_store import get_engine
+    import sqlalchemy as sa, json as _json
+
+    # Load EvaluationSetup from DB
+    _engine = get_engine()
+    with _engine.connect() as _conn:
+        _row = _conn.execute(sa.text(
+            "SELECT setup_json FROM evaluation_setups WHERE rfp_id = :rfp_id AND org_id = CAST(:org_id AS uuid) ORDER BY created_at DESC LIMIT 1"
+        ), {"rfp_id": rfp_id, "org_id": org_id}).fetchone()
+    if not _row:
+        print(f"[ABORT] No evaluation_setup found for rfp_id={rfp_id}")
+        sys.exit(1)
+    _raw = _row[0]
+    evaluation_setup = EvaluationSetup.model_validate(_raw if isinstance(_raw, dict) else _json.loads(_raw))
 
     print("\n  Running ingestion agent…")
-    output = await run_ingestion_agent(
-        file_bytes=file_bytes,
+    output, critics = await run_ingestion_agent(
+        content=file_bytes,
         filename=filename,
         vendor_id=vendor_id,
         org_id=org_id,
-        doc_id=doc_id,
-        run_id=run_id,
+        rfp_id=rfp_id,
+        evaluation_setup=evaluation_setup,
     )
 
     section("INGESTION OUTPUT")
-    chunks = output.chunks if hasattr(output, "chunks") else []
-    kv("Total chunks", len(chunks))
-    if chunks:
-        sizes = [len(c.text) for c in chunks]
-        kv("Chunk size min/avg/max", f"{min(sizes)} / {sum(sizes)//len(sizes)} / {max(sizes)} chars")
-
-    if chunks:
-        section("SAMPLE CHUNKS (first 3)")
-        for c in chunks[:3]:
-            print(f"\n  chunk_id:      {c.chunk_id}")
-            print(f"  section_type:  {getattr(c, 'section_type', '?')}")
-            print(f"  priority:      {getattr(c, 'priority', '?')}")
-            print(f"  text preview:  {c.text[:200]!r}")
+    kv("Total chunks", output.total_chunks)
+    kv("Status", output.status)
+    kv("Quality score", f"{output.quality_score:.2f}" if output.quality_score is not None else "n/a")
+    if output.chunks_by_type:
+        kv("Chunks by type", str(output.chunks_by_type))
+    if output.warnings:
+        for w in output.warnings:
+            print(f"  [WARNING] {w}")
 
     critic = critic_after_ingestion(output)
     critic_summary(critic)
@@ -520,23 +530,23 @@ async def run_ingestion(vendor_id_or_pdf: str, state: dict) -> None:
 
     # Accumulate per-vendor ingestion state (supports multiple vendors)
     ingested = state.get("ingested_vendors", {})
-    ingested[vendor_id] = {"doc_id": doc_id, "chunk_count": len(chunks)}
+    ingested[vendor_id] = {"doc_id": doc_id, "chunk_count": output.total_chunks}
     state.update({
         "run_id":             run_id,
         "org_id":             org_id,
         "vendor_id":          vendor_id,   # last ingested — used by extraction
         "doc_id":             doc_id,
         "ingested_vendors":   ingested,
-        "ingestion_chunk_ids": [c.chunk_id for c in chunks],
-        "ingestion_chunk_count": len(chunks),
+        "ingestion_chunk_ids": [],
+        "ingestion_chunk_count": output.total_chunks,
     })
     save_state(state)
     remaining = [v for v in state.get("vendor_ids", []) if v not in ingested]
     if remaining:
-        print(f"\n[OK] INGESTION DONE — {len(chunks)} chunks indexed.")
+        print(f"\n[OK] INGESTION DONE — {output.total_chunks} chunks indexed.")
         print(f"     Next vendor to ingest: --agent ingestion --vendor {remaining[0]}\n")
     else:
-        print(f"\n[OK] INGESTION DONE — {len(chunks)} chunks indexed. All vendors ingested.")
+        print(f"\n[OK] INGESTION DONE — {output.total_chunks} chunks indexed. All vendors ingested.")
         print(f"     Next: --agent extraction\n")
 
 

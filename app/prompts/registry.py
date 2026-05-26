@@ -33,6 +33,15 @@ _REGISTRY: dict[str, tuple[str, str]] = {
 _cache: dict[str, str] = {}
 
 
+def _langsmith_session():
+    """requests.Session with SSL verification disabled for LangSmith (Norton MITM on local dev)."""
+    import requests
+    session = requests.Session()
+    if os.getenv("LANGSMITH_VERIFY_SSL", "true").lower() == "false":
+        session.verify = False
+    return session
+
+
 @lru_cache(maxsize=1)
 def _langsmith_available() -> bool:
     """Returns True only if LANGSMITH_API_KEY is set and hub is reachable."""
@@ -40,7 +49,7 @@ def _langsmith_available() -> bool:
         return False
     try:
         from langsmith import Client
-        Client().list_prompts(limit=1)  # lightweight probe
+        Client(session=_langsmith_session()).list_prompts(limit=1)  # lightweight probe
         return True
     except Exception:
         return False
@@ -50,7 +59,7 @@ def _load_from_langsmith(identifier: str) -> str | None:
     """Pull prompt template from LangSmith Hub. Returns raw template string or None."""
     try:
         from langsmith import Client
-        prompt_obj = Client().pull_prompt(identifier)
+        prompt_obj = Client(session=_langsmith_session()).pull_prompt(identifier)
         # pull_prompt returns a LangChain PromptTemplate or ChatPromptTemplate
         if hasattr(prompt_obj, "template"):
             return prompt_obj.template
