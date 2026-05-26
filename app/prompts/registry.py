@@ -37,6 +37,11 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     # ── Extraction (Agent 03) ──────────────────────────────────────────────────
     "extraction/extract_facts":       ("extraction-extract-facts",       "extraction/extract_facts.yaml"),
     "extraction/retry_extract":       ("extraction-retry-extract",       "extraction/retry_extract.yaml"),
+
+    # ── Evaluation (Agent 04) ──────────────────────────────────────────────────
+    "evaluation/verify_threshold":    ("evaluation-verify-threshold",    "evaluation/verify_threshold.yaml"),
+    "evaluation/evaluate_check":      ("evaluation-evaluate-check",      "evaluation/evaluate_check.yaml"),
+    "evaluation/score_criterion":     ("evaluation-score-criterion",     "evaluation/score_criterion.yaml"),
 }
 
 # In-process cache: name → raw template string

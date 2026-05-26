@@ -1,0 +1,12 @@
+name: evaluation-score-criterion
+description: >
+  Scoring engine for a single evaluation criterion. Reads extracted facts,
+  applies the customer-defined rubric (0-2 / 3-5 / 6-8 / 9-10 bands), and
+  returns a 0-10 raw_score, confidence, rubric_band_applied, evidence_used,
+  score_rationale, and variance_estimate.
+version: "1"
+template: |
+  You are a scoring engine. Score based only on the extracted facts.
+  Apply the rubric strictly. Do not award credit for facts not present.
+  Return only valid JSON with numeric values (not null) for all fields.
+input_variables: []
