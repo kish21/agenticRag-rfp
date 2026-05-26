@@ -51,19 +51,48 @@ def _extraction_completeness(
     extracted_facts: list,
     extraction_targets: list[dict],
 ) -> float:
-    standard_populated = sum([
-        bool(certifications),
-        bool(insurance),
-        bool(slas),
-        bool(projects),
-        bool(pricing),
-    ])
+    """
+    Score based only on fact types the customer's evaluation actually requires.
+    Standard types not in extraction_targets are ignored — an HR evaluation
+    with no SLA requirements is not penalised for having zero SLA facts.
+    """
+    active_standard = {
+        t.get("fact_type") for t in extraction_targets
+        if t.get("fact_type") in ("certification", "insurance", "sla", "project", "pricing")
+    }
+
+    score = 0
+    total = 0
+
+    if "certification" in active_standard:
+        total += 1
+        if certifications:
+            score += 1
+    if "insurance" in active_standard:
+        total += 1
+        if insurance:
+            score += 1
+    if "sla" in active_standard:
+        total += 1
+        if slas:
+            score += 1
+    if "project" in active_standard:
+        total += 1
+        if projects:
+            score += 1
+    if "pricing" in active_standard:
+        total += 1
+        if pricing:
+            score += 1
+
     custom_targets = [t for t in extraction_targets if t.get("fact_type") == "custom"]
     found_target_ids = {f.target_id for f in extracted_facts}
-    custom_found = sum(1 for t in custom_targets if t["target_id"] in found_target_ids)
-    total = 5 + len(custom_targets)
-    achieved = standard_populated + custom_found
-    return round(achieved / total, 3) if total > 0 else 1.0
+    for t in custom_targets:
+        total += 1
+        if t["target_id"] in found_target_ids:
+            score += 1
+
+    return round(score / total, 3) if total > 0 else 1.0
 
 
 def _normalise(text: str) -> str:

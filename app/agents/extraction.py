@@ -47,14 +47,25 @@ async def run_extraction_agent(
 ) -> tuple[ExtractionOutput, object]:
     extraction_id = str(uuid.uuid4())
 
-    # Step 1: Build source context
+    # Step 1: Build source context — exclude boilerplate (legal disclaimers, T&Cs)
+    # so the LLM is not asked to extract facts from irrelevant legal text.
+    # Section type is shown in each chunk header so the LLM can prioritise
+    # requirement_response chunks over background ones.
+    relevant_chunks = [
+        c for c in retrieval_output.chunks
+        if c.section_type != "boilerplate"
+    ]
+    # Fall back to all chunks if filtering removed everything
+    if not relevant_chunks:
+        relevant_chunks = list(retrieval_output.chunks)
+
     source_chunks: dict[str, str] = {
         chunk.chunk_id: chunk.text
-        for chunk in retrieval_output.chunks
+        for chunk in relevant_chunks
     }
     context = "\n\n---\n\n".join(
-        f"[{chunk.chunk_id}]\n{chunk.text}"
-        for chunk in retrieval_output.chunks
+        f"[{chunk.chunk_id}] [{chunk.section_type}]\n{chunk.text}"
+        for chunk in relevant_chunks
     )
 
     if not context.strip():
