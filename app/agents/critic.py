@@ -300,6 +300,17 @@ def critic_after_comparator(output: ComparatorOutput) -> CriticOutput:
             "Cannot proceed to Decision Agent without a ranking."
         ))
 
+    missing = set(output.vendor_ids) - set(output.overall_ranking)
+    if missing:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "comparator_agent",
+            "vendors_missing_from_ranking",
+            f"{len(missing)} vendor(s) requested but absent from overall ranking",
+            f"missing_vendors={sorted(missing)}",
+            "Evaluation likely failed for these vendors. "
+            "Do not proceed to Decision Agent — ranking is incomplete. Escalate to human review."
+        ))
+
     if output.ranking_confidence < 0.5:
         flags.append(_make_flag(
             CriticSeverity.SOFT, "comparator_agent",

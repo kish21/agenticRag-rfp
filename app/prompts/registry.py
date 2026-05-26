@@ -42,6 +42,9 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "evaluation/verify_threshold":    ("evaluation-verify-threshold",    "evaluation/verify_threshold.yaml"),
     "evaluation/evaluate_check":      ("evaluation-evaluate-check",      "evaluation/evaluate_check.yaml"),
     "evaluation/score_criterion":     ("evaluation-score-criterion",     "evaluation/score_criterion.yaml"),
+
+    # ── Comparator (Agent 05) ──────────────────────────────────────────────────
+    "comparator/compare_criterion":   ("comparator-compare-criterion",   "comparator/compare_criterion.yaml"),
 }
 
 # In-process cache: name → raw template string

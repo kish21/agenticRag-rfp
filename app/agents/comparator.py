@@ -8,6 +8,7 @@ import json
 import uuid
 
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 from app.schemas.output_models import (
     ComparatorOutput,
     CriterionComparison,
@@ -16,7 +17,6 @@ from app.schemas.output_models import (
     VendorCriterionComparison,
 )
 from app.agents.critic import critic_after_comparator
-from app.db.fact_store import get_vendor_facts
 
 
 def _relative_position(rank: int, total: int) -> str:
@@ -59,14 +59,7 @@ async def _compare_criterion(
         for vid, score in vendor_scores.items()
     )
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a procurement comparator. Compare vendors on this criterion "
-                "based only on the scores and evidence provided. Identify what differentiates them.\n"
-                "Return only valid JSON."
-            ),
-        },
+        {"role": "system", "content": get_prompt("comparator/compare_criterion")},
         {
             "role": "user",
             "content": (
@@ -82,7 +75,10 @@ async def _compare_criterion(
         },
     ]
     raw = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
-    parsed = json.loads(raw)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = {"vendor_differentiators": {}, "distinguishing_factors": "", "comparison_confidence": 0.0}
 
     differentiators: dict[str, str] = parsed.get("vendor_differentiators", {})
     score_pairs = list(vendor_scores.items())
@@ -124,11 +120,13 @@ async def run_comparator_agent(
     comparison_id = str(uuid.uuid4())
     warnings: list[str] = []
 
-    # Get all vendors' facts from PostgreSQL in one pass
-    all_facts = {
-        vid: get_vendor_facts(org_id, vid, setup_id=evaluation_setup.setup_id)
-        for vid in vendor_ids
-    }
+    # Warn about vendors with no evaluation output — they will be absent from ranking
+    for vid in vendor_ids:
+        if vid not in evaluation_outputs:
+            warnings.append(
+                f"Vendor {vid} has no evaluation output — excluded from ranking. "
+                "Evaluation may have failed for this vendor."
+            )
 
     # Build score lookup: {vendor_id: {criterion_id: CriterionScore}}
     score_lookup: dict[str, dict[str, object]] = {
