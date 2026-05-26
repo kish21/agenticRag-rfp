@@ -123,6 +123,17 @@ def critic_after_retrieval(
             "mark as insufficient_evidence."
         ))
 
+    if not output.empty_retrieval and output.confidence < 0.4:
+        flags.append(_make_flag(
+            CriticSeverity.SOFT, "retrieval_agent",
+            "low_retrieval_confidence",
+            f"Retrieval confidence {output.confidence:.2f} is below 0.4 — "
+            "vendor document may not address this criterion",
+            f"confidence={output.confidence}, chunks={len(output.chunks)}",
+            "Review retrieved chunks manually. Consider broadening query or checking "
+            "if vendor document covers this requirement."
+        ))
+
     if not output.empty_retrieval:
         answer_bearing = [c for c in output.chunks if c.is_answer_bearing]
         if not answer_bearing:

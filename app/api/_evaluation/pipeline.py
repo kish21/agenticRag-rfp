@@ -7,7 +7,16 @@ import sqlalchemy as sa
 
 from app.infra.audit import audit
 from app.infra.logger import rfp_logger, DevLevel
-from app.schemas.output_models import EvaluationSetup, RetrievalOutput
+from app.schemas.output_models import EvaluationSetup, RetrievalOutput, CriticVerdict
+from app.domain.org_settings import get_org_settings
+from app.agents.critic import (
+    critic_after_ingestion,
+    critic_after_retrieval,
+    critic_after_evaluation,
+    critic_after_comparator,
+    critic_after_decision,
+    critic_after_explanation,
+)
 from app.db.fact_store import get_engine
 from app.agents.planner import run_planner
 from app.agents.ingestion import run_ingestion_agent
@@ -53,6 +62,12 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         if event_type:
             audit(org_id=org_id, run_id=run_id, event_type=event_type,
                   actor="system", agent=agent, detail={"message": message})
+
+    def _block_if_hard(critic, context: str) -> None:
+        """Raise RuntimeError if critic returned a HARD block so the outer except catches it."""
+        if critic.overall_verdict == CriticVerdict.BLOCKED:
+            hard_descs = [f.description for f in critic.flags if f.severity.value == "hard"]
+            raise RuntimeError(f"[CRITIC BLOCK] {context}: {'; '.join(hard_descs)}")
 
     def _fail(agent: str, err: Exception) -> None:
         rfp_logger.dev(DevLevel.ERROR, agent, f"Pipeline blocked: {err}",
@@ -106,6 +121,7 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
 
         vendor_file_map = _db_load_vendor_files(run_id)
         n_vendors = len(vendor_ids)
+        org_settings = get_org_settings(org_id)
 
         rfp_logger.dev(DevLevel.AGENT, "Pipeline",
                        f"Starting pipeline: {n_vendors} vendor(s), RFP '{rfp_title}'",
@@ -125,13 +141,28 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         # ── 2. Ingestion ───────────────────────────────────────────────────────
         _emit("ingestion", "running", f"Ingesting RFP + {len(vendor_file_map)} vendor docs",
               log_msg=f"Reading and indexing the RFP document plus {len(vendor_file_map)} vendor proposal{'s' if len(vendor_file_map) != 1 else ''}.")
-        await run_ingestion_agent(content=rfp_bytes, filename=rfp_filename,
-                                  vendor_id="rfp", org_id=org_id, rfp_id=rfp_id,
-                                  evaluation_setup=evaluation_setup)
+        _, rfp_ing_critics = await run_ingestion_agent(
+            content=rfp_bytes, filename=rfp_filename,
+            vendor_id="rfp", org_id=org_id, rfp_id=rfp_id,
+            evaluation_setup=evaluation_setup)
+        for c in rfp_ing_critics:
+            _block_if_hard(c, f"ingestion/{rfp_filename}")
+
         for vid, (vbytes, vfilename) in vendor_file_map.items():
-            await run_ingestion_agent(content=vbytes, filename=vfilename,
-                                      vendor_id=vid, org_id=org_id, rfp_id=rfp_id,
-                                      evaluation_setup=evaluation_setup)
+            _, ving_critics = await run_ingestion_agent(
+                content=vbytes, filename=vfilename,
+                vendor_id=vid, org_id=org_id, rfp_id=rfp_id,
+                evaluation_setup=evaluation_setup)
+            for c in ving_critics:
+                if c.overall_verdict.value in ("approved_with_warnings", "blocked"):
+                    rfp_logger.dev(DevLevel.INFO, "ingestion",
+                                   f"Vendor {vid} critic: {c.overall_verdict.value} "
+                                   f"— {len(c.flags)} flag(s)",
+                                   data={"vendor_id": vid,
+                                         "verdict": c.overall_verdict.value,
+                                         "flags": [f.check_name for f in c.flags]},
+                                   run_id=run_id, org_id=org_id)
+                _block_if_hard(c, f"ingestion/{vfilename} (vendor={vid})")
         _emit("ingestion", "done", f"RFP + {len(vendor_file_map)} vendor docs indexed",
               log_msg=f"All documents processed and indexed — {len(vendor_file_map)} vendor proposal{'s' if len(vendor_file_map) != 1 else ''} ready for analysis.")
 
@@ -151,11 +182,21 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             seen_chunk_ids: set[str] = set()
             merged_chunks: list = []
 
+            mandatory_names = {c.name for c in evaluation_setup.mandatory_checks}
             for query in queries:
-                ret_out, _ = await run_retrieval_agent(
+                ret_out, ret_critic = await run_retrieval_agent(
                     query=query, vendor_id=vid, org_id=org_id, rfp_id=rfp_id,
-                    use_hyde=False, use_rewriting=True, n_candidates=10, n_final=3,
+                    is_mandatory_check=(query in mandatory_names),
+                    org_settings=org_settings,
                 )
+                if ret_critic.overall_verdict.value != "approved":
+                    rfp_logger.dev(DevLevel.INFO, "retrieval",
+                                   f"Vendor {vid} query '{query[:60]}' critic: "
+                                   f"{ret_critic.overall_verdict.value}",
+                                   data={"vendor_id": vid,
+                                         "verdict": ret_critic.overall_verdict.value,
+                                         "flags": [f.check_name for f in ret_critic.flags]},
+                                   run_id=run_id, org_id=org_id)
                 for chunk in ret_out.chunks:
                     if chunk.chunk_id not in seen_chunk_ids:
                         seen_chunk_ids.add(chunk.chunk_id)
@@ -175,6 +216,8 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
                 empty_retrieval=len(merged_chunks) == 0,
                 warnings=[],
             )
+            combined_critic = critic_after_retrieval(combined, is_mandatory=False)
+            _block_if_hard(combined_critic, f"retrieval/combined vendor={vid}")
             retrieval_outputs[vid] = combined
             rfp_logger.dev(DevLevel.RAG, "retrieval",
                            f"Vendor {vid}: {len(merged_chunks)} unique chunks from {len(queries)} queries",
@@ -223,29 +266,55 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
               log_msg=f"Scoring each vendor against your {len(evaluation_setup.scoring_criteria)} criteria with their configured weights.")
         evaluation_outputs: dict = {}
         for vid in vendor_ids:
-            ev_out, _ = await run_evaluation_agent(vendor_id=vid, org_id=org_id,
-                                                    run_id=run_id,
-                                                    evaluation_setup=evaluation_setup,
-                                                    extraction_output=extraction_outputs.get(vid))
+            ev_out, ev_critic = await run_evaluation_agent(
+                vendor_id=vid, org_id=org_id, run_id=run_id,
+                evaluation_setup=evaluation_setup,
+                extraction_output=extraction_outputs.get(vid))
             evaluation_outputs[vid] = ev_out
+            if ev_critic.overall_verdict.value != "approved":
+                rfp_logger.dev(DevLevel.INFO, "evaluation",
+                               f"Vendor {vid} critic: {ev_critic.overall_verdict.value} "
+                               f"— {len(ev_critic.flags)} flag(s)",
+                               data={"vendor_id": vid,
+                                     "verdict": ev_critic.overall_verdict.value,
+                                     "flags": [f.check_name for f in ev_critic.flags]},
+                               run_id=run_id, org_id=org_id)
+            _block_if_hard(ev_critic, f"evaluation/vendor={vid}")
         _emit("evaluation", "done", "All vendors scored",
               log_msg=f"All {n_vendors} vendors scored. Scores ready for comparison.")
 
         # ── 6. Comparator ──────────────────────────────────────────────────────
         _emit("comparator", "running", "Cross-vendor ranking and stability check",
               log_msg="Ranking vendors against each other and checking whether the ranking is stable across scoring variations.")
-        comp_out, _ = await run_comparator_agent(vendor_ids=vendor_ids, org_id=org_id,
-                                                  rfp_id=rfp_id, evaluation_setup=evaluation_setup,
-                                                  evaluation_outputs=evaluation_outputs)
+        comp_out, comp_critic = await run_comparator_agent(
+            vendor_ids=vendor_ids, org_id=org_id, rfp_id=rfp_id,
+            evaluation_setup=evaluation_setup, evaluation_outputs=evaluation_outputs)
+        _block_if_hard(comp_critic, "comparator")
+        if comp_critic.overall_verdict.value != "approved":
+            rfp_logger.dev(DevLevel.INFO, "comparator",
+                           f"Comparator critic: {comp_critic.overall_verdict.value} "
+                           f"— {len(comp_critic.flags)} flag(s)",
+                           data={"verdict": comp_critic.overall_verdict.value,
+                                 "flags": [f.check_name for f in comp_critic.flags]},
+                           run_id=run_id, org_id=org_id)
         _emit("comparator", "done", "Vendors ranked",
               log_msg="Final vendor ranking confirmed.")
 
         # ── 7. Decision ────────────────────────────────────────────────────────
         _emit("decision", "running", "Governance routing and approval tier selection",
               log_msg="Applying your organisation's governance rules to determine the approval tier and required approvers.")
-        dec_out, _ = await run_decision_agent(evaluation_outputs=evaluation_outputs,
-                                               comparator_output=comp_out,
-                                               contract_value=contract_value)
+        dec_out, dec_critic = await run_decision_agent(
+            evaluation_outputs=evaluation_outputs,
+            comparator_output=comp_out,
+            contract_value=contract_value)
+        _block_if_hard(dec_critic, "decision")
+        if dec_critic.overall_verdict.value != "approved":
+            rfp_logger.dev(DevLevel.INFO, "decision",
+                           f"Decision critic: {dec_critic.overall_verdict.value} "
+                           f"— {len(dec_critic.flags)} flag(s)",
+                           data={"verdict": dec_critic.overall_verdict.value,
+                                 "flags": [f.check_name for f in dec_critic.flags]},
+                           run_id=run_id, org_id=org_id)
         n_short = len(getattr(dec_out, "shortlisted_vendors", []) or [])
         n_rej   = len(getattr(dec_out, "rejected_vendors",    []) or [])
         _emit("decision", "done", "Decision and approval tier set",
@@ -254,17 +323,32 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         # ── 8. Explanation ─────────────────────────────────────────────────────
         _emit("explanation", "running", "Generating grounded report",
               log_msg="Writing the evaluation report — every recommendation is backed by a direct quote from the vendor proposals.")
-        exp_out, _ = await run_explanation_agent(decision_output=dec_out,
-                                                  evaluation_outputs=evaluation_outputs,
-                                                  extraction_outputs=extraction_outputs,
-                                                  source_chunks=source_chunks,
-                                                  currency=currency)
+        exp_out, exp_critic = await run_explanation_agent(
+            decision_output=dec_out,
+            evaluation_outputs=evaluation_outputs,
+            extraction_outputs=extraction_outputs,
+            source_chunks=source_chunks,
+            currency=currency)
+        _block_if_hard(exp_critic, "explanation")
         _emit("explanation", "done", "Report ready — every claim cited",
               log_msg="Evaluation complete. Full report ready with citations for every finding.")
 
-        # ── 9. Critic ──────────────────────────────────────────────────────────
-        _emit("critic", "done", "All agent outputs validated",
-              log_msg="Independent quality check passed — all findings verified for accuracy and consistency.")
+        # ── 9. Critic — final summary across all agents ────────────────────────
+        # Individual critics ran inline after each agent above and blocked on hard flags.
+        # Here we collect soft warnings and emit a final summary for the audit log.
+        all_critics = [comp_critic, dec_critic, exp_critic]
+        all_critics += [ev_critic for ev_critic in
+                        [evaluation_outputs.get(vid) for vid in vendor_ids]
+                        if ev_critic is not None and hasattr(ev_critic, "flags")]
+        total_soft = sum(c.soft_flag_count for c in all_critics if hasattr(c, "soft_flag_count"))
+        critic_summary_msg = (
+            f"All agents passed — {total_soft} soft warning(s) noted in logs"
+            if total_soft == 0 or total_soft > 0
+            else "All agent outputs validated"
+        )
+        _emit("critic", "done", critic_summary_msg,
+              log_msg=f"Independent quality check complete — {total_soft} soft flag(s) logged. "
+                      f"No hard blocks reached this step.")
 
         _db_save_decision(run_id, dec_out.model_dump(mode="json"))
         rfp_logger.end_run(run_id=run_id, org_id=org_id, status="complete",
