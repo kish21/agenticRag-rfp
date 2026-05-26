@@ -151,6 +151,11 @@ export default function SignupPage() {
               : "Create your administrator account for this workspace."}
           </p>
 
+          {/* aria-live region so screen readers announce errors set via setError() */}
+          <div role="alert" aria-live="polite" aria-atomic="true" style={{ display: error ? undefined : "none" }}>
+            {error}
+          </div>
+
           {step === 1 && (
             <Step1Form
               orgName={orgName}
