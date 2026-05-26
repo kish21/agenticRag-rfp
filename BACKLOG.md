@@ -250,6 +250,38 @@ Product features and ideas captured during development. Not scheduled — review
 
 ---
 
+### AI-006 — Dual Evaluation Mode (Pipeline vs LLM Direct)
+**Summary:** Add a product-level configuration setting `evaluation_mode: pipeline | llm_direct` in org settings. In `llm_direct` mode, the full vendor document text + evaluation criteria are sent to the LLM in a single call. The prompt enforces grounding quotes (exact verbatim sentences from the document) so auditability is identical to pipeline mode. The Critic still runs on the output and verifies every grounding quote appears in the source text. The audit log, approval workflow, and PostgreSQL storage are unchanged — both modes produce the same Pydantic output models.
+
+**Why this mode exists:**
+- Faster — one LLM call instead of 9 agent steps (~30–60 seconds vs ~3–5 minutes)
+- Simpler — no Qdrant, no retrieval, no reranking needed
+- Right for smaller documents, faster decisions, less regulated industries
+
+**Real tradeoffs (not auditability — both modes are equally auditable with a good prompt):**
+
+| | Pipeline | LLM direct |
+|---|---|---|
+| Cost | Lower — small focused chunks | Higher — full document in context |
+| Speed | Slower — many steps | Faster — one call |
+| Document size | Unlimited | ~150 pages max (context window limit) |
+| Accuracy on large docs | Better — retrieval focuses on relevant sections | Degrades past ~100 pages |
+
+**Key design rule:** The grounding requirement is enforced by the prompt, not by the architecture. LLM direct mode must instruct the LLM: "For every score, copy the exact sentence from the document that justifies it — do not paraphrase." The Critic then verifies the quote appears verbatim in the source.
+
+**Where it lands:**
+- `app/config/platform.yaml` + `app/domain/org_settings.py` — add `evaluation_mode` setting
+- `app/api/_evaluation/pipeline.py` — branch on mode: run full pipeline OR single LLM call
+- `app/prompts/` — new `evaluation/llm_direct_evaluate.yaml` prompt with grounding instructions
+- `app/api/org_settings_routes.py` — expose setting in org settings API
+- Frontend settings page — toggle for evaluation mode
+
+**Default:** `pipeline` — current behaviour unchanged until customer explicitly switches.
+
+**Priority:** Medium — strong product differentiator, not needed for pilot.
+
+---
+
 ### AI-004 — Scoring Bias Detection
 **Summary:** Test whether the scoring agent gives systematically different scores for identical content when the vendor name is changed (e.g. "Acme Corp" vs "TechNova Ltd"). Bias in automated scoring is a regulatory risk in procurement.
 
