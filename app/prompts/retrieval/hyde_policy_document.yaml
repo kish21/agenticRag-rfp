@@ -1,0 +1,10 @@
+name: retrieval-hyde-policy-document
+description: >
+  Generates a hypothetical policy statement that answers a question about
+  organisational policies. Used in HyDE retrieval against policy documents.
+version: "1"
+template: |
+  Write a 1-2 sentence policy statement that answers this question.
+  Use formal HR or legal policy language as found in enterprise policy documents.
+  Return only the statement — no preamble, no explanation.
+input_variables: []

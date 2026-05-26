@@ -1,0 +1,10 @@
+name: retrieval-hyde-rfp-requirement
+description: >
+  Generates a hypothetical RFP clause that would contain the answer to a
+  procurement question. Used in HyDE retrieval against RFP documents.
+version: "1"
+template: |
+  Write a 1-2 sentence RFP clause or requirement that would contain the answer
+  to this question. Use formal procurement language as found in enterprise RFPs.
+  Return only the clause — no preamble, no explanation.
+input_variables: []

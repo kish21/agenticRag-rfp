@@ -22,11 +22,21 @@ _PROMPTS_DIR = Path(__file__).parent
 # Map short names → (langsmith_identifier, local_yaml_file)
 # Key format: "agent/prompt_name"  matches LangSmith Hub namespace: meridian/agent/prompt-name
 _REGISTRY: dict[str, tuple[str, str]] = {
-    # ── Setup (pre-agent) ──────────────────────────────────────────────────────
+    # ── Setup (Agent 00) ───────────────────────────────────────────────────────
     "setup/extract_rfp_criteria":    ("setup-extract-rfp-criteria",    "setup/extract_rfp_criteria.yaml"),
     "setup/generate_score_guides":   ("setup-generate-score-guides",   "setup/generate_score_guides.yaml"),
     "setup/suggest_mandatory_checks":("setup-suggest-mandatory-checks","setup/suggest_mandatory_checks.yaml"),
     "setup/interpret_criteria_sheet":("setup-interpret-criteria-sheet","setup/interpret_criteria_sheet.yaml"),
+
+    # ── Retrieval (Agent 02) ───────────────────────────────────────────────────
+    "retrieval/rewrite_query":        ("retrieval-rewrite-query",        "retrieval/rewrite_query.yaml"),
+    "retrieval/hyde_vendor_response": ("retrieval-hyde-vendor-response", "retrieval/hyde_vendor_response.yaml"),
+    "retrieval/hyde_rfp_requirement": ("retrieval-hyde-rfp-requirement", "retrieval/hyde_rfp_requirement.yaml"),
+    "retrieval/hyde_policy_document": ("retrieval-hyde-policy-document", "retrieval/hyde_policy_document.yaml"),
+
+    # ── Extraction (Agent 03) ──────────────────────────────────────────────────
+    "extraction/extract_facts":       ("extraction-extract-facts",       "extraction/extract_facts.yaml"),
+    "extraction/retry_extract":       ("extraction-retry-extract",       "extraction/retry_extract.yaml"),
 }
 
 # In-process cache: name → raw template string

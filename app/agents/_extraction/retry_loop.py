@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from app.config import settings
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 from app.schemas.output_models import EvaluationSetup
 
 from .parsing import (
@@ -130,22 +131,15 @@ async def run_extraction_critic_retries(
         wrong_summary = "; ".join(wrong_value_parts[:3])
         missing_summary = high_conf_fails[0]
 
-        retry_system = (
-            "You are a structured fact extraction engine for enterprise vendor documents.\n"
-            "CRITICAL: The previous extraction FAILED for this criterion:\n"
-            f"  Criterion: {criterion_name}\n"
-            f"  Requires: {what_passes}\n"
-            f"  Previous extraction returned: {wrong_summary}\n"
-            f"  What was wrong: {missing_summary}\n\n"
-            f"Find the PRIMARY statement of '{criterion_name}' in the passages. "
-            "Do NOT extract adjacent or referenced facts — only the primary statement "
-            "that directly satisfies the criterion.\n\n"
-            "Rules:\n"
-            "1. grounding_quote must be the EXACT verbatim sentence that is the primary statement.\n"
-            "2. source_chunk_id must match the [chunk_id] shown in context headers.\n"
-            "3. Only extract what is explicitly stated. Do not infer.\n\n"
-            f"Return ONLY a JSON object with a '{response_key}' array:\n"
-            + _focused_schema(fact_type)
+        retry_system = get_prompt(
+            "extraction/retry_extract",
+            criterion_name=criterion_name,
+            what_passes=what_passes,
+            wrong_summary=wrong_summary,
+            missing_summary=missing_summary,
+            target_desc="",
+            response_key=response_key,
+            schema=_focused_schema(fact_type),
         )
 
         try:
@@ -277,22 +271,15 @@ async def run_extraction_critic_retries(
         wrong_summary_c = "; ".join(wrong_value_parts_c[:3])
         missing_summary_c = high_conf_fails_c[0]
 
-        retry_system_c = (
-            "You are a structured fact extraction engine for enterprise vendor documents.\n"
-            "CRITICAL: The previous extraction FAILED for this criterion:\n"
-            f"  Criterion: {criterion_name}\n"
-            f"  Target: {tgt.name} — {tgt.description}\n"
-            f"  Requires: {what_passes}\n"
-            f"  Previous extraction returned: {wrong_summary_c}\n"
-            f"  What was wrong: {missing_summary_c}\n\n"
-            f"Find the PRIMARY statement satisfying '{criterion_name}' in the passages. "
-            "Do NOT extract adjacent or referenced facts.\n\n"
-            "Rules:\n"
-            "1. grounding_quote must be the EXACT verbatim sentence from the source.\n"
-            "2. source_chunk_id must match the [chunk_id] shown in context headers.\n"
-            "3. Only extract what is explicitly stated.\n\n"
-            "Return ONLY a JSON object using this schema:\n"
-            + _focused_schema("custom", target_id=target_id)
+        retry_system_c = get_prompt(
+            "extraction/retry_extract",
+            criterion_name=criterion_name,
+            what_passes=what_passes,
+            wrong_summary=wrong_summary_c,
+            missing_summary=missing_summary_c,
+            target_desc=f"  Target: {tgt.name} - {tgt.description}\n",
+            response_key="extracted_facts",
+            schema=_focused_schema("custom", target_id=target_id),
         )
 
         try:
@@ -474,22 +461,15 @@ async def run_extraction_critic_retries(
                 retry_schema_sc = _focused_schema(tgt.fact_type)
                 target_desc_sc = ""
 
-            retry_system_sc = (
-                "You are a structured fact extraction engine for enterprise vendor documents.\n"
-                "CRITICAL: The previous extraction FAILED for this scoring criterion:\n"
-                f"  Criterion: {sc_criterion_name}\n"
-                f"{target_desc_sc}"
-                f"  Excellent evidence looks like: {sc_what_passes}\n"
-                f"  Previous extraction returned: {wrong_summary_sc}\n"
-                f"  What was wrong: {missing_summary_sc}\n\n"
-                f"Find the PRIMARY statement satisfying '{sc_criterion_name}' in the passages. "
-                "Do NOT extract adjacent or referenced facts.\n\n"
-                "Rules:\n"
-                "1. grounding_quote must be the EXACT verbatim sentence from the source.\n"
-                "2. source_chunk_id must match the [chunk_id] shown in context headers.\n"
-                "3. Only extract what is explicitly stated.\n\n"
-                "Return ONLY a JSON object using this schema:\n"
-                + retry_schema_sc
+            retry_system_sc = get_prompt(
+                "extraction/retry_extract",
+                criterion_name=sc_criterion_name,
+                what_passes=sc_what_passes,
+                wrong_summary=wrong_summary_sc,
+                missing_summary=missing_summary_sc,
+                target_desc=target_desc_sc,
+                response_key=response_key_sc,
+                schema=retry_schema_sc,
             )
 
             try:

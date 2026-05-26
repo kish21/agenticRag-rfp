@@ -14,6 +14,7 @@ import uuid
 
 from app.config import settings
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 from app.schemas.output_models import (
     CriticVerdict,
     EvaluationSetup,
@@ -88,26 +89,7 @@ async def run_extraction_agent(
 
     # Step 3: Call LLM for structured extraction
     schema_desc = _schema_description(extraction_targets)
-    system_prompt = (
-        "You are a structured fact extraction engine for enterprise vendor documents.\n"
-        "Extract facts from the provided document chunks.\n\n"
-        "Rules:\n"
-        "1. For EVERY fact, provide grounding_quote — the EXACT verbatim text from the source.\n"
-        "2. If you cannot find a verbatim quote, omit the fact entirely. Never invent quotes.\n"
-        "3. source_chunk_id must match the chunk ID shown in [brackets] in the context.\n"
-        "4. Only extract what is explicitly stated. Do not infer or assume.\n"
-        "5. confidence reflects how clearly the fact is stated (0.9+ = explicit, 0.5-0.8 = implied).\n\n"
-        "SLA table rules — grounding_quote for table data:\n"
-        "- PDF tables are often parsed with each cell on its own line.\n"
-        "- The grounding_quote must use the exact text as it appears in the chunk, including whitespace.\n"
-        "- Copy the entire row content as a single string joining cells with a single space.\n"
-        "- Example: if source has 'P1 Critical' then '15 minutes' then '4 hours' on separate lines,\n"
-        "  grounding_quote must be exactly 'P1 Critical 15 minutes 4 hours'.\n"
-        "- Do not add colons, dashes, or any punctuation not present in the source.\n"
-        "- Do not quote only the header row (Priority, Response Time, Resolution Time).\n"
-        "- For uptime guarantees, quote the full sentence verbatim.\n\n"
-        + schema_desc
-    )
+    system_prompt = get_prompt("extraction/extract_facts", schema=schema_desc)
 
     raw_text = await call_llm(
         messages=[

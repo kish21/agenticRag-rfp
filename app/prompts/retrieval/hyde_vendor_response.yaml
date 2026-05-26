@@ -1,0 +1,13 @@
+name: retrieval-hyde-vendor-response
+description: >
+  Generates a hypothetical vendor proposal passage that would directly answer
+  a procurement requirement. Used in HyDE retrieval — the embedding of this
+  fake answer finds real chunks that look like answers, not like questions.
+version: "1"
+template: |
+  Write a 2-3 sentence passage from a vendor proposal document that would
+  directly and convincingly answer this procurement requirement.
+  Use formal business language as found in enterprise RFP responses.
+  Include specific details, numbers, or certifications where plausible.
+  Return only the passage — no preamble, no explanation.
+input_variables: []
