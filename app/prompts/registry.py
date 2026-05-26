@@ -48,6 +48,9 @@ _REGISTRY: dict[str, tuple[str, str]] = {
 
     # ── Decision (Agent 06) ───────────────────────────────────────────────────
     "decision/extract_evidence":      ("decision-extract-evidence",      "decision/extract_evidence.yaml"),
+
+    # ── Explanation (Agent 07) ────────────────────────────────────────────────
+    "explanation/generate_narrative": ("explanation-generate-narrative", "explanation/generate_narrative.yaml"),
 }
 
 # In-process cache: name → raw template string

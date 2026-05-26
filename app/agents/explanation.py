@@ -13,6 +13,7 @@ import re
 import uuid
 
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 from pydantic import ValidationError
 from app.schemas.output_models import (
     ExplanationOutput, VendorNarrative, GroundedClaim,
@@ -78,36 +79,7 @@ async def _generate_vendor_narrative(
         )
 
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are writing a formal procurement evaluation report section.\n"
-                "Generate a structured narrative for this vendor.\n\n"
-                "RULES:\n"
-                "- Every factual claim MUST include a grounding_quote — an exact phrase "
-                "from the source text below.\n"
-                "- Do NOT invent facts. Only state what is in the source text.\n"
-                "- Return JSON only, no prose.\n\n"
-                "Return this exact structure:\n"
-                "{\n"
-                '  "executive_summary": "2-3 sentence summary",\n'
-                '  "compliance_narrative": "paragraph on mandatory check results",\n'
-                '  "scoring_narrative": "paragraph on scoring performance",\n'
-                '  "recommendation_rationale": "1-2 sentence rationale",\n'
-                '  "grounded_claims": [\n'
-                "    {\n"
-                '      "claim_text": "the claim being made",\n'
-                '      "grounding_quote": "exact phrase from source text",\n'
-                '      "source_chunk_id": "chunk-id from source",\n'
-                '      "source_filename": "filename",\n'
-                '      "source_page": 1,\n'
-                '      "confidence": 0.0\n'
-                "    }\n"
-                "  ]\n"
-                "}\n"
-                "Respond with only valid JSON, no prose."
-            ),
-        },
+        {"role": "system", "content": get_prompt("explanation/generate_narrative")},
         {
             "role": "user",
             "content": (
@@ -183,6 +155,8 @@ def _build_fact_context(extraction: ExtractionOutput, currency: str = "GBP") -> 
             lines.append(f"Pricing: {_fmt_currency(amt, currency)}/yr")
         else:
             lines.append(f"Pricing: {price.description or 'amount not specified'}")
+    for fact in extraction.extracted_facts:
+        lines.append(f"Custom fact [{fact.target_id}]: {fact.value}")
     return "\n".join(lines) if lines else "No extracted facts available."
 
 
@@ -197,9 +171,7 @@ def _build_compliance_summary(evaluation: EvaluationOutput) -> str:
 
 
 def _format_chunks(source_chunks: dict[str, str]) -> str:
-    parts = []
-    for chunk_id, text in list(source_chunks.items())[:10]:
-        parts.append(f"[{chunk_id}]\n{text[:400]}")
+    parts = [f"[{chunk_id}]\n{text}" for chunk_id, text in source_chunks.items()]
     return "\n\n".join(parts) if parts else "No source chunks."
 
 
@@ -227,6 +199,17 @@ async def run_explanation_agent(
             extraction_id="empty", vendor_id=vendor_id, org_id="",
             source_chunk_ids=[], extraction_completeness=0.0, hallucination_risk=0.0
         ))
+
+        # Filter source chunks to only this vendor's chunks — prevents cross-vendor
+        # contamination in the LLM context and grounding checks
+        vendor_chunks = {
+            cid: source_chunks[cid]
+            for cid in extraction.source_chunk_ids
+            if cid in source_chunks
+        }
+        if not vendor_chunks:
+            vendor_chunks = source_chunks  # fallback if extraction has no chunk IDs
+
         is_rejected = any(r.vendor_id == vendor_id for r in decision_output.rejected_vendors)
 
         narrative = await _generate_vendor_narrative(
@@ -235,7 +218,7 @@ async def run_explanation_agent(
             is_rejected=is_rejected,
             evaluation=evaluation,
             extraction=extraction,
-            source_chunks=source_chunks,
+            source_chunks=vendor_chunks,
             decision_output=decision_output,
             currency=currency,
         )
@@ -248,7 +231,7 @@ async def run_explanation_agent(
     )
     grounded_claims = sum(len(n.grounded_claims) for n in vendor_narratives)
     grounding_completeness = (
-        grounded_claims / total_claims if total_claims > 0 else 1.0
+        grounded_claims / total_claims if total_claims > 0 else 0.0
     )
 
     methodology_note = (
@@ -259,10 +242,19 @@ async def run_explanation_agent(
     )
 
     limitations = []
+    if total_claims == 0:
+        limitations.append(
+            "No grounded claims were produced for any vendor — "
+            "narratives may be empty. Check source chunks and re-run."
+        )
     for n in vendor_narratives:
         if n.ungrounded_claims_removed > 0:
             limitations.append(
                 f"{n.vendor_id}: {n.ungrounded_claims_removed} unverified claim(s) removed."
+            )
+        if len(n.grounded_claims) == 0:
+            limitations.append(
+                f"{n.vendor_id}: zero grounded claims — narrative has no verifiable content."
             )
 
     output = ExplanationOutput(

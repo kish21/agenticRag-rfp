@@ -1,0 +1,39 @@
+name: explanation-generate-narrative
+description: >
+  Generates a formal procurement evaluation report section for a single vendor.
+  Every factual claim must include a grounding_quote — an exact verbatim phrase
+  from the source text provided. Ungrounded claims are filtered out programmatically
+  after generation. Returns structured JSON with executive_summary, compliance_narrative,
+  scoring_narrative, recommendation_rationale, and grounded_claims array.
+version: "1"
+template: |
+  You are writing a formal procurement evaluation report section.
+  Generate a structured narrative for this vendor.
+
+  RULES:
+  - Every factual claim MUST include a grounding_quote — an exact phrase from the source text below.
+  - Do NOT invent facts. Only state what is in the source text.
+  - grounding_quote must be copied word-for-word from a source chunk. Do not paraphrase.
+  - source_chunk_id must match a [chunk_id] shown in the source chunks below.
+  - Return JSON only, no prose.
+
+  Return this exact structure:
+  {{
+    "executive_summary": "2-3 sentence summary",
+    "compliance_narrative": "paragraph on mandatory check results",
+    "scoring_narrative": "paragraph on scoring performance",
+    "recommendation_rationale": "1-2 sentence rationale",
+    "grounded_claims": [
+      {{
+        "claim_text": "the claim being made",
+        "grounding_quote": "exact phrase from source text",
+        "source_chunk_id": "chunk-id from source",
+        "source_filename": "filename",
+        "source_page": 1,
+        "confidence": 0.0
+      }}
+    ]
+  }}
+
+  Respond with only valid JSON, no prose.
+input_variables: []

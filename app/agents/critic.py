@@ -413,7 +413,24 @@ def critic_after_explanation(
         ))
 
     for narrative in output.vendor_narratives:
-        if narrative.ungrounded_claims_removed > 3:
+        if len(narrative.grounded_claims) == 0 and narrative.ungrounded_claims_removed == 0:
+            flags.append(_make_flag(
+                CriticSeverity.HARD, "explanation_agent",
+                "empty_narrative",
+                f"Vendor {narrative.vendor_id} has zero claims — LLM produced no narrative content",
+                f"vendor={narrative.vendor_id}",
+                "LLM failed to generate any claims. Check source chunks and retry."
+            ))
+        elif len(narrative.grounded_claims) == 0 and narrative.ungrounded_claims_removed > 0:
+            flags.append(_make_flag(
+                CriticSeverity.HARD, "explanation_agent",
+                "all_claims_ungrounded",
+                f"All {narrative.ungrounded_claims_removed} claims for {narrative.vendor_id} "
+                "failed grounding verification — no verifiable content remains",
+                f"vendor={narrative.vendor_id}, removed={narrative.ungrounded_claims_removed}",
+                "LLM is hallucinating. Source chunks may be insufficient. Do not publish report."
+            ))
+        elif narrative.ungrounded_claims_removed > 3:
             flags.append(_make_flag(
                 CriticSeverity.SOFT, "explanation_agent",
                 "many_claims_removed",
