@@ -9,7 +9,7 @@ from app.schemas.output_models import (
     CriticOutput, CriticFlag, CriticSeverity, CriticVerdict,
     RetrievalOutput, ExtractionOutput, EvaluationOutput,
     ComparatorOutput, DecisionOutput, ExplanationOutput,
-    IngestionOutput
+    IngestionOutput, PlannerOutput,
 )
 
 
@@ -49,6 +49,51 @@ def _verdict(flags: list[CriticFlag]) -> CriticVerdict:
     if soft:
         return CriticVerdict.APPROVED_WITH_WARNINGS
     return CriticVerdict.APPROVED
+
+
+def critic_after_planner(
+    output: PlannerOutput,
+    validation_errors: list[str],
+) -> CriticOutput:
+    flags = []
+
+    if not output.vendor_ids:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "planner_agent",
+            "no_vendors",
+            "Plan contains no vendor IDs — nothing to evaluate",
+            "vendor_ids=[]",
+            "Provide at least one vendor ID before running evaluation."
+        ))
+
+    if not output.tasks:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "planner_agent",
+            "empty_plan",
+            "Plan contains no tasks",
+            f"plan_id={output.plan_id}",
+            "Plan generation failed. Check evaluation_setup is complete."
+        ))
+
+    for error in validation_errors:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "planner_agent",
+            "plan_validation_error",
+            error,
+            f"plan_id={output.plan_id}",
+            "Fix evaluation_setup before proceeding — plan does not cover all requirements."
+        ))
+
+    return CriticOutput(
+        critic_run_id=str(uuid.uuid4()),
+        evaluated_agent="planner_agent",
+        evaluated_output_id=output.plan_id,
+        flags=flags,
+        hard_flag_count=sum(1 for f in flags if f.severity == CriticSeverity.HARD),
+        soft_flag_count=sum(1 for f in flags if f.severity == CriticSeverity.SOFT),
+        overall_verdict=_verdict(flags),
+        requires_human_review=any(f.severity == CriticSeverity.HARD for f in flags),
+    )
 
 
 def critic_after_ingestion(output: IngestionOutput) -> CriticOutput:

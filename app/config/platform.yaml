@@ -42,6 +42,7 @@ infrastructure:
   retrieval_critic_confidence_floor: 0.6
   extraction_critic_max_retries: 1
   extraction_critic_confidence_floor: 0.7
+  task_duration_estimate_seconds: 30
 
 retrieval_critic_prompt: |
   You are evaluating whether a set of retrieved document passages

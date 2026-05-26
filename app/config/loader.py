@@ -67,6 +67,7 @@ class PlatformInfra(BaseModel):
     retrieval_critic_confidence_floor: float
     extraction_critic_max_retries: int
     extraction_critic_confidence_floor: float
+    task_duration_estimate_seconds: int
 
 class PlatformGovernanceTier(BaseModel):
     tier: int
