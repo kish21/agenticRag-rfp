@@ -172,11 +172,12 @@ async def run_retrieval_agent(
     if use_hybrid_search:
         raw_results = search_hybrid(
             collection=coll,
-            query_text=retrieval_text,
+            query_text=query,           # always original query for sparse/BM25
             org_id=org_id,
             vendor_id=vendor_id,
             limit=n_candidates,
             dense_vector=retrieval_vector,
+            section_type_filter=section_type_filter,
         )
     else:
         raw_results = search_dense(

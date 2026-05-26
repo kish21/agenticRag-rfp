@@ -151,6 +151,7 @@ def search_hybrid(
     vendor_id: str,
     limit: int,
     dense_vector: list[float] | None = None,
+    section_type_filter: str = None,
 ) -> list[dict]:
     """
     Hybrid retrieval combining dense semantic and sparse lexical signals
@@ -179,6 +180,13 @@ def search_hybrid(
         FieldCondition(key="org_id", match=MatchValue(value=org_id)),
         FieldCondition(key="vendor_id", match=MatchValue(value=vendor_id)),
     ]
+    if section_type_filter:
+        must_conditions.append(
+            FieldCondition(
+                key="section_type",
+                match=MatchValue(value=section_type_filter)
+            )
+        )
     qfilter = Filter(must=must_conditions)
 
     prefetch = [
