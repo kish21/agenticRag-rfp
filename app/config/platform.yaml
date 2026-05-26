@@ -106,6 +106,32 @@ extraction_critic_prompt: |
     "should_retry": <true if re-extracting with a more focused prompt could find the correct fact, false if the source passage simply does not contain it>
   }}
 
+governance:
+  # Approval tiers: contract_value is in GBP. max_value: null means no upper limit.
+  approval_tiers:
+    - tier: 1
+      approver_role: department_head
+      max_value: 100000
+      sla_hours: 24
+    - tier: 2
+      approver_role: regional_director
+      max_value: 500000
+      sla_hours: 48
+    - tier: 3
+      approver_role: cfo
+      max_value: 1000000
+      sla_hours: 72
+    - tier: 4
+      approver_role: board
+      max_value: null
+      sla_hours: 120
+  # Recommendation thresholds: raw 0-10 score bands
+  recommendation_thresholds:
+    strongly_recommended: 8.0
+    recommended: 6.0
+    acceptable: 4.0
+    marginal: 0.0
+
 hyde_templates:
   vendor_response: |
     Write a 2-3 sentence passage from a vendor response document

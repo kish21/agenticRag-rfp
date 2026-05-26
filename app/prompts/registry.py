@@ -45,6 +45,9 @@ _REGISTRY: dict[str, tuple[str, str]] = {
 
     # ── Comparator (Agent 05) ──────────────────────────────────────────────────
     "comparator/compare_criterion":   ("comparator-compare-criterion",   "comparator/compare_criterion.yaml"),
+
+    # ── Decision (Agent 06) ───────────────────────────────────────────────────
+    "decision/extract_evidence":      ("decision-extract-evidence",      "decision/extract_evidence.yaml"),
 }
 
 # In-process cache: name → raw template string

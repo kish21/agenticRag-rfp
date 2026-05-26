@@ -356,6 +356,17 @@ def critic_after_decision(output: DecisionOutput) -> CriticOutput:
                 "Find evidence or change decision."
             ))
 
+    if output.requires_human_review and output.review_reasons:
+        for reason in output.review_reasons:
+            if "insufficient evidence" in reason.lower():
+                flags.append(_make_flag(
+                    CriticSeverity.SOFT, "decision_agent",
+                    "shortlisted_vendor_unresolved_checks",
+                    reason,
+                    f"vendor has mandatory checks with insufficient_evidence status",
+                    "Flag in report. Approver must confirm these checks before award."
+                ))
+
     if not output.shortlisted_vendors and output.rejected_vendors:
         flags.append(_make_flag(
             CriticSeverity.HARD, "decision_agent",

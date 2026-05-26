@@ -9,59 +9,48 @@ Pipeline:
 5. Hard block (escalate) if all vendors rejected
 6. Critic check
 """
+import json
 import uuid
 from datetime import datetime, timedelta
 
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
+from app.config import settings
 from app.schemas.output_models import (
     DecisionOutput, RejectionNotice, ShortlistedVendor, ApprovalRouting,
     EvaluationOutput, ComparatorOutput, ComplianceStatus,
 )
 from app.agents.critic import critic_after_decision
 
-# Default approval tiers — override via EvaluationSetup governance config if present.
-# tier: int, approver_role: str, max_value: float|None, sla_hours: int
-_DEFAULT_TIERS = [
-    {"tier": 1, "approver_role": "department_head",  "max_value": 100_000,  "sla_hours": 24},
-    {"tier": 2, "approver_role": "regional_director",   "max_value": 500_000,  "sla_hours": 48},
-    {"tier": 3, "approver_role": "cfo",               "max_value": 1_000_000, "sla_hours": 72},
-    {"tier": 4, "approver_role": "board",             "max_value": None,      "sla_hours": 120},
-]
-
-_RECOMMENDATION_MAP = [
-    (8.0, "strongly_recommended"),
-    (6.0, "recommended"),
-    (4.0, "acceptable"),
-    (0.0, "marginal"),
-]
-
 
 def route_to_approval_tier(contract_value: float) -> ApprovalRouting:
-    tiers = sorted(_DEFAULT_TIERS, key=lambda t: t["max_value"] or float("inf"))
+    tiers = sorted(
+        settings.platform.governance.approval_tiers,
+        key=lambda t: t.max_value if t.max_value is not None else float("inf"),
+    )
     for tier in tiers:
-        max_val = tier["max_value"]
-        if max_val is None or contract_value <= max_val:
+        if tier.max_value is None or contract_value <= tier.max_value:
             return ApprovalRouting(
-                approval_tier=tier["tier"],
-                approver_role=tier["approver_role"],
+                approval_tier=tier.tier,
+                approver_role=tier.approver_role,
                 contract_value=contract_value,
-                sla_hours=tier["sla_hours"],
-                sla_deadline=datetime.utcnow() + timedelta(hours=tier["sla_hours"]),
+                sla_hours=tier.sla_hours,
+                sla_deadline=datetime.utcnow() + timedelta(hours=tier.sla_hours),
             )
-    # Fallback — should never reach here given tier with max_value=None
     last = tiers[-1]
     return ApprovalRouting(
-        approval_tier=last["tier"],
-        approver_role=last["approver_role"],
+        approval_tier=last.tier,
+        approver_role=last.approver_role,
         contract_value=contract_value,
-        sla_hours=last["sla_hours"],
-        sla_deadline=datetime.utcnow() + timedelta(hours=last["sla_hours"]),
+        sla_hours=last.sla_hours,
+        sla_deadline=datetime.utcnow() + timedelta(hours=last.sla_hours),
     )
 
 
 def _recommendation(score: float) -> str:
-    for threshold, label in _RECOMMENDATION_MAP:
-        if score >= threshold:
+    thresholds = settings.platform.governance.recommendation_thresholds
+    for label in ("strongly_recommended", "recommended", "acceptable", "marginal"):
+        if score >= thresholds.get(label, 0.0):
             return label
     return "marginal"
 
@@ -88,29 +77,15 @@ async def _build_rejection_notice(
     # (Critic will hard-block this if citations remain empty after this step)
     if not evidence_citations and failed:
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Extract verbatim evidence phrases from these rejection reasons. "
-                    "Return a JSON array of strings — exact quotes from the source. "
-                    "Each string must be a verbatim phrase, not a summary.\n"
-                    "Respond with only valid JSON, no prose."
-                ),
-            },
-            {
-                "role": "user",
-                "content": "\n".join(rejection_reasons),
-            },
+            {"role": "system", "content": get_prompt("decision/extract_evidence")},
+            {"role": "user", "content": "\n".join(rejection_reasons)},
         ]
-        import json
         try:
             raw = await call_llm(messages, temperature=0.0,
                                  response_format={"type": "json_object"})
             parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                evidence_citations = parsed
-            elif isinstance(parsed, dict):
-                evidence_citations = list(parsed.values())
+            citations = parsed.get("evidence") or []
+            evidence_citations = [c for c in citations if isinstance(c, str)]
         except Exception:
             evidence_citations = rejection_reasons[:3]
 
@@ -159,10 +134,21 @@ async def run_decision_agent(
     )
 
     shortlisted = []
+    review_reasons = []
     for rank, (vendor_id, evaluation) in enumerate(shortlisted_sorted, start=1):
-        # Look up per-criterion scores from comparator for breakdown
         criterion_scores = evaluation.criterion_scores
         rec = _recommendation(evaluation.total_weighted_score)
+
+        # Surface unresolved insufficient_evidence decisions on shortlisted vendors
+        unresolved = [
+            d.check_id for d in evaluation.compliance_decisions
+            if d.decision == ComplianceStatus.INSUFFICIENT_EVIDENCE
+        ]
+        if unresolved:
+            review_reasons.append(
+                f"Vendor {vendor_id} shortlisted but has unresolved mandatory checks "
+                f"with insufficient evidence: {unresolved}. Human review recommended."
+            )
 
         shortlisted.append(
             ShortlistedVendor(
@@ -179,9 +165,8 @@ async def run_decision_agent(
     approval_routing = route_to_approval_tier(contract_value)
 
     # All-vendors-rejected: escalate
-    requires_review = len(shortlisted) == 0 and len(rejected_vendors) > 0
-    review_reasons = []
-    if requires_review:
+    requires_review = (len(shortlisted) == 0 and len(rejected_vendors) > 0) or bool(review_reasons)
+    if len(shortlisted) == 0 and len(rejected_vendors) > 0:
         review_reasons.append(
             "All vendors rejected — mandatory requirements may be too restrictive. "
             "Escalate to procurement team for review."

@@ -68,12 +68,23 @@ class PlatformInfra(BaseModel):
     extraction_critic_max_retries: int
     extraction_critic_confidence_floor: float
 
+class PlatformGovernanceTier(BaseModel):
+    tier: int
+    approver_role: str
+    max_value: float | None
+    sla_hours: int
+
+class PlatformGovernance(BaseModel):
+    approval_tiers: list[PlatformGovernanceTier]
+    recommendation_thresholds: dict[str, float]
+
 class PlatformConfig(BaseModel):
     embedding: PlatformEmbedding
     ingestion: PlatformIngestion
     retrieval: PlatformRetrieval
     llm: PlatformLLM
     infrastructure: PlatformInfra
+    governance: PlatformGovernance
     hyde_templates: dict[str, str]    # doc_type -> template
     retrieval_critic_prompt: str
     extraction_critic_prompt: str
