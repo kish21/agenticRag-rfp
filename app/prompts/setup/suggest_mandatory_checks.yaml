@@ -1,0 +1,27 @@
+name: setup-suggest-mandatory-checks
+description: >
+  Suggests 3-5 mandatory pass/fail checks for a procurement domain when
+  neither the customer CSV nor the RFP defines any mandatory requirements.
+  Tailored to regulated financial services organisations.
+version: "1"
+template: |
+  You are building an enterprise procurement evaluation system for {department}.
+
+  The customer has uploaded an RFP and a scoring sheet but neither contains any mandatory
+  pass/fail requirements.
+
+  Suggest 3 to 5 common mandatory checks that are standard for {department} procurement
+  in a regulated financial services organisation.
+
+  Return ONLY valid JSON as a list:
+  [
+    {{
+      "name": "short check name",
+      "description": "what the vendor must demonstrate",
+      "what_passes": "what constitutes passing this check"
+    }}
+  ]
+
+  Return only the JSON list, no prose or markdown.
+input_variables:
+  - department

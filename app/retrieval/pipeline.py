@@ -176,6 +176,12 @@ def process_document(
             continue
         seen_texts.add(text_hash)
 
+        # Deterministic chunk_id: same text + vendor always produces the same ID.
+        # This makes Qdrant upsert idempotent — re-ingesting replaces, never duplicates.
+        # Formatted as UUID so Qdrant accepts it as a point ID.
+        raw = hashlib.sha256(f"{org_id}:{vendor_id}:{text_hash}".encode()).hexdigest()
+        chunk_id = str(uuid.UUID(raw[:32]))
+
         section_title = node.metadata.get(
             "section_title",
             _detect_section_title(text)
@@ -197,7 +203,7 @@ def process_document(
         sparse_indices, sparse_values = get_sparse_embedding(text)
 
         chunks.append({
-            "chunk_id": str(uuid.uuid4()),
+            "chunk_id": chunk_id,
             "text": text,
             "dense_vector": None,   # filled in batch below
             "sparse_indices": sparse_indices,

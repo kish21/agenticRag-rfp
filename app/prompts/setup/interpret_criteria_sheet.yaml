@@ -1,0 +1,40 @@
+name: setup-interpret-criteria-sheet
+description: >
+  Interprets a customer spreadsheet that uses non-standard column headers
+  and extracts scoring criteria and mandatory checks in the canonical format.
+  Used as a fallback when pandas cannot find standard column names.
+version: "1"
+template: |
+  You are a data engineer helping parse a procurement evaluation spreadsheet.
+
+  The customer uploaded a spreadsheet but it uses non-standard column headers.
+  Read the content below and extract evaluation criteria in the format specified.
+
+  Spreadsheet content:
+  {sheet_text}
+
+  Return ONLY valid JSON:
+  {{
+    "scoring_criteria": [
+      {{
+        "name": "criterion name",
+        "weight": 0.35,
+        "description": "what is scored",
+        "what_passes": "what a good vendor response looks like"
+      }}
+    ],
+    "mandatory_checks": [
+      {{
+        "name": "check name",
+        "description": "what vendor must provide",
+        "what_passes": "what constitutes passing"
+      }}
+    ]
+  }}
+
+  Rules:
+  - weights must sum to 1.0 across scoring criteria
+  - if a row has "mandatory", "pass/fail", or "required" — treat as mandatory_check not scoring
+  - return only JSON no prose or markdown
+input_variables:
+  - sheet_text

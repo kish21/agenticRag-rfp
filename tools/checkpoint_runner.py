@@ -1261,17 +1261,52 @@ def show_status(state: dict):
     print("="*56)
 
 
+def _write_junit(results: list[tuple[str, bool, str, float]], output_path: str):
+    import xml.etree.ElementTree as ET
+    from pathlib import Path
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    failures = sum(1 for _, p, _, _ in results if not p)
+    suite = ET.Element("testsuite", {
+        "name": "checkpoints",
+        "tests": str(len(results)),
+        "failures": str(failures),
+        "errors": "0",
+    })
+    for cp_id, passed, message, elapsed in results:
+        _, desc = CHECKPOINTS.get(cp_id, (None, cp_id))
+        case = ET.SubElement(suite, "testcase", {
+            "classname": cp_id.split("-")[0],
+            "name": f"{cp_id}: {desc}",
+            "time": f"{elapsed:.2f}",
+        })
+        if not passed:
+            ET.SubElement(case, "failure", {"message": message[:200]}).text = message
+    tree = ET.ElementTree(ET.Element("testsuites"))
+    tree.getroot().append(suite)
+    ET.indent(tree, space="  ")
+    tree.write(output_path, encoding="unicode", xml_declaration=True)
+    print(f"\n  JUnit XML written -> {output_path}")
+
+
 def main():
     state = load_state()
 
-    if len(sys.argv) < 2 or sys.argv[1] == "status":
+    args = sys.argv[1:]
+    junit_path = None
+    if "--junit" in args:
+        args.remove("--junit")
+        junit_path = "test-results/checkpoints.xml"
+
+    if not args or args[0] == "status":
         show_status(state)
         return
 
-    raw_arg = sys.argv[1]
+    raw_arg = args[0]
     # Case-insensitive match against CHECKPOINTS keys
     _cp_lower = {k.lower(): k for k in CHECKPOINTS}
     arg = _cp_lower.get(raw_arg.lower(), raw_arg.upper())
+
+    junit_results: list[tuple[str, bool, str, float]] = []
 
     if arg == "ALL":
         to_run = list(state.get("passed_checkpoints", []))
@@ -1280,11 +1315,17 @@ def main():
             return
         failed = []
         for cp in to_run:
-            if not run_checkpoint(cp, state):
+            start = time.time()
+            passed = run_checkpoint(cp, state)
+            elapsed = time.time() - start
+            if not passed:
                 failed.append(cp)
+            junit_results.append((cp, passed, "", elapsed))
         print(f"\nRegression: {len(to_run)-len(failed)}/{len(to_run)} passed")
         if failed:
             print(f"REGRESSED: {failed}")
+        if junit_path:
+            _write_junit(junit_results, junit_path)
         return
 
     if "-CP" not in arg and arg.upper().startswith("SK"):
@@ -1293,17 +1334,27 @@ def main():
             print(f"No checkpoints for: {arg}")
             return
         for cp in to_run:
-            if not run_checkpoint(cp, state):
+            start = time.time()
+            passed = run_checkpoint(cp, state)
+            elapsed = time.time() - start
+            junit_results.append((cp, passed, "", elapsed))
+            if not passed:
                 print(f"\nBlocked at {cp}")
                 break
+        if junit_path:
+            _write_junit(junit_results, junit_path)
         return
 
     if arg in CHECKPOINTS:
-        run_checkpoint(arg, state)
+        start = time.time()
+        passed = run_checkpoint(arg, state)
+        elapsed = time.time() - start
+        if junit_path:
+            _write_junit([(arg, passed, "", elapsed)], junit_path)
         return
 
-    print(f"Unknown: {sys.argv[1]}")
-    print("Usage: python checkpoint_runner.py [status|SK01|SK01-CP01|all]")
+    print(f"Unknown: {raw_arg}")
+    print("Usage: python checkpoint_runner.py [status|SK01|SK01-CP01|all] [--junit]")
 
 
 if __name__ == "__main__":

@@ -77,6 +77,9 @@ frontend/.env.local
 .DS_Store
 Thumbs.db
 
+# Smoke test runtime state
+.smoke_test_state.json
+
 # Design reference archives (large binary files)
 *.rar
 *.zip
@@ -91,3 +94,4 @@ QUICK_REFERENCE.md
 START_HERE.md
 docs/SKILL_02_INTERVIEW_QA.md
 docs/SKILL_02_WHAT_WE_BUILT.md
+SESSION_PLAN.md

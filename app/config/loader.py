@@ -16,6 +16,20 @@ CONFIG_DIR = Path(__file__).parent
 # Load .env from repo root so all env vars are available
 load_dotenv(CONFIG_DIR.parent.parent / ".env", override=False)
 
+# Norton Antivirus on this machine intercepts HTTPS via its own root CA.
+# Patch requests.Session at class level so all instances (including LangSmith's
+# internal background tracing thread) skip SSL verification for LangSmith domains.
+if os.getenv("LANGSMITH_VERIFY_SSL", "true").lower() == "false":
+    import requests as _req
+    import urllib3 as _urllib3
+    _urllib3.disable_warnings(_urllib3.exceptions.InsecureRequestWarning)
+    _orig_req = _req.Session.request
+    def _ls_no_ssl(self, method, url, **kwargs):
+        if "langchain.com" in str(url) or "langsmith.com" in str(url):
+            kwargs.setdefault("verify", False)
+        return _orig_req(self, method, url, **kwargs)
+    _req.Session.request = _ls_no_ssl
+
 
 # ─── Platform (engineering) shape ─────────────────────────────────────
 class PlatformEmbedding(BaseModel):

@@ -8,6 +8,7 @@ import re
 import uuid
 from app.db.fact_store import get_engine
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 import sqlalchemy as sa
 
 # Common suffixes the LLM appends that don't change the meaning of a check.
@@ -24,8 +25,19 @@ def _normalize_name(name: str) -> str:
     Lowercase + strip noise suffixes + collapse punctuation/whitespace.
     Used as the dedup key so 'ISO 27001' and 'ISO 27001 Certification'
     collapse to the same key and don't both survive into the setup.
+
+    Also handles:
+    - Parenthesised acronyms: 'Service Level Commitments (SLA)' → 'service level commitments'
+    - Ampersand vs and: 'Technical Capability & Security' → 'technical capability and security'
+    - Currency/threshold suffixes: '>= £5M', '>= €5M' stripped
     """
     n = name.lower().strip()
+    # Remove parenthesised content entirely — acronyms like (SLA), (ISO), (KPI)
+    n = re.sub(r"\([^)]*\)", "", n).strip()
+    # Normalise ampersand to "and"
+    n = n.replace("&", "and")
+    # Strip threshold suffixes like ">= £5m", ">= €5m", ">= $5m"
+    n = re.sub(r">=?\s*[£€$]?\s*\d+[mk]?", "", n).strip()
     for suffix in _NOISE_SUFFIXES:
         if n.endswith(suffix):
             n = n[: -len(suffix)].strip()
@@ -37,6 +49,11 @@ async def extract_criteria_from_user_sheet(sheet_bytes: bytes, filename: str) ->
     """
     Parse a user-uploaded scoring sheet (CSV/Excel/PDF/DOCX) into the same
     shape as extract_criteria_from_rfp(): {"mandatory_checks": [...], "scoring_criteria": [...]}.
+
+    Strategy:
+    1. CSV/Excel  → try pandas column-name matching first (fast, free)
+                  → if no scoring criteria found, fall back to LLM interpretation
+    2. PDF/DOCX   → LLM interpretation directly
     Never raises — returns empty dict on any parse failure.
     """
     if not sheet_bytes:
@@ -45,9 +62,14 @@ async def extract_criteria_from_user_sheet(sheet_bytes: bytes, filename: str) ->
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     try:
         if ext in ("csv", "xlsx", "xls"):
-            return _parse_sheet_with_pandas(sheet_bytes, ext)
+            result = _parse_sheet_with_pandas(sheet_bytes, ext)
+            # If pandas found no scoring criteria the column names didn't match —
+            # fall back to LLM which can interpret any header format or language
+            if not result.get("scoring_criteria"):
+                print(f"  Sheet parser found no scoring criteria in '{filename}' — trying LLM fallback…")
+                result = await _llm_interpret_sheet(sheet_bytes, ext)
+            return result
         elif ext in ("pdf", "docx", "doc"):
-            # Reuse the LLM-based RFP extractor — same prompt, same output shape
             if ext == "pdf":
                 text = extract_rfp_text(sheet_bytes)
             else:
@@ -57,6 +79,59 @@ async def extract_criteria_from_user_sheet(sheet_bytes: bytes, filename: str) ->
             return {"mandatory_checks": [], "scoring_criteria": []}
     except Exception as e:
         print(f"User sheet extraction failed ({filename}): {e}")
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+
+async def _llm_interpret_sheet(sheet_bytes: bytes, ext: str) -> dict:
+    """
+    LLM fallback for scoring sheets with non-standard headers.
+    Converts the sheet to plain text and asks the LLM to extract criteria.
+    Works for any column naming convention, any industry, any language.
+    """
+    import io
+    try:
+        import pandas as pd
+    except ImportError:
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+    try:
+        if ext == "csv":
+            df = pd.read_csv(io.BytesIO(sheet_bytes))
+        else:
+            df = pd.read_excel(io.BytesIO(sheet_bytes))
+
+        # Convert to plain readable text so the LLM can interpret any format
+        sheet_text = df.to_string(index=False, na_rep="")
+    except Exception as e:
+        print(f"  LLM sheet fallback: could not read file — {e}")
+        return {"mandatory_checks": [], "scoring_criteria": []}
+
+    prompt = get_prompt("setup/interpret_criteria_sheet", sheet_text=sheet_text[:4000])
+
+    try:
+        response = await call_llm(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+        )
+        clean = response.strip()
+        if "```" in clean:
+            parts = clean.split("```")
+            clean = parts[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        result = json.loads(clean.strip())
+
+        # Normalise weights to 1.0
+        scoring = result.get("scoring_criteria", [])
+        if scoring:
+            total = sum(float(c.get("weight", 0)) for c in scoring)
+            if total > 0 and abs(total - 1.0) > 0.01:
+                for c in scoring:
+                    c["weight"] = round(float(c.get("weight", 0)) / total, 3)
+
+        return result
+    except Exception as e:
+        print(f"  LLM sheet interpretation failed: {e}")
         return {"mandatory_checks": [], "scoring_criteria": []}
 
 
@@ -218,40 +293,7 @@ async def extract_criteria_from_rfp(rfp_text: str) -> dict:
     if not rfp_text or len(rfp_text.strip()) < 100:
         return {"mandatory_checks": [], "scoring_criteria": []}
 
-    prompt = f"""Read this RFP and extract evaluation criteria.
-
-Return ONLY valid JSON:
-{{
-  "mandatory_checks": [
-    {{
-      "name": "short name",
-      "description": "what vendor must provide",
-      "what_passes": "what constitutes passing",
-      "page_reference": "section/page if found"
-    }}
-  ],
-  "scoring_criteria": [
-    {{
-      "name": "criterion name",
-      "weight": 0.35,
-      "description": "what is scored",
-      "rubric_9_10": "outstanding evidence",
-      "rubric_6_8": "good evidence",
-      "rubric_3_5": "adequate evidence",
-      "rubric_0_2": "poor or absent",
-      "page_reference": "section/page if found"
-    }}
-  ]
-}}
-
-Rules:
-- weights must sum to 1.0
-- convert percentages to decimals (35% = 0.35)
-- if no weight stated distribute evenly
-- return only JSON no prose or markdown
-
-RFP TEXT:
-{rfp_text[:6000]}"""
+    prompt = get_prompt("setup/extract_rfp_criteria", rfp_text=rfp_text[:6000])
 
     try:
         response = await call_llm(
@@ -424,6 +466,25 @@ def merge_criteria(
             })
             scoring_names.add(name_key)
 
+    # 5. Score guide enrichment pass
+    # For any merged criterion with blank score guide bands, copy them from the RFP
+    # if the RFP extracted the same criterion with scoring bands.
+    # This covers: CSV has criterion + weight but no score guide; RFP has the guide.
+    rfp_scoring_by_name = {
+        _normalize_name(c["name"]): c
+        for c in rfp_criteria.get("scoring_criteria", [])
+    }
+    for sc in scoring_criteria:
+        name_key = _normalize_name(sc["name"])
+        rfp_match = rfp_scoring_by_name.get(name_key)
+        if not rfp_match:
+            continue
+        # Only fill in bands that are currently blank
+        for band in ("rubric_9_10", "rubric_6_8", "rubric_3_5", "rubric_0_2"):
+            if not sc.get(band) and rfp_match.get(band):
+                sc[band] = rfp_match[band]
+                sc["score_guide_source"] = "rfp"  # audit trail
+
     # If no scoring criteria found fall back to even distribution
     if not scoring_criteria:
         return {
@@ -457,6 +518,130 @@ def merge_criteria(
         ),
         "source": "merged",
     }
+
+
+async def detect_and_fill_gaps(merged: dict, department: str) -> tuple[dict, dict]:
+    """
+    After merge_criteria(), scan for gaps and fill them via LLM.
+
+    Gap 1 — scoring criterion with all four score guide bands blank:
+             LLM generates bands based on criterion name + department domain.
+    Gap 2 — no mandatory checks at all:
+             LLM suggests 3-5 common mandatory checks for the domain.
+
+    All generated content is marked source=generated and returned in gaps_report.
+    Nothing is saved to the database here — customer must confirm first (#117).
+
+    Returns: (enriched_merged, gaps_report)
+    """
+    scoring   = merged.get("scoring_criteria", [])
+    mandatory = merged.get("mandatory_checks", [])
+    gaps_report: dict = {
+        "has_gaps": False,
+        "score_guides_generated": [],
+        "mandatory_checks_suggested": [],
+    }
+
+    # ── Gap 1: missing score guide bands ──────────────────────────────────────
+    criteria_missing_guides = [
+        sc for sc in scoring
+        if not any([
+            sc.get("rubric_9_10"), sc.get("rubric_6_8"),
+            sc.get("rubric_3_5"),  sc.get("rubric_0_2"),
+        ])
+    ]
+
+    if criteria_missing_guides:
+        gaps_report["has_gaps"] = True
+        names_list = "\n".join(f"- {sc['name']}" for sc in criteria_missing_guides)
+
+        prompt = get_prompt(
+            "setup/generate_score_guides",
+            department=department,
+            criteria_names=names_list,
+        )
+
+        try:
+            response = await call_llm(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            clean = response.strip()
+            if "```" in clean:
+                parts = clean.split("```")
+                clean = parts[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            generated_guides: list[dict] = json.loads(clean.strip())
+
+            # Apply generated guides back to the criteria
+            generated_by_name = {_normalize_name(g["name"]): g for g in generated_guides}
+            for sc in scoring:
+                match = generated_by_name.get(_normalize_name(sc["name"]))
+                if match:
+                    sc["rubric_9_10"] = match.get("rubric_9_10", "")
+                    sc["rubric_6_8"]  = match.get("rubric_6_8",  "")
+                    sc["rubric_3_5"]  = match.get("rubric_3_5",  "")
+                    sc["rubric_0_2"]  = match.get("rubric_0_2",  "")
+                    sc["score_guide_source"] = "generated"
+                    gaps_report["score_guides_generated"].append({
+                        "criterion_name": sc["name"],
+                        "source": "generated",
+                    })
+        except Exception as e:
+            print(f"  Gap detection: score guide generation failed — {e}")
+
+    # ── Gap 2: no mandatory checks at all ─────────────────────────────────────
+    if not mandatory:
+        gaps_report["has_gaps"] = True
+
+        prompt = get_prompt("setup/suggest_mandatory_checks", department=department)
+
+        try:
+            response = await call_llm(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            clean = response.strip()
+            if "```" in clean:
+                parts = clean.split("```")
+                clean = parts[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            suggested: list[dict] = json.loads(clean.strip())
+
+            for s in suggested:
+                mc_id = str(uuid.uuid4())[:8].upper()
+                new_check = {
+                    "check_id":              f"MC-GEN-{mc_id}",
+                    "name":                  s.get("name", ""),
+                    "description":           s.get("description", ""),
+                    "what_passes":           s.get("what_passes", ""),
+                    "extraction_target_id":  f"ET-GEN-{mc_id}",
+                    "source":                "generated",
+                    "is_locked":             False,
+                }
+                mandatory.append(new_check)
+                # Add corresponding extraction target so Pydantic validator passes
+                merged.setdefault("extraction_targets", []).append({
+                    "target_id":      f"ET-GEN-{mc_id}",
+                    "name":           s.get("name", ""),
+                    "description":    s.get("what_passes", s.get("description", "")),
+                    "fact_type":      "custom",
+                    "is_mandatory":   True,
+                    "feeds_check_id": f"MC-GEN-{mc_id}",
+                    "source":         "generated",
+                })
+                gaps_report["mandatory_checks_suggested"].append({
+                    "name":   s.get("name", ""),
+                    "source": "generated",
+                })
+        except Exception as e:
+            print(f"  Gap detection: mandatory check suggestion failed — {e}")
+
+    merged["scoring_criteria"] = scoring
+    merged["mandatory_checks"] = mandatory
+    return merged, gaps_report
 
 
 def _build_targets(

@@ -27,6 +27,25 @@ def _run_migrations() -> None:
         print(f"[startup] Alembic migration warning: {exc}")
 
 
+def _check_cors_origins() -> None:
+    """Refuse to start in production with wildcard CORS origins."""
+    is_production = bool(settings.app_api_key and settings.app_api_key != "changeme-internal-api-key")
+    has_wildcard = "*" in settings.allowed_origins
+    if is_production and has_wildcard:
+        raise RuntimeError(
+            "CORS misconfiguration: ALLOWED_ORIGINS='*' is not permitted in production. "
+            "Set ALLOWED_ORIGINS to your frontend domain(s) in .env, e.g.:\n"
+            "  ALLOWED_ORIGINS=https://app.meridianai.com"
+        )
+    if is_production:
+        localhost_only = all("localhost" in o or "127.0.0.1" in o for o in settings.allowed_origins)
+        if localhost_only:
+            print(
+                "[WARNING] CORS: ALLOWED_ORIGINS only contains localhost — "
+                "frontend requests from production domain will be blocked."
+            )
+
+
 def _mark_orphaned_runs() -> None:
     """On startup, any run still 'running' was orphaned by a previous crash/restart."""
     try:
@@ -52,6 +71,7 @@ def _mark_orphaned_runs() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _check_cors_origins()
     _run_migrations()
     _mark_orphaned_runs()
     yield

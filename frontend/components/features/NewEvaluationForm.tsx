@@ -63,24 +63,70 @@ const inputCss: React.CSSProperties = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const DRAFT_KEY = "meridian_eval_draft";
+
+interface DraftData {
+  rfpTitle: string;
+  department: string;
+  contractValue: string;
+  currency: string;
+  vendorNames: string[];
+}
+
+function loadDraft(): DraftData | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as DraftData) : null;
+  } catch { return null; }
+}
+
+function saveDraft(d: DraftData) {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* quota */ }
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+}
+
 export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluationFormProps) {
   const bp = useBreakpoint();
   const isMobile = bp === "mobile";
 
-  const [rfpTitle, setRfpTitle] = useState("");
-  const [department, setDepartment] = useState("");
-  const [contractValue, setContractValue] = useState("");
-  const [currency, setCurrency] = useState("GBP");
+  const draft = loadDraft();
+
+  const [rfpTitle, setRfpTitle] = useState(draft?.rfpTitle ?? "");
+  const [department, setDepartment] = useState(draft?.department ?? "");
+  const [contractValue, setContractValue] = useState(draft?.contractValue ?? "");
+  const [currency, setCurrency] = useState(draft?.currency ?? "GBP");
   const [rfpFile, setRfpFile] = useState<File | null>(null);
   const [criteriaFile, setCriteriaFile] = useState<File | null>(null);
   const [vendors, setVendors] = useState<VendorSlot[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [draftMsg, setDraftMsg] = useState<string | null>(draft ? "Draft restored (files not saved)" : null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (formError) errorRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [formError]);
+
+  // Auto-save metadata on change
+  useEffect(() => {
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      const hasContent = rfpTitle.trim() || department || contractValue || vendors.length > 0;
+      if (hasContent) {
+        saveDraft({
+          rfpTitle, department, contractValue, currency,
+          vendorNames: vendors.map(v => v.name),
+        });
+        setDraftMsg("Draft saved");
+        setTimeout(() => setDraftMsg(null), 2000);
+      }
+    }, 800);
+    return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
+  }, [rfpTitle, department, contractValue, currency, vendors]);
 
   function resetForm() {
     setRfpTitle("");
@@ -91,6 +137,8 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
     setCriteriaFile(null);
     setVendors([]);
     setFormError("");
+    clearDraft();
+    setDraftMsg(null);
   }
 
   function addVendorsFromFiles(files: File[]) {
@@ -141,6 +189,7 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
         body: fd,
         on401: onAuth401,
       });
+      clearDraft();
       onSuccess(res.run_id, rfpTitle.trim(), vendors.length);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to start evaluation. Try again.");
@@ -151,6 +200,37 @@ export function NewEvaluationForm({ onBack, onSuccess, onAuth401 }: NewEvaluatio
 
   return (
     <div className="w-full" style={{ maxWidth: 620 }}>
+      {/* Draft status indicator */}
+      {draftMsg && (
+        <div style={{
+          marginBottom: 12, padding: "8px 12px",
+          backgroundColor: "var(--color-surface)",
+          borderTop: "1px solid var(--color-border)",
+          borderBottom: "1px solid var(--color-border)",
+          borderLeft: "2px solid var(--color-info)",
+          borderRight: "1px solid var(--color-border)",
+          borderRadius: "var(--radius)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-muted)" }}>
+            {draftMsg}
+          </span>
+          {draftMsg.includes("restored") && (
+            <button
+              type="button"
+              onClick={resetForm}
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontFamily: FONT, fontSize: 11, color: "var(--color-error)",
+                padding: "0 4px",
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Back + Reset row */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <button
