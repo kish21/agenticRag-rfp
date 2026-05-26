@@ -82,7 +82,7 @@ def upsert_chunk(
     client.upsert(
         collection_name=collection,
         points=[PointStruct(
-            id=str(uuid.uuid4()),
+            id=chunk_id,
             vector={
                 "dense": dense_vector,
                 "sparse": {
