@@ -232,16 +232,15 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         _emit("extraction", "running", "Extracting structured facts",
               log_msg="Pulling out specific facts from each proposal — certifications, insurance, SLA commitments, project history, and pricing.")
         extraction_outputs: dict = {}
-        source_chunks: dict = {}
+        source_chunks: dict[str, str] = {}  # {chunk_id: chunk_text} — for explanation grounding
         for vid in vendor_ids:
             ext_out, critic_ext = await run_extraction_agent(
                 retrieval_output=retrieval_outputs[vid], vendor_id=vid, org_id=org_id,
                 doc_id=f"{rfp_id}-{vid}", setup_id=setup_id, evaluation_setup=evaluation_setup,
                 run_id=run_id)
             extraction_outputs[vid] = ext_out
-            source_chunks[vid] = "\n".join(
-                c.text for c in retrieval_outputs[vid].chunks
-            ) if hasattr(retrieval_outputs[vid], "chunks") else ""
+            if hasattr(retrieval_outputs[vid], "chunks"):
+                source_chunks.update({c.chunk_id: c.text for c in retrieval_outputs[vid].chunks})
             rfp_logger.dev(DevLevel.INFO, "extraction",
                            f"Vendor {vid}: {len(ext_out.slas)} SLAs, {len(ext_out.pricing)} pricing, {len(ext_out.extracted_facts)} facts",
                            data={"vendor_id": vid,

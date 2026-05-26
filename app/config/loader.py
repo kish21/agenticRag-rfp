@@ -30,6 +30,12 @@ if os.getenv("LANGSMITH_VERIFY_SSL", "true").lower() == "false":
         return _orig_req(self, method, url, **kwargs)
     _req.Session.request = _ls_no_ssl
 
+# BGE reranker (sentence-transformers) tries to reach huggingface.co on every
+# startup to check for model updates. Norton blocks that HTTPS too.
+# Set HF_HUB_OFFLINE=1 so it uses the local model cache without network checks.
+if os.getenv("SSL_VERIFY", "true").lower() == "false":
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 
 # ─── Platform (engineering) shape ─────────────────────────────────────
 class PlatformEmbedding(BaseModel):

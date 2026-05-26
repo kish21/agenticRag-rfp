@@ -486,11 +486,14 @@ def critic_after_explanation(
                 "High hallucination in explanation. Check source data quality."
             ))
 
+    import re as _re
     for narrative in output.vendor_narratives:
         for claim in narrative.grounded_claims[:5]:
             source = source_chunks.get(claim.source_chunk_id, "")
             if source and claim.grounding_quote:
-                if claim.grounding_quote not in source:
+                norm_source = _re.sub(r'\s+', ' ', source).strip()
+                norm_quote  = _re.sub(r'\s+', ' ', claim.grounding_quote).strip()
+                if norm_quote not in norm_source:
                     flags.append(_make_flag(
                         CriticSeverity.HARD, "explanation_agent",
                         "grounding_verification_failed",

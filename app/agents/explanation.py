@@ -156,7 +156,7 @@ def _build_fact_context(extraction: ExtractionOutput, currency: str = "GBP") -> 
         else:
             lines.append(f"Pricing: {price.description or 'amount not specified'}")
     for fact in extraction.extracted_facts:
-        lines.append(f"Custom fact [{fact.target_id}]: {fact.value}")
+        lines.append(f"Custom fact [{fact.target_id}]: {fact.text_value}")
     return "\n".join(lines) if lines else "No extracted facts available."
 
 
