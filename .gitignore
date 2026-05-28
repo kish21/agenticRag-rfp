@@ -82,6 +82,9 @@ Thumbs.db
 .smoke_test_state.json
 tests/smoke_results/
 
+# Seed scripts — contain hardcoded demo data + passwords, local-only
+tools/seed_*.py
+
 # Design reference archives (large binary files)
 *.rar
 *.zip
