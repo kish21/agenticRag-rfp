@@ -5,7 +5,7 @@ description: Phase-completion audit for the Meridian RFP-evaluation pipeline —
 # `/phase-done-rfp` — RFP pipeline-specific phase-completion gate
 
 This skill is **specific to the agenticRag-rfp project**. It first runs the
-generic 8-category `/phase-done` audit, then layers checks unique to the
+generic 11-category `/phase-done` audit, then layers checks unique to the
 LangGraph multi-agent RFP-evaluation architecture this codebase implements.
 
 If you're working on a different project, you want **`/phase-done`** (generic,
@@ -15,8 +15,18 @@ user-global) instead.
 
 ## Phase 0 — Run the generic audit first
 
-Invoke the generic `/phase-done` command and wait for its full 8-category
-report. Surface its recommendations verbatim. Then continue below with the
+Invoke the generic `/phase-done` command and wait for its full **11-category**
+report (1–8 = engineering hygiene; 9–11 = pre-push guards added 2026-05-28
+after PR #150 surfaced these three bug classes: branch drift causing
+merge-time conflicts, CI parity gaps (pytest missing on runner, no PG service
+for integration tests), and silent overwrites of existing PR metadata).
+
+**If category 9 (branch freshness) or 10 (pre-push CI parity) BLOCK, do NOT
+proceed with the RFP-specific checks below** — fix the blockers first, then
+re-run `/phase-done-rfp`. The project-specific invariants are downstream of
+"the basics work."
+
+Surface the generic skill's report verbatim. Then continue below with the
 RFP-specific extras.
 
 ---
