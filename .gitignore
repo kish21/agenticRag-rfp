@@ -65,8 +65,16 @@ frontend/.env.local
 # Modal
 .modal/
 
-# Claude Code session files
-.claude/
+# Claude Code session files — gitignore is per-FILE inside .claude/, so that
+# team-shareable artifacts (commands/, skills/, settings.json) ARE tracked
+# while personal/local state (settings.local.json, build logs, handoff notes)
+# stays out.
+.claude/settings.local.json
+.claude/HANDOFF.md
+.claude/build_state.json
+.claude/checkpoint_log.md
+.claude/daily_build_log.md
+.claude/__pycache__/
 
 # IDE
 .idea/
