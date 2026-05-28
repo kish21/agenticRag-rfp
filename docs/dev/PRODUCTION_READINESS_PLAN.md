@@ -292,10 +292,56 @@ Folder = attribution. No LLM call needed for the common case.
 
 **Critical safety check:** before ingesting, verify `invited_vendors` membership — uninvited vendors go to admin queue, never silently ingested.
 
+### DESIGN PIVOT — deadline-based processing (revised 2026-05-28)
+
+The original Phase 5 design ingested files immediately on arrival. Workflow review with the customer scenario in mind revealed a better model: **store on arrival, process after the submission deadline closes.** This matches how real procurement works (deadline-driven), avoids wasted compute on re-uploaded drafts, and guarantees all vendors are processed against the same rubric snapshot.
+
+**Lifecycle:**
+```
+T0          Customer creates RFP. Sets submission_deadline (e.g. Friday 5pm).
+            Invites vendors. Folders provisioned.   rfps.submission_status = 'open'
+
+T1..Tn      Vendors upload (and re-upload) files throughout the window.
+            Watcher RECEIVES each file — SHA256, attribution, INSERT into
+            ingestion_jobs with status='received'. NO LLM calls, NO extraction.
+            Re-uploads from the same vendor mark older versions superseded.
+
+Deadline    rfps.submission_status flips: open → closed. Watcher rejects new
+            uploads with 'submissions closed' error.
+
+Deadline    Modal-scheduled deadline_processor cron (runs every 5 min) sees:
++ 1 hour    "rfps where submission_deadline < NOW() AND status='closed'".
+grace       For each, fan out the received jobs through ingestion + extraction
+            sub-graph IN PARALLEL across all vendors.
+            rfps.submission_status: closed → processing.
+
+Completion  When all ingestion_jobs reach status='facts_ready':
+            rfps.submission_status: processing → facts_ready.
+            Customer notified via Phase 8 channels (email + Teams + in-app).
+
+Customer    Logs in, clicks 'Evaluate'. Pipeline short-circuits the heavy
+returns     stages (facts already in PostgreSQL). Only Retrieval refresh,
+            Evaluation, Comparator, Decision, Explanation actually run.
+            ~30 seconds. Report ready.
+```
+
+**Why this is better than "ingest on arrival":**
+- **No wasted extraction** on draft versions vendors will replace before deadline.
+- **All vendors batch-processed together** against the same evaluation_setup snapshot — procurement fairness.
+- **No half-state UI** ("Acme ready / Apex still processing") during submission window.
+- **Zero LLM cost during submission window** — only storage.
+- **Simpler watcher** — receives + stores, no sub-graph trigger.
+- **Customer experience is sharper** — they get one "ready to evaluate" notification, not a stream of per-vendor processing updates.
+
 ### 5b — State / idempotency (`ingestion_jobs`)
 
-One table answers both "don't re-process" and "show me what's done":
 ```sql
+-- RFP-level submission lifecycle (new columns)
+ALTER TABLE rfps ADD COLUMN
+    submission_deadline   TIMESTAMPTZ,
+    submission_status     TEXT DEFAULT 'open'
+        CHECK (submission_status IN ('open','closed','processing','facts_ready','evaluated'));
+
 CREATE TABLE ingestion_jobs (
   job_id          UUID PRIMARY KEY,
   org_id          UUID NOT NULL,
@@ -304,39 +350,104 @@ CREATE TABLE ingestion_jobs (
   source_uri      TEXT,
   filename        TEXT,
   content_hash    CHAR(64) NOT NULL,
-  status          TEXT NOT NULL,    -- queued | processing | facts_ready | failed | duplicate | needs_attribution
+  status          TEXT NOT NULL,
+  -- received       : file stored, awaiting deadline
+  -- superseded     : older version of same vendor's submission
+  -- queued         : deadline passed, ready for ingestion sub-graph
+  -- processing     : ingestion + extraction in flight
+  -- facts_ready    : extracted_facts rows written, ready for evaluation
+  -- failed         : non-recoverable error during processing
+  -- duplicate      : same content_hash already received
+  -- needs_attribution : file landed with unresolvable vendor (admin queue)
+  -- rejected_late  : file arrived after submission_deadline (hard deadline)
   attribution_confidence FLOAT,
+  received_at     TIMESTAMPTZ DEFAULT now(),
   attempted_at    TIMESTAMPTZ,
   completed_at    TIMESTAMPTZ,
   error           TEXT,
   doc_id          UUID REFERENCES vendor_documents,
+  superseded_by   UUID REFERENCES ingestion_jobs(job_id),
   UNIQUE (rfp_id, vendor_id, content_hash)
 );
 ```
-On file arrival: SHA256 → INSERT ON CONFLICT DO NOTHING → if conflict status=`duplicate` skip; else status=`queued` and worker picks up.
 
-Dashboard query returns per-vendor rollup of `ready / in_progress / failed / pending_review` counts.
+**On file arrival (watcher path):**
+1. Compute SHA256.
+2. `SELECT submission_status FROM rfps WHERE rfp_id = X` — if not `open`, write `status='rejected_late'`, return error to vendor.
+3. INSERT job with `status='received'`. ON CONFLICT (same hash) → `status='duplicate'`, skip.
+4. If a PRIOR job exists for `(rfp_id, vendor_id)` with `status='received'`, mark it `superseded`. New job becomes the active one.
 
-### 5c — Watcher service & sub-graph
+**On deadline (scheduler path):**
+1. Lock submissions: `UPDATE rfps SET submission_status='closed' WHERE submission_deadline < NOW() AND submission_status='open'`.
+2. For each closed RFP, queue its received jobs: `UPDATE ingestion_jobs SET status='queued' WHERE rfp_id=X AND status='received'`.
+3. Set RFP status to `processing`.
+4. Fire the ingestion sub-graph for each queued job — IN PARALLEL across vendors.
+5. When all jobs reach `facts_ready`, flip RFP status to `facts_ready`. Notify customer (Phase 8).
 
-- `app/jobs/ingestion_watcher.py` — `watchdog`-based local fs watcher + Modal-scheduled S3/Azure pollers.
-- `app/pipeline/ingestion_graph.py` (new) — minimal sub-graph: planner-lite → ingestion → extraction. Runs continuously.
-- [app/pipeline/nodes.py](app/pipeline/nodes.py) `ingestion_node` adds: `if facts_already_extracted(vid, rfp_id): skip`. Same check on extraction.
+### 5c — Watcher service (receive-only) + deadline scheduler
+
+**Watcher** — `app/jobs/ingestion_watcher.py`:
+- `watchdog`-based local fs watcher + Modal-scheduled S3/Azure pollers.
+- Receive-only: SHA256 + attribution + INSERT into `ingestion_jobs(status='received')`.
+- Does NOT trigger any LLM/Qdrant work.
+- ~50 lines.
+
+**Deadline scheduler** — `app/jobs/deadline_processor.py` (NEW):
+- Modal cron, runs every 5 minutes (same pattern as existing `app/jobs/cleanup.py`, `app/jobs/rate_monitor.py`).
+- Atomically transitions RFPs across the lifecycle.
+- Fires ingestion + extraction sub-graph in parallel for all queued jobs of an RFP.
+- Emits the `rfp.facts_ready` event consumed by Phase 8 delivery channels.
+
+**Ingestion sub-graph** — `app/pipeline/ingestion_graph.py`:
+- Minimal: planner-lite → ingestion → extraction.
+- One graph instance per `(rfp_id, vendor_id)` pair, fanned out in parallel by the deadline_processor.
+- Writes facts to PostgreSQL with `setup_id` snapshot tag (so post-deadline rubric edits don't silently re-map old extractions — see Phase 6b).
+
+**Pipeline short-circuit on user-triggered evaluation** — [app/pipeline/nodes.py](app/pipeline/nodes.py):
+- `ingestion_node`: if `facts_already_extracted(vid, rfp_id)`, skip body.
+- `extraction_node`: same.
+- This is the mechanism that makes the user-triggered "Evaluate" click take ~30s instead of ~5min.
+
+### Late submissions & addenda (post-deadline)
+
+**Hard deadline.** Files arriving after `submission_deadline` are rejected at the watcher with `status='rejected_late'`. Vendor sees an error; customer sees them in an admin queue.
+
+**Customer can explicitly accept a late addendum.** If they do:
+- The late job is promoted from `rejected_late` to `queued`.
+- Phase 6 (incremental re-evaluation) re-runs Extraction + Evaluation for that vendor only.
+- Comparator + Decision + Explanation re-run with the updated vendor's score.
+- Report explicitly highlights "Vendor X submitted addendum on YYYY-MM-DD, accepted by [user]" in the audit trail.
 
 ### Files
-- [app/db/schema.sql](app/db/schema.sql), [app/db/fact_store.py](app/db/fact_store.py), [app/jobs/ingestion_watcher.py](app/jobs/) (new), [app/jobs/email_watcher.py](app/jobs/) (new, optional), [app/jobs/llm_attribution.py](app/jobs/) (new), [app/pipeline/ingestion_graph.py](app/pipeline/) (new), [app/pipeline/nodes.py](app/pipeline/nodes.py), [app/api/admin_routes.py](app/api/admin_routes.py), [deploy/modal.py](deploy/modal.py), [tests/test_ingestion_attribution.py](tests/) (new), [tests/test_ingestion_idempotency.py](tests/) (new).
+- [app/db/schema.sql](app/db/schema.sql) — `submission_deadline`, `submission_status` columns + `ingestion_jobs` table.
+- [app/db/fact_store.py](app/db/fact_store.py) — `enqueue_ingestion_job()`, `mark_rfp_facts_ready()`, `get_rfp_rollup()`.
+- [app/jobs/ingestion_watcher.py](app/jobs/) (NEW) — receive-only watcher.
+- [app/jobs/deadline_processor.py](app/jobs/) (NEW) — Modal cron, lifecycle transitions.
+- [app/jobs/email_watcher.py](app/jobs/) (NEW, optional) — IMAP/Microsoft Graph.
+- [app/jobs/llm_attribution.py](app/jobs/) (NEW) — LLM-fallback attribution for ambiguous files.
+- [app/pipeline/ingestion_graph.py](app/pipeline/) (NEW) — 3-node sub-graph.
+- [app/pipeline/nodes.py](app/pipeline/nodes.py) — short-circuit on facts_already_extracted.
+- [app/api/admin_routes.py](app/api/admin_routes.py) — attribution queue + late-addendum acceptance endpoints.
+- [app/api/evaluation_routes.py](app/api/evaluation_routes.py) — `POST /rfps/{rfp_id}/deadline` to set/extend the deadline.
+- [deploy/modal.py](deploy/modal.py) — schedule entries for watcher + deadline_processor.
+- [tests/test_ingestion_attribution.py](tests/) (NEW).
+- [tests/test_ingestion_idempotency.py](tests/) (NEW).
+- [tests/test_deadline_lifecycle.py](tests/) (NEW) — RFP lifecycle state machine + late-rejection.
 
 ### Exit / pass criteria — Phase 5
-- [ ] `ingestion_jobs` table exists with the UNIQUE constraint on (rfp_id, vendor_id, content_hash).
+- [ ] `rfps.submission_deadline` + `submission_status` columns exist; status transitions enforced via CHECK constraint.
+- [ ] `ingestion_jobs` table exists with the UNIQUE constraint on (rfp_id, vendor_id, content_hash) and the expanded status set (`received`, `superseded`, `queued`, `processing`, `facts_ready`, `failed`, `duplicate`, `needs_attribution`, `rejected_late`).
 - [ ] Watcher service starts via `python -m app.jobs.ingestion_watcher` and survives PostgreSQL reconnect (integration test).
-- [ ] Drop a file into `drops/{rfp_id}/{vendor_id}/` → within 5 seconds an `ingestion_jobs` row exists with `status='queued'`; within 60 seconds `status='facts_ready'` and `extracted_facts` rows exist.
-- [ ] Drop the same file twice → second `INSERT` produces `status='duplicate'`; worker does NOT re-process (test asserts only one `vendor_documents` row for that content_hash).
-- [ ] Drop a file for an uninvited vendor → `status='needs_attribution'`, admin queue shows the file with LLM reasoning.
-- [ ] LLM attribution: drop a file at the drops/ root → LLM attribution attempted; confidence ≥0.85 auto-attributes (with audit-log entry); below threshold → admin queue.
-- [ ] Admin endpoint `POST /api/v1/admin/attribute/{job_id}` accepts a manual override and flips status to `queued`.
-- [ ] User-triggered evaluation after background ingestion completes in ≤60 seconds (5-vendor fixture); logs show ingestion + extraction were skipped for those vendors.
-- [ ] Dashboard `GET /api/v1/rfps/{rfp_id}/ingestion-status` returns expected per-vendor rollup JSON; verified by integration test fixture.
-- [ ] `tests/test_ingestion_attribution.py` and `tests/test_ingestion_idempotency.py` both passing in CI.
+- [ ] Deadline scheduler starts via `python -m app.jobs.deadline_processor` and processes expired RFPs every cron tick.
+- [ ] Drop a file into `drops/{rfp_id}/{vendor_id}/` BEFORE deadline → `ingestion_jobs` row exists with `status='received'` within 5 seconds; NO `extracted_facts` rows yet.
+- [ ] Drop a file AFTER deadline → `ingestion_jobs` row exists with `status='rejected_late'`; admin queue shows it.
+- [ ] Same vendor uploads twice before deadline → older job marked `superseded`, newer becomes the active job; only the newer one gets ingested at deadline.
+- [ ] Same hash uploaded twice → `status='duplicate'`, no further processing.
+- [ ] Deadline passes (test by setting `submission_deadline` to NOW() - 1min) → within one cron tick, RFP status flips `open → closed → processing`; all received jobs become `queued`; ingestion + extraction run in parallel across vendors; final RFP status `facts_ready`.
+- [ ] Uninvited vendor's file → `status='needs_attribution'`, admin queue shows file with LLM attribution reasoning.
+- [ ] User-triggered evaluation AFTER background processing completes in ≤60 seconds (5-vendor fixture); logs show ingestion + extraction were skipped.
+- [ ] Customer notified via at least 3 channels (email + Teams + in-app) when RFP reaches `facts_ready` — Phase 8 subscription matched on `trigger='on_facts_ready'`.
+- [ ] `tests/test_ingestion_attribution.py`, `tests/test_ingestion_idempotency.py`, `tests/test_deadline_lifecycle.py` all green in CI.
 
 ---
 
