@@ -1,13 +1,24 @@
 """
 Role-based access control helpers for evaluation runs.
 
-Access model:
+Access model (Phase 9 — extended from the original creator-only model):
   platform_admin    → all runs in org
   company_admin     → all runs in org
   department_admin  → all runs in org (they manage criteria + approvals)
-  department_user   → only runs they created (created_by_email == user.email)
+  department_user   → runs they match in runs_visible_to() SQL function:
+                        - runs they created (created_by_email match), OR
+                        - runs in any department they belong to
+                          (user_departments table), OR
+                        - runs they were explicitly invited to
+                          (rfp_collaborators table), OR
+                        - runs they are an assigned approver on
+                          (approval_assignments table)
 
 Override actions (confirm / override endpoint) require department_admin or above.
+
+The detailed access matrix is implemented in `app/domain/visibility.py` and the
+canonical SQL function `runs_visible_to()`. This module is a thin wrapper that
+preserves the existing API used by the rest of the codebase.
 """
 import json
 from fastapi import HTTPException
@@ -17,9 +28,26 @@ _WIDE_ROLES = {"platform_admin", "company_admin", "department_admin"}
 
 
 def can_view_run(user: TokenData, run: dict) -> bool:
+    """Returns True iff the user is permitted to view the given run.
+
+    Wide-role users see everything in their org (existing behaviour preserved).
+    For department_user, delegates to `app/domain/visibility.py:can_view_run`
+    which consults the user_departments / rfp_collaborators / approval_assignments
+    tables in addition to the legacy `created_by_email` ownership check.
+    """
     if user.role in _WIDE_ROLES:
         return True
-    return run.get("created_by_email") == user.email
+    # Legacy fast-path: own runs always visible. Avoids a DB roundtrip in the
+    # common case where a user is loading a run they created.
+    if run.get("created_by_email") == user.email:
+        return True
+    # Phase 9: delegate to visibility function for collaborators / dept members /
+    # approvers. Import lazily to avoid a circular import at module load.
+    from app.domain.visibility import can_view_run as _phase9_can_view
+    run_id = run.get("run_id")
+    if not run_id:
+        return False
+    return _phase9_can_view(user, str(run_id))
 
 
 def require_run_access(user: TokenData, run: dict) -> None:

@@ -604,3 +604,127 @@ CREATE INDEX IF NOT EXISTS idx_retrieval_log_run
     ON retrieval_log(run_id, criterion_id);
 CREATE INDEX IF NOT EXISTS idx_retrieval_log_org_vendor
     ON retrieval_log(org_id, vendor_id, created_at);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Phase 9 — Multi-user RFP visibility & collaboration
+-- ═══════════════════════════════════════════════════════════════════════
+-- Adds matrix department membership, explicit collaborator invites, and
+-- approval-queue assignments. The runs_visible_to() function below uses
+-- all three (plus role + ownership) to compute what each user can see.
+--
+-- INVARIANT: autonomous ingestion (Phase 5 watchers) must NEVER write to
+-- these tables. Access lists are decided when the RFP is created by a
+-- human; file arrival is data, not access.
+
+-- Matrix membership — a user can belong to multiple departments
+CREATE TABLE IF NOT EXISTS user_departments (
+    user_id        UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    department_id  TEXT NOT NULL,
+    role_in_dept   TEXT NOT NULL DEFAULT 'member'
+                       CHECK (role_in_dept IN ('member','lead','observer')),
+    added_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, department_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_departments_dept
+    ON user_departments(department_id);
+
+-- Explicit collaborator invites on a specific evaluation run
+CREATE TABLE IF NOT EXISTS rfp_collaborators (
+    run_id     UUID NOT NULL REFERENCES evaluation_runs(run_id) ON DELETE CASCADE,
+    user_id    UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'viewer'
+                   CHECK (role IN ('viewer','reviewer','editor')),
+    added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    added_by   UUID REFERENCES users(user_id) ON DELETE SET NULL,
+    PRIMARY KEY (run_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rfp_collaborators_user
+    ON rfp_collaborators(user_id);
+
+-- Approval queue — which user must sign off on which run
+CREATE TABLE IF NOT EXISTS approval_assignments (
+    run_id            UUID NOT NULL REFERENCES evaluation_runs(run_id) ON DELETE CASCADE,
+    approver_user_id  UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    approver_role     TEXT NOT NULL,   -- 'cfo' | 'cto' | 'cpo' | 'legal' | etc.
+    status            TEXT NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending','approved','rejected')),
+    assigned_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at       TIMESTAMPTZ,
+    comment           TEXT,
+    PRIMARY KEY (run_id, approver_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_approval_assignments_user_pending
+    ON approval_assignments(approver_user_id, status)
+    WHERE status = 'pending';
+
+-- RLS on the three new tables — org isolation via the joined evaluation_runs/users
+ALTER TABLE user_departments     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rfp_collaborators    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approval_assignments ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_user_departments') THEN
+        CREATE POLICY rls_user_departments ON user_departments
+            USING (EXISTS (
+                SELECT 1 FROM users u
+                WHERE u.user_id = user_departments.user_id
+                  AND u.org_id::text = current_setting('app.current_org_id', true)
+            ));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_rfp_collaborators') THEN
+        CREATE POLICY rls_rfp_collaborators ON rfp_collaborators
+            USING (EXISTS (
+                SELECT 1 FROM evaluation_runs r
+                WHERE r.run_id = rfp_collaborators.run_id
+                  AND r.org_id::text = current_setting('app.current_org_id', true)
+            ));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_approval_assignments') THEN
+        CREATE POLICY rls_approval_assignments ON approval_assignments
+            USING (EXISTS (
+                SELECT 1 FROM evaluation_runs r
+                WHERE r.run_id = approval_assignments.run_id
+                  AND r.org_id::text = current_setting('app.current_org_id', true)
+            ));
+    END IF;
+END $$;
+
+-- ── runs_visible_to() — central authorisation function ─────────────────
+-- Returns the set of evaluation_runs that a given user is permitted to see.
+-- Default-deny: if no predicate matches, the user sees nothing.
+--
+-- Predicates (OR'd):
+--   1. Wide org-level role (platform_admin, company_admin)
+--   2. User created the run                  (created_by_email match)
+--   3. User belongs to the run's department  (user_departments join)
+--   4. User was explicitly invited           (rfp_collaborators join)
+--   5. User is an assigned approver          (approval_assignments join)
+
+CREATE OR REPLACE FUNCTION runs_visible_to(
+    p_user_id    UUID,
+    p_user_email TEXT,
+    p_user_role  TEXT,
+    p_org_id     UUID
+)
+RETURNS SETOF evaluation_runs AS $$
+    SELECT r.* FROM evaluation_runs r
+    WHERE r.org_id = p_org_id
+      AND (
+        p_user_role IN ('platform_admin', 'company_admin')
+        OR r.created_by_email = p_user_email
+        OR r.creator_dept_id IN (
+            SELECT department_id FROM user_departments WHERE user_id = p_user_id
+        )
+        OR EXISTS (
+            SELECT 1 FROM rfp_collaborators c
+            WHERE c.run_id = r.run_id AND c.user_id = p_user_id
+        )
+        OR EXISTS (
+            SELECT 1 FROM approval_assignments a
+            WHERE a.run_id = r.run_id AND a.approver_user_id = p_user_id
+        )
+      );
+$$ LANGUAGE SQL STABLE;

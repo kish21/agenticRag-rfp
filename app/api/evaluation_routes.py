@@ -268,44 +268,92 @@ async def start_evaluation(
 # ── GET /list ──────────────────────────────────────────────────────────────────
 
 @router.get("/list")
-async def list_runs(user: TokenData = Depends(get_current_user)):
-    """Dashboard: returns evaluation runs the caller is allowed to see."""
+async def list_runs(
+    user: TokenData = Depends(get_current_user),
+    scope: str = "auto",
+):
+    """Dashboard: returns evaluation runs the caller is allowed to see.
+
+    Phase 9 — accepts an optional `?scope=` query parameter:
+      - `auto` (default)  → legacy behaviour (wide role sees org; dept_user sees own)
+      - `mine`            → runs the user personally created
+      - `department`      → runs in any department the user belongs to
+      - `approvals`       → runs the user has a pending approval on
+      - `shared`          → runs the user was explicitly invited to
+      - `all`             → entire visible set (the union of mine/department/
+                            approvals/shared); wide-role users get whole org
+
+    Default-deny: a user who doesn't match any predicate sees an empty list,
+    even within the same org.
+    """
     engine = get_engine()
 
-    if user.role == "department_user":
-        query = sa.text("""
-            SELECT
-                r.run_id::text, r.rfp_id, r.status, r.created_at,
-                r.approval_tier, r.contract_value, r.currency,
-                r.rfp_title, r.department,
-                array_length(r.vendor_ids, 1) AS vendor_count,
-                r.decision_output,
-                r.llm_cost_usd, r.llm_tokens_total
-            FROM evaluation_runs r
-            WHERE r.org_id = CAST(:oid AS uuid)
-              AND r.created_by_email = :email
-            ORDER BY r.created_at DESC
-            LIMIT 100
-        """)
-        params = {"oid": user.org_id, "email": user.email}
-    else:
-        query = sa.text("""
-            SELECT
-                r.run_id::text, r.rfp_id, r.status, r.created_at,
-                r.approval_tier, r.contract_value, r.currency,
-                r.rfp_title, r.department,
-                array_length(r.vendor_ids, 1) AS vendor_count,
-                r.decision_output,
-                r.llm_cost_usd, r.llm_tokens_total
-            FROM evaluation_runs r
-            WHERE r.org_id = CAST(:oid AS uuid)
-            ORDER BY r.created_at DESC
-            LIMIT 100
-        """)
-        params = {"oid": user.org_id}
+    # Legacy path — preserved exactly so existing frontend clients don't break.
+    if scope == "auto":
+        if user.role == "department_user":
+            query = sa.text("""
+                SELECT
+                    r.run_id::text, r.rfp_id, r.status, r.created_at,
+                    r.approval_tier, r.contract_value, r.currency,
+                    r.rfp_title, r.department,
+                    array_length(r.vendor_ids, 1) AS vendor_count,
+                    r.decision_output,
+                    r.llm_cost_usd, r.llm_tokens_total
+                FROM evaluation_runs r
+                WHERE r.org_id = CAST(:oid AS uuid)
+                  AND r.created_by_email = :email
+                ORDER BY r.created_at DESC
+                LIMIT 100
+            """)
+            params = {"oid": user.org_id, "email": user.email}
+        else:
+            query = sa.text("""
+                SELECT
+                    r.run_id::text, r.rfp_id, r.status, r.created_at,
+                    r.approval_tier, r.contract_value, r.currency,
+                    r.rfp_title, r.department,
+                    array_length(r.vendor_ids, 1) AS vendor_count,
+                    r.decision_output,
+                    r.llm_cost_usd, r.llm_tokens_total
+                FROM evaluation_runs r
+                WHERE r.org_id = CAST(:oid AS uuid)
+                ORDER BY r.created_at DESC
+                LIMIT 100
+            """)
+            params = {"oid": user.org_id}
 
-    with engine.connect() as conn:
-        rows = conn.execute(query, params).fetchall()
+        with engine.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+    else:
+        # Phase 9 scoped path — delegate to the visibility wrapper.
+        if scope not in ("mine", "department", "approvals", "shared", "all"):
+            raise HTTPException(status_code=400, detail=f"Unknown scope: {scope}")
+        if scope == "all" and user.role not in ("platform_admin", "company_admin"):
+            raise HTTPException(status_code=403, detail="scope=all requires a wide-role account")
+        from app.domain.visibility import visible_runs as _visible_runs
+        visible = _visible_runs(user, scope=scope, limit=100)
+        # Re-query the full row data for each visible run_id, then sort by created_at desc.
+        if not visible:
+            rows = []
+        else:
+            run_ids = [str(v["run_id"]) for v in visible]
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    sa.text("""
+                        SELECT
+                            r.run_id::text, r.rfp_id, r.status, r.created_at,
+                            r.approval_tier, r.contract_value, r.currency,
+                            r.rfp_title, r.department,
+                            array_length(r.vendor_ids, 1) AS vendor_count,
+                            r.decision_output,
+                            r.llm_cost_usd, r.llm_tokens_total
+                        FROM evaluation_runs r
+                        WHERE r.run_id::text = ANY(:ids)
+                        ORDER BY r.created_at DESC
+                        LIMIT 100
+                    """),
+                    {"ids": run_ids},
+                ).fetchall()
 
     runs = []
     for row in rows:
@@ -898,3 +946,65 @@ async def delete_run(run_id: str, user: TokenData = Depends(get_current_user)):
           actor=user.email, detail={"status_at_deletion": run["status"]})
 
     return {"run_id": run_id, "deleted": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 9 — Collaborator management on a specific evaluation run
+# ═══════════════════════════════════════════════════════════════════════════
+
+class CollaboratorRequest(BaseModel):
+    user_id: str
+    role: str = "viewer"  # 'viewer' | 'reviewer' | 'editor'
+
+
+@router.post("/{run_id}/collaborators")
+async def add_run_collaborator(
+    run_id: str,
+    body: CollaboratorRequest,
+    user: TokenData = Depends(get_current_user),
+):
+    """Invite a user to collaborate on this evaluation run. The caller must
+    already have view access to the run (creator, dept member, admin, or
+    existing collaborator with editor role)."""
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+
+    # Look up adder's user_id (we need it for added_by FK).
+    import sqlalchemy as _sa
+    from app.db.fact_store import get_engine as _ge
+    with _ge().connect() as _conn:
+        row = _conn.execute(
+            _sa.text("SELECT user_id::text FROM users WHERE email = :email AND org_id = CAST(:oid AS uuid)"),
+            {"email": user.email, "oid": user.org_id},
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Caller user record not found")
+    adder_user_id = row[0]
+
+    from app.domain.visibility import add_collaborator as _add
+    try:
+        _add(run_id, body.user_id, body.role, adder_user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    audit(org_id=user.org_id, run_id=run_id, event_type="collaborator.added",
+          actor=user.email, detail={"invited_user_id": body.user_id, "role": body.role})
+    return {"status": "ok", "run_id": run_id, "user_id": body.user_id, "role": body.role}
+
+
+@router.delete("/{run_id}/collaborators/{user_id}")
+async def remove_run_collaborator(
+    run_id: str,
+    user_id: str,
+    user: TokenData = Depends(get_current_user),
+):
+    """Remove a collaborator. Same access requirement as adding."""
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+
+    from app.domain.visibility import remove_collaborator as _rm
+    _rm(run_id, user_id)
+
+    audit(org_id=user.org_id, run_id=run_id, event_type="collaborator.removed",
+          actor=user.email, detail={"removed_user_id": user_id})
+    return {"status": "ok", "run_id": run_id, "removed_user_id": user_id}
