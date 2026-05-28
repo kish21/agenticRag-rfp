@@ -48,7 +48,7 @@ async def _generate_hyde_document(query: str, doc_type: str = "vendor_response")
         {"role": "system", "content": system},
         {"role": "user", "content": query},
     ]
-    result = await call_llm(messages, temperature=0.1)
+    result = await call_llm(messages, temperature=0.0)
     return result.strip()
 
 

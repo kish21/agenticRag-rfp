@@ -54,6 +54,17 @@ class GroundedClaim(BaseModel):
     confidence: float = 0.8
 
 
+class SystemFact(BaseModel):
+    """A claim sourced from upstream agent outputs (decision/evaluation/comparator/
+    extraction) rather than from a PDF chunk. Has NO grounding_quote — the source
+    is the system's own structured output, which is trusted by definition.
+    Keeping this separate from GroundedClaim is what stops the Explanation LLM
+    from fabricating chunk_ids for facts like 'Rank: 2' or 'Score: 8.5/10'."""
+    fact_text: str
+    origin: Literal["decision", "evaluation", "extraction", "comparator"]
+    origin_id: str = ""  # check_id | criterion_id | vendor rank as string | etc.
+
+
 class SynthesisLLMResponse(BaseModel):
     """Validates the raw LLM JSON output from the synthesis/explanation step."""
     executive_summary: str = ""
@@ -61,10 +72,20 @@ class SynthesisLLMResponse(BaseModel):
     scoring_narrative: str = ""
     recommendation_rationale: str = ""
     grounded_claims: List[GroundedClaim] = []
+    # System-computed facts (rank, score, check pass/fail). NO grounding required —
+    # these come from trusted upstream agents, not PDF chunks.
+    system_facts: List[SystemFact] = []
 
     @field_validator("grounded_claims", mode="before")
     @classmethod
     def _coerce_claims(cls, v: object) -> object:
+        if not isinstance(v, list):
+            return []
+        return v
+
+    @field_validator("system_facts", mode="before")
+    @classmethod
+    def _coerce_system_facts(cls, v: object) -> object:
         if not isinstance(v, list):
             return []
         return v
@@ -79,6 +100,12 @@ class VendorNarrative(BaseModel):
     recommendation_rationale: str
     grounded_claims: List[GroundedClaim]
     ungrounded_claims_removed: int = 0
+    # System-computed facts that don't need grounding (decision rank, scores, etc.)
+    system_facts: List[SystemFact] = []
+    # Diagnostic — captures each claim that failed verify_grounding() with the
+    # LLM-supplied quote next to a slice of the actual source chunk so the
+    # drift pattern (unicode, paraphrase, wrong chunk) can be inspected.
+    ungrounded_examples: List[dict] = []
 
 class ExplanationOutput(BaseModel):
     explanation_id: str

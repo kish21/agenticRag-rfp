@@ -92,7 +92,7 @@ async def _generate_vendor_narrative(
         },
     ]
 
-    raw = await call_llm(messages, temperature=0.2,
+    raw = await call_llm(messages, temperature=0.0,
                          response_format={"type": "json_object"})
 
     try:
@@ -107,12 +107,25 @@ async def _generate_vendor_narrative(
 
     verified_claims = []
     ungrounded_count = 0
+    ungrounded_examples: list[dict] = []
 
     for claim in synthesis.grounded_claims:
         if verify_grounding(claim.claim_text, claim.grounding_quote, claim.source_chunk_id, source_chunks):
             verified_claims.append(claim)
         else:
             ungrounded_count += 1
+            src_text = source_chunks.get(claim.source_chunk_id, "")
+            ungrounded_examples.append({
+                "claim_text":        claim.claim_text,
+                "llm_grounding_quote": claim.grounding_quote,
+                "cited_chunk_id":    claim.source_chunk_id,
+                "chunk_exists":      bool(src_text),
+                "source_excerpt":    src_text[:600] if src_text else "(no chunk under this id)",
+                "diagnosis_hint":    (
+                    "wrong_chunk_id" if not src_text else
+                    "quote_not_in_source"
+                ),
+            })
 
     return VendorNarrative(
         vendor_id=vendor_id,
@@ -123,6 +136,10 @@ async def _generate_vendor_narrative(
         recommendation_rationale=synthesis.recommendation_rationale,
         grounded_claims=verified_claims,
         ungrounded_claims_removed=ungrounded_count,
+        # System-computed facts (rank, score, check pass/fail) bypass grounding.
+        # Their truth comes from upstream agent outputs, not PDF chunks.
+        system_facts=list(synthesis.system_facts),
+        ungrounded_examples=ungrounded_examples,
     )
 
 

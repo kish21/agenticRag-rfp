@@ -68,7 +68,13 @@ def _langsmith_session():
 
 @lru_cache(maxsize=1)
 def _langsmith_available() -> bool:
-    """Returns True only if LANGSMITH_API_KEY is set and hub is reachable."""
+    """Returns True only if LANGSMITH_API_KEY is set, hub is reachable, AND
+    PROMPTS_FORCE_LOCAL is not enabled. Local-YAML override is critical for dev
+    workflows where the YAML has been updated but the Hub version is stale
+    (e.g. Phase 1 grounded_claims/system_facts split — the local YAML moves
+    first, the Hub version follows once the new prompt is validated)."""
+    if os.getenv("PROMPTS_FORCE_LOCAL", "false").lower() == "true":
+        return False
     if not os.getenv("LANGSMITH_API_KEY"):
         return False
     try:

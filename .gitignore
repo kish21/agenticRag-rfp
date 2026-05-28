@@ -20,6 +20,7 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
 
 # Data (can be large / sensitive)
 data/documents/
@@ -79,6 +80,7 @@ Thumbs.db
 
 # Smoke test runtime state
 .smoke_test_state.json
+tests/smoke_results/
 
 # Design reference archives (large binary files)
 *.rar
@@ -95,3 +97,8 @@ START_HERE.md
 docs/SKILL_02_INTERVIEW_QA.md
 docs/SKILL_02_WHAT_WE_BUILT.md
 SESSION_PLAN.md
+
+# Internal review documents (not for public repo)
+PLATFORM_REVIEW_2026.md
+Codex_review.md
+copilot_appreview.md
