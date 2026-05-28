@@ -380,7 +380,8 @@ async def drive_graph_verbose(graph, initial_state: dict, out_dir: Path) -> tupl
     initial_keys = {k for k, v in initial_state.items()
                     if k not in _DROP_KEYS and v not in (None, {}, [], "", False)}
 
-    async for state_diff in graph.astream(initial_state):
+    # recursion_limit=50 to accommodate Phase 2 critic-retry cycles
+    async for state_diff in graph.astream(initial_state, {"recursion_limit": 50}):
         elapsed = time.perf_counter() - last_tick
         # astream yields {node_name: updated_fields_dict}
         node_name = next(iter(state_diff))

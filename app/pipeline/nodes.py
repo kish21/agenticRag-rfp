@@ -596,6 +596,10 @@ async def explanation_per_vendor(state: PipelineState) -> dict:
 
     is_rejected = any(r.vendor_id == vid for r in decision_output.rejected_vendors)
 
+    # Phase 2 — pass through any critic feedback from a prior attempt so the
+    # LLM corrects course. Empty string on the first attempt (no-op).
+    critic_feedback = state.get("explanation_critic_feedback") or ""
+
     try:
         async with vendor_slot():
             narrative = await _generate_vendor_narrative(
@@ -607,6 +611,7 @@ async def explanation_per_vendor(state: PipelineState) -> dict:
                 source_chunks=vendor_chunks,
                 decision_output=decision_output,
                 currency=state["currency"],
+                critic_feedback=critic_feedback,
             )
             return {"vendor_narratives_accum": {vid: narrative}}
     except Exception as exc:
@@ -625,23 +630,27 @@ async def explanation_per_vendor(state: PipelineState) -> dict:
 
 
 async def explanation_finalise(state: PipelineState) -> dict:
-    """Aggregates per-vendor narratives into the final ExplanationOutput,
-    runs the critic, and preserves diagnostics on a HARD block (Phase 1 fix)."""
+    """Aggregates per-vendor narratives into the final ExplanationOutput.
+
+    Phase 2: this node NO LONGER runs the critic — that decision moved to
+    the new `explanation_critic` node which can route to retry-with-feedback
+    instead of just blocking. finalise's job is now purely "build the
+    aggregate output." It never raises a hard block; the critic does.
+    Exception handling preserves the in-progress output for diagnostics
+    if aggregation itself crashes (very rare — pure aggregation code)."""
     from app.agents.explanation import _build_executive_summary
     from app.schemas.schema_decision import ExplanationOutput
 
     agent = "explanation"
     vendor_narratives_accum = state.get("vendor_narratives_accum") or {}
     decision_output = state["decision_output"]
-    source_chunks = state.get("source_chunks") or {}
 
-    exp_out = None  # so the block handler can still preserve diagnostics
+    exp_out = None
     try:
         # Sort by vendor_id for deterministic output across runs.
         vendor_narratives = [vendor_narratives_accum[v]
                              for v in sorted(vendor_narratives_accum.keys())]
 
-        # Aggregate grounding completeness (same formula as the original agent)
         total_claims = sum(
             len(n.grounded_claims) + n.ungrounded_claims_removed
             for n in vendor_narratives
@@ -689,19 +698,143 @@ async def explanation_finalise(state: PipelineState) -> dict:
             report_confidence=decision_output.decision_confidence,
         )
 
-        exp_critic = critic_after_explanation(exp_out, source_chunks)
-        _hard_block_if(exp_critic, "explanation")
-
-        _emit(state, agent, "done",
-              "Report ready — every claim cited",
-              log_msg="Evaluation complete. Full report ready with citations for every finding.")
-
+        # No "done" emit here — the critic node decides when the stage is truly
+        # done (might be retried). The critic emits the final "done" event.
         return {"explanation_output": exp_out}
 
     except Exception as exc:
-        # Preserve the generated explanation (with ungrounded_examples diagnostics)
-        # even on critic-block — Phase 1's safety property.
+        # Pure aggregation crashed (e.g. bad shape in narratives_accum) —
+        # genuinely fatal; route to END with whatever output we have.
         update = _block_update(state, agent, exc)
         if exp_out is not None:
             update["explanation_output"] = exp_out
         return update
+
+
+# ── Phase 2 — Explanation critic node (retry-with-feedback controller) ────────
+
+_EXPLANATION_MAX_RETRIES = 2  # 2 retries = 3 total attempts
+
+
+def _build_critic_feedback(exp_out, exp_critic) -> str:
+    """Construct structured retry guidance from the previous attempt's
+    diagnostic fields. The Explanation LLM sees this on the next attempt
+    as a 'PREVIOUS ATTEMPT FAILED' preamble. The more specific the feedback,
+    the better the retry succeeds — generic 'do better' wastes a budget slot."""
+    parts: list[str] = []
+
+    # Headline metric
+    gc = getattr(exp_out, "grounding_completeness", 0.0) if exp_out else 0.0
+    parts.append(
+        f"PREVIOUS ATTEMPT FAILED: grounding_completeness={gc:.0%} "
+        "(threshold is 70%). Fix per the guidance below — do NOT repeat the same mistakes."
+    )
+
+    # Diagnostic samples from ungrounded_examples (Phase 1's instrumentation)
+    if exp_out:
+        samples = []
+        for narrative in (exp_out.vendor_narratives or [])[:3]:
+            for ex in (getattr(narrative, "ungrounded_examples", []) or [])[:2]:
+                hint = ex.get("diagnosis_hint", "unknown")
+                claim = ex.get("claim_text", "")[:100]
+                quote = ex.get("llm_grounding_quote", "")[:120]
+                samples.append(f"  - vendor={narrative.vendor_id} ({hint}): "
+                               f"claim={claim!r}, quote you cited={quote!r}")
+        if samples:
+            parts.append("Examples of claims that were rejected:")
+            parts.extend(samples)
+
+    # General rule reminder — most failures are metadata-as-grounded-claim
+    parts.append(
+        "RULES:\n"
+        "  • PDF-content claims (vendor proposal text)  → grounded_claims, with verbatim quote.\n"
+        "  • System metadata (decision rank, scores, MC-* check IDs)  → system_facts, NO quote, NO chunk_id.\n"
+        "  • The grounding_quote MUST be a copy-paste verbatim substring of one source chunk.\n"
+    )
+    return "\n".join(parts)
+
+
+async def explanation_critic(state: PipelineState) -> dict:
+    """Phase 2 — Critic-as-controller for the Explanation stage.
+
+    Reads state['explanation_output'], runs the critic, and decides routing.
+    Three outcomes (read by _route_after_explanation_critic):
+      APPROVED   → emits 'done' and routes to END
+      RETRY      → bumps retry_count, writes feedback into state, signals
+                   loop-back to explanation_start
+      EXHAUSTED  → 3rd consecutive block; emits 'blocked' and routes to END
+
+    The critic itself is unchanged (`critic_after_explanation`). What's new
+    is the routing logic that converts BLOCKED into a retry instead of a
+    pipeline-fatal exception."""
+    agent = "explanation"
+    exp_out = state.get("explanation_output")
+    source_chunks = state.get("source_chunks") or {}
+    retry_count = state.get("explanation_retry_count") or 0
+
+    if exp_out is None:
+        # finalise didn't produce an output (genuine aggregation failure).
+        # Treat as exhausted — nothing useful to retry from.
+        _emit(state, agent, "blocked",
+              "No explanation output to evaluate",
+              log_msg="The report aggregation failed; cannot retry.")
+        return {"blocked": True, "blocked_agent": agent,
+                "error_message": "explanation_finalise produced no output"}
+
+    exp_critic = critic_after_explanation(exp_out, source_chunks)
+
+    if exp_critic.overall_verdict != CriticVerdict.BLOCKED:
+        # APPROVED or APPROVED_WITH_WARNINGS — done.
+        _emit(state, agent, "done",
+              f"Report ready — every claim cited (attempt {retry_count + 1})",
+              log_msg=("Evaluation complete. Report ready with citations for every finding."
+                       if retry_count == 0
+                       else f"Report ready on retry attempt {retry_count + 1}."))
+        return {"explanation_retry_requested": False}
+
+    # BLOCKED — decide retry vs exhausted.
+    hard_descs = "; ".join(f.description for f in exp_critic.flags
+                           if f.severity.value == "hard")[:240]
+
+    if retry_count >= _EXPLANATION_MAX_RETRIES:
+        # Exhausted budget. Emit blocked event, preserve explanation_output
+        # (already in state from finalise) for the user to see why.
+        _emit(state, agent, "blocked",
+              f"[CRITIC BLOCK after {retry_count + 1} attempts] {hard_descs}",
+              log_msg=f"Report could not pass the quality gate after "
+                      f"{retry_count + 1} attempts. See explanation diagnostics for why.")
+        rfp_logger.dev(DevLevel.ERROR, agent,
+                       f"Critic exhausted after {retry_count + 1} attempts: {hard_descs}",
+                       data={"retry_count": retry_count,
+                             "flags": [f.check_name for f in exp_critic.flags]},
+                       run_id=state["run_id"], org_id=state["org_id"])
+        return {
+            "blocked": True,
+            "blocked_agent": agent,
+            "error_message": f"[CRITIC BLOCK after {retry_count + 1} attempts] {hard_descs}",
+            "explanation_retry_requested": False,
+        }
+
+    # Retry: build feedback, bump counter, signal loop-back.
+    feedback = _build_critic_feedback(exp_out, exp_critic)
+    next_attempt = retry_count + 1
+    _emit(state, agent, "retrying",
+          f"Critic blocked (attempt {retry_count + 1}); retrying with feedback",
+          log_msg=f"The report quality check failed (attempt {retry_count + 1}). "
+                  f"Retrying with structured feedback. {hard_descs[:120]}")
+    rfp_logger.dev(DevLevel.INFO, agent,
+                   f"Critic block → retry {next_attempt} of {_EXPLANATION_MAX_RETRIES}: {hard_descs[:200]}",
+                   data={"attempt": retry_count + 1,
+                         "next_attempt": next_attempt + 1,
+                         "feedback_chars": len(feedback)},
+                   run_id=state["run_id"], org_id=state["org_id"])
+    return {
+        "explanation_retry_count": next_attempt,
+        "explanation_critic_feedback": feedback,
+        # Clear the previous explanation_output so finalise re-aggregates fresh.
+        # vendor_narratives_accum entries are overwritten by the merge reducer
+        # when explanation_per_vendor re-runs with the same vendor_ids.
+        "explanation_output": None,
+        # Explicit routing signal — read by _route_after_explanation_critic
+        "explanation_retry_requested": True,
+    }

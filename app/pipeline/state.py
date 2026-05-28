@@ -86,6 +86,22 @@ class PipelineState(TypedDict):
     decision_output:    Any   # DecisionOutput    | None
     explanation_output: Any   # ExplanationOutput | None
 
+    # ── Phase 2 — Critic-as-controller (retry-with-feedback) ─────────────────
+    # The explanation_critic node reads explanation_output, runs the critic,
+    # and decides routing: approved -> END | retry -> back to explanation_start
+    # | exhausted -> END. retry_count caps the loop at 2 retries (3 attempts).
+    # explanation_critic_feedback carries structured guidance derived from
+    # the previous attempt's ungrounded_examples — explanation_per_vendor
+    # injects it into the next LLM call so the model knows what went wrong.
+    explanation_retry_count: int        # 0..2
+    explanation_critic_feedback: str    # structured feedback from previous attempt
+
+    # Transient routing flag set by explanation_critic node — True on a "retry"
+    # verdict, False otherwise. Read by _route_after_explanation_critic in
+    # graph.py. Explicit boolean is more robust than inferring retry-intent
+    # from the absence of explanation_output.
+    explanation_retry_requested: bool
+
     # ── Control flow ─────────────────────────────────────────────────────────
     blocked: bool
     blocked_agent: str

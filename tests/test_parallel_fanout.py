@@ -27,13 +27,16 @@ from app.pipeline import concurrency as conc  # noqa: E402
 
 
 # Stages and patch names — kept in sync with test_pipeline_graph.py.
+# explanation_critic is patched too (added in Phase 2) — the production
+# critic depends on a real ExplanationOutput which our no-op mocks skip.
 _NODE_PATCH_NAMES = [
     "planner_node", "ingestion_node",
     "retrieval_start", "retrieval_per_vendor", "retrieval_done",
     "extraction_start", "extraction_per_vendor", "extraction_done",
     "evaluation_start", "evaluation_per_vendor", "evaluation_done",
     "comparator_node", "decision_node",
-    "explanation_start", "explanation_per_vendor", "explanation_finalise",
+    "explanation_start", "explanation_per_vendor",
+    "explanation_finalise", "explanation_critic",
 ]
 
 

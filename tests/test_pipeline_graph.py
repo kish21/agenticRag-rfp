@@ -29,7 +29,11 @@ from app.pipeline.state import PipelineState
 # Stages that are split into start/per_vendor/done (or finalise for explanation).
 # Each contributes 3 nodes to the graph.
 _FAN_OUT_STAGES = ["retrieval", "extraction", "evaluation"]
-_EXPLANATION_NODES = ["explanation_start", "explanation_per_vendor", "explanation_finalise"]
+# Phase 2: explanation has 4 nodes — start + per_vendor + finalise + critic (controller).
+_EXPLANATION_NODES = [
+    "explanation_start", "explanation_per_vendor",
+    "explanation_finalise", "explanation_critic",
+]
 
 # Non-per-vendor nodes that follow the original blocked→END pattern.
 _LINEAR_NODES = ["planner", "ingestion", "comparator", "decision"]
@@ -44,13 +48,16 @@ _ALL_GRAPH_NODES = (
 )
 
 # Patch target -> mock kind. _ok() is the default; tests can override.
+# explanation_critic is patched too — its production logic depends on a real
+# ExplanationOutput which the no-op mocks don't produce.
 _NODE_PATCH_NAMES = [
     "planner_node", "ingestion_node",
     "retrieval_start", "retrieval_per_vendor", "retrieval_done",
     "extraction_start", "extraction_per_vendor", "extraction_done",
     "evaluation_start", "evaluation_per_vendor", "evaluation_done",
     "comparator_node", "decision_node",
-    "explanation_start", "explanation_per_vendor", "explanation_finalise",
+    "explanation_start", "explanation_per_vendor",
+    "explanation_finalise", "explanation_critic",
 ]
 
 
@@ -163,11 +170,25 @@ class TestGraphTopology:
             assert (per, done) in edge_pairs, \
                 f"Missing edge {per} -> {done}"
 
-    def test_explanation_finalise_is_terminal(self):
+    def test_explanation_critic_is_terminal_controller(self):
+        """Phase 2 — explanation_critic is the terminal node (controller).
+        It must have at least two outgoing edges: 'retry' back to
+        explanation_start, and END for the approved/exhausted paths."""
+        edges = build_graph().get_graph().edges
+        critic_out = [e for e in edges if e.source == "explanation_critic"]
+        assert len(critic_out) >= 2, \
+            f"explanation_critic must have retry + END edges; got {len(critic_out)}"
+        targets = {e.target for e in critic_out}
+        assert "__end__" in targets, "explanation_critic must have an END edge"
+        assert "explanation_start" in targets, \
+            "explanation_critic must have a retry edge back to explanation_start"
+
+    def test_explanation_finalise_routes_to_critic(self):
         edges = [e for e in build_graph().get_graph().edges
                  if e.source == "explanation_finalise"]
-        assert len(edges) == 1, "explanation_finalise must have exactly one outgoing edge"
-        assert edges[0].target == "__end__"
+        assert len(edges) == 1
+        assert edges[0].target == "explanation_critic", \
+            "explanation_finalise must route to explanation_critic (Phase 2)"
 
     def test_comparator_is_sync_barrier_after_evaluation(self):
         """evaluation_done → comparator is the sync point where all per-vendor

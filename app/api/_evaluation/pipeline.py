@@ -116,7 +116,12 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         # astream() yields {node_name: state_diff} after each node completes.
         # We iterate to drive execution; nodes write progress to the DB themselves.
         final_state: PipelineState = initial_state
-        async for state_diff in evaluation_graph.astream(initial_state):
+        # recursion_limit raised to 50 for Phase 2 critic-retry cycles
+        # (default is 25; a single full pass uses ~18 steps; +2 retries = ~24
+        # extra explanation-cycle steps, comfortably under 50).
+        async for state_diff in evaluation_graph.astream(
+            initial_state, {"recursion_limit": 50}
+        ):
             # state_diff is {node_name: updated_fields_dict}
             node_name = next(iter(state_diff))
             updated   = state_diff[node_name]

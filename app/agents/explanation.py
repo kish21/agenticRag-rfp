@@ -52,8 +52,13 @@ async def _generate_vendor_narrative(
     source_chunks: dict[str, str],
     decision_output: DecisionOutput,
     currency: str = "GBP",
+    critic_feedback: str = "",
 ) -> VendorNarrative:
-    """Generates narrative sections and verifies every claim is grounded."""
+    """Generates narrative sections and verifies every claim is grounded.
+
+    Phase 2: optionally accepts `critic_feedback` from a previous attempt's
+    critic verdict. When non-empty, it is prepended to the user message as
+    a 'PREVIOUS ATTEMPT FAILED' preamble so the LLM corrects course."""
 
     context_facts = _build_fact_context(extraction, currency=currency)
     compliance_summary = _build_compliance_summary(evaluation)
@@ -78,11 +83,20 @@ async def _generate_vendor_narrative(
             f"Recommendation: {shortlisted.recommendation if shortlisted else '?'}"
         )
 
+    # Phase 2 retry feedback prepended to user message (if any)
+    feedback_block = (
+        f"========================================\n"
+        f"{critic_feedback}\n"
+        f"========================================\n\n"
+        if critic_feedback else ""
+    )
+
     messages = [
         {"role": "system", "content": get_prompt("explanation/generate_narrative")},
         {
             "role": "user",
             "content": (
+                f"{feedback_block}"
                 f"Vendor: {vendor_name} ({vendor_id})\n"
                 f"Decision: {decision_context}\n\n"
                 f"Compliance results:\n{compliance_summary}\n\n"

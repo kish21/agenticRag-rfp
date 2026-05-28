@@ -55,8 +55,8 @@ from .nodes import (
     # Cross-vendor stages
     comparator_node,
     decision_node,
-    # Explanation (3 nodes — fan-out + final stitching)
-    explanation_start, explanation_per_vendor, explanation_finalise,
+    # Explanation (Phase 2: 4 nodes — fan-out + finalise + critic-controller)
+    explanation_start, explanation_per_vendor, explanation_finalise, explanation_critic,
 )
 
 # Node name constants
@@ -81,6 +81,7 @@ _DECISION   = "decision"
 _EXPLANATION_START      = "explanation_start"
 _EXPLANATION_PER_VENDOR = "explanation_per_vendor"
 _EXPLANATION_FINALISE   = "explanation_finalise"
+_EXPLANATION_CRITIC     = "explanation_critic"   # Phase 2 — controller node
 
 
 # ── Routing helpers ──────────────────────────────────────────────────────────
@@ -134,6 +135,7 @@ def build_graph() -> CompiledStateGraph:
     g.add_node(_EXPLANATION_START,      explanation_start)
     g.add_node(_EXPLANATION_PER_VENDOR, explanation_per_vendor)
     g.add_node(_EXPLANATION_FINALISE,   explanation_finalise)
+    g.add_node(_EXPLANATION_CRITIC,     explanation_critic)
 
     # ── Entry point ─────────────────────────────────────────────────────────
     g.set_entry_point(_PLANNER)
@@ -168,16 +170,40 @@ def build_graph() -> CompiledStateGraph:
     g.add_conditional_edges(_DECISION,   _route_after,
                             {END: END, "continue": _EXPLANATION_START})
 
-    # ── Explanation stage (fan-out + finalise) ─────────────────────────────
+    # ── Explanation stage (fan-out + finalise + Phase 2 critic-controller) ──
+    #
+    # Topology:
+    #     explanation_start → [fan-out] → explanation_per_vendor (×N)
+    #                                          ↓
+    #                                  explanation_finalise
+    #                                          ↓
+    #                                 explanation_critic ─→ approved → END
+    #                                          │
+    #                                          ├──→ retry → explanation_start
+    #                                          │
+    #                                          └──→ exhausted (blocked) → END
+    #
     g.add_conditional_edges(_EXPLANATION_START, _fan_out(_EXPLANATION_PER_VENDOR),
                             [_EXPLANATION_PER_VENDOR, END])
     g.add_edge(_EXPLANATION_PER_VENDOR, _EXPLANATION_FINALISE)
-    g.add_edge(_EXPLANATION_FINALISE, END)
+    g.add_edge(_EXPLANATION_FINALISE, _EXPLANATION_CRITIC)
+    g.add_conditional_edges(_EXPLANATION_CRITIC, _route_after_explanation_critic,
+                            {"retry": _EXPLANATION_START, END: END})
 
-    # Recursion limit guard — Phase 4 has no cycles but Phase 2 (critic retry)
-    # will introduce them. Setting a generous floor now means Phase 2 won't
-    # need to touch graph.py just to relax recursion behaviour.
     return g.compile()
+
+
+def _route_after_explanation_critic(state: PipelineState) -> str:
+    """Phase 2 routing decision for the explanation_critic node.
+
+    The critic node sets an explicit `explanation_retry_requested: bool` flag
+    so this router has an unambiguous signal — no inferring from the absence
+    of other fields."""
+    if state.get("blocked"):
+        return END
+    if state.get("explanation_retry_requested"):
+        return "retry"
+    return END
 
 
 # Module-level singleton — built once on first import, reused across requests.
