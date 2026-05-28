@@ -255,9 +255,28 @@ async def retrieval_per_vendor(state: PipelineState) -> dict:
                 warnings=[],
             )
 
-            # Per-vendor critic — emits soft warnings via log but does NOT
-            # block the pipeline in Phase 4. (Phase 2 will hook retry here.)
-            critic_after_retrieval(combined, is_mandatory=False)
+            # Per-vendor critic — restored after Phase 4 regression review.
+            # HARD verdicts mark THIS vendor as failed (other vendors continue
+            # under per-vendor isolation); soft warnings are logged only.
+            # Pre-Phase-4 behaviour was "HARD → abort the whole pipeline";
+            # Phase 4 isolation upgrades this to "HARD → fail this vendor".
+            combined_critic = critic_after_retrieval(combined, is_mandatory=False)
+            if combined_critic.overall_verdict == CriticVerdict.BLOCKED:
+                hard_descs = "; ".join(f.description for f in combined_critic.flags
+                                       if f.severity.value == "hard")[:240]
+                rfp_logger.dev(DevLevel.ERROR, agent,
+                               f"Vendor {vid} retrieval HARD-blocked by critic: {hard_descs}",
+                               data={"vendor_id": vid,
+                                     "verdict": combined_critic.overall_verdict.value,
+                                     "flags": [f.check_name for f in combined_critic.flags]},
+                               run_id=state["run_id"], org_id=org_id)
+                return {
+                    "failed_vendors": [{
+                        "vendor_id": vid, "stage": "retrieval",
+                        "error": f"critic_hard_block: {hard_descs}",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    }],
+                }
 
             rfp_logger.dev(DevLevel.RAG, agent,
                            f"Vendor {vid}: {len(merged_chunks)} unique chunks "
@@ -429,6 +448,27 @@ async def evaluation_per_vendor(state: PipelineState) -> dict:
                 vendor_id=vid, org_id=org_id, run_id=state["run_id"],
                 evaluation_setup=evaluation_setup,
                 extraction_output=extraction_output_objects.get(vid))
+
+            # HARD-block guard restored after Phase 4 regression review.
+            # Pre-Phase-4: HARD critic on evaluation aborted the whole run.
+            # Phase 4 isolation: HARD critic on ONE vendor's evaluation marks
+            # that vendor failed (others continue). Soft/warning logged.
+            if ev_critic.overall_verdict == CriticVerdict.BLOCKED:
+                hard_descs = "; ".join(f.description for f in ev_critic.flags
+                                       if f.severity.value == "hard")[:240]
+                rfp_logger.dev(DevLevel.ERROR, agent,
+                               f"Vendor {vid} evaluation HARD-blocked by critic: {hard_descs}",
+                               data={"vendor_id": vid,
+                                     "verdict": ev_critic.overall_verdict.value,
+                                     "flags": [f.check_name for f in ev_critic.flags]},
+                               run_id=state["run_id"], org_id=org_id)
+                return {
+                    "failed_vendors": [{
+                        "vendor_id": vid, "stage": "evaluation",
+                        "error": f"critic_hard_block: {hard_descs}",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    }],
+                }
             if ev_critic.overall_verdict.value != "approved":
                 rfp_logger.dev(DevLevel.INFO, agent,
                                f"Vendor {vid} critic: {ev_critic.overall_verdict.value} "
@@ -599,6 +639,11 @@ async def explanation_per_vendor(state: PipelineState) -> dict:
     # Phase 2 — pass through any critic feedback from a prior attempt so the
     # LLM corrects course. Empty string on the first attempt (no-op).
     critic_feedback = state.get("explanation_critic_feedback") or ""
+    # Phase 2 (fix) — tag accumulator key with current attempt number so
+    # stale narratives from a previous attempt don't leak into a retry.
+    # explanation_finalise filters to the LATEST attempt per vendor.
+    attempt = (state.get("explanation_retry_count") or 0) + 1
+    accum_key = f"{vid}@attempt{attempt}"
 
     try:
         async with vendor_slot():
@@ -613,7 +658,7 @@ async def explanation_per_vendor(state: PipelineState) -> dict:
                 currency=state["currency"],
                 critic_feedback=critic_feedback,
             )
-            return {"vendor_narratives_accum": {vid: narrative}}
+            return {"vendor_narratives_accum": {accum_key: narrative}}
     except Exception as exc:
         rfp_logger.dev(DevLevel.ERROR, agent,
                        f"Vendor {vid} explanation failed: {exc}",
@@ -645,11 +690,31 @@ async def explanation_finalise(state: PipelineState) -> dict:
     vendor_narratives_accum = state.get("vendor_narratives_accum") or {}
     decision_output = state["decision_output"]
 
+    # Phase 2 (fix #1) — accumulator keys are "{vid}@attempt{N}". Pick the
+    # HIGHEST attempt per vendor. This drops stale narratives from previous
+    # attempts. If a vendor had a SUCCESSFUL attempt 1 but a CRASHED attempt 2
+    # (no new key written), the attempt-1 narrative is preserved (best-effort).
+    # If a vendor succeeded on attempt 2, the attempt-1 narrative is dropped.
+    latest_per_vendor: dict[str, tuple[int, object]] = {}  # vid -> (attempt, narrative)
+    for accum_key, narrative in vendor_narratives_accum.items():
+        # Defensive: accept untagged legacy keys (treat as attempt 0).
+        if "@attempt" in accum_key:
+            vid, attempt_marker = accum_key.split("@attempt", 1)
+            try:
+                attempt = int(attempt_marker)
+            except ValueError:
+                attempt = 0
+        else:
+            vid, attempt = accum_key, 0
+        prior_attempt, _ = latest_per_vendor.get(vid, (-1, None))
+        if attempt > prior_attempt:
+            latest_per_vendor[vid] = (attempt, narrative)
+
     exp_out = None
     try:
         # Sort by vendor_id for deterministic output across runs.
-        vendor_narratives = [vendor_narratives_accum[v]
-                             for v in sorted(vendor_narratives_accum.keys())]
+        vendor_narratives = [latest_per_vendor[v][1]
+                             for v in sorted(latest_per_vendor.keys())]
 
         total_claims = sum(
             len(n.grounded_claims) + n.ungrounded_claims_removed
@@ -832,8 +897,10 @@ async def explanation_critic(state: PipelineState) -> dict:
         "explanation_retry_count": next_attempt,
         "explanation_critic_feedback": feedback,
         # Clear the previous explanation_output so finalise re-aggregates fresh.
-        # vendor_narratives_accum entries are overwritten by the merge reducer
-        # when explanation_per_vendor re-runs with the same vendor_ids.
+        # The retried explanation_per_vendor branches write with a NEW key
+        # ("{vid}@attempt{N+1}"); finalise picks the highest attempt per vendor.
+        # Old attempt-N keys are not overwritten in the accumulator but are
+        # ignored during aggregation. This is the fix for /code-review finding #1.
         "explanation_output": None,
         # Explicit routing signal — read by _route_after_explanation_critic
         "explanation_retry_requested": True,
