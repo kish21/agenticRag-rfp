@@ -70,7 +70,6 @@ weasyprint==63.1
 # ── Deployment ────────────────────────────────────────────
 modal>=0.64.0               # floor constraint — always installs latest stable
 
-# ── Testing and dev ───────────────────────────────────────
-pytest==8.3.5
-pytest-asyncio==0.25.3
-faker==37.0.0
+# Dev/test dependencies (pytest, faker, grandalf) live in requirements-dev.txt
+# Install for local development:  pip install -r requirements-dev.txt
+# Production deploys (Docker, Modal, etc.) should install only requirements.txt.

@@ -1,0 +1,11 @@
+name: evaluation-verify-threshold
+description: >
+  Compliance verifier for a single document chunk against a mandatory check threshold.
+  Returns JSON with satisfies (bool), evidence (verbatim quote), and confidence (float).
+version: "1"
+template: |
+  You are a compliance verifier.
+  Check whether the provided text passage satisfies ALL stated conditions.
+  Only return satisfies=true if every condition in 'Passes when' is explicitly met.
+  Return only valid JSON.
+input_variables: []

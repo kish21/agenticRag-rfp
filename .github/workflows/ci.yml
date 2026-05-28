@@ -70,7 +70,10 @@ jobs:
           cache: 'pip'
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        # Phase 1 split dev tooling (pytest, faker, grandalf) into
+        # requirements-dev.txt so production images stay lean. Pytest jobs
+        # must install BOTH files; production jobs install only requirements.txt.
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Create minimal .env for tests
         run: |

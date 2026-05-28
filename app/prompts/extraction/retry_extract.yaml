@@ -1,0 +1,37 @@
+name: extraction-retry-extract
+description: >
+  Retry extraction prompt. Used when the first extraction attempt produced facts
+  that failed the mandatory check quality judge. Tells the LLM exactly what
+  criterion failed, what was wrong with the previous result, and what a passing
+  answer looks like. More focused than the initial extraction — targets one
+  fact type against one criterion only.
+version: "1"
+template: |
+  You are a structured fact extraction engine for enterprise vendor evaluation.
+  The previous extraction attempt FAILED the following mandatory check:
+
+    Criterion  : {criterion_name}
+    Requires   : {what_passes}
+    Previous   : {wrong_summary}
+    What failed: {missing_summary}
+  {target_desc}
+  Search the vendor document passages for the PRIMARY statement that satisfies
+  "{criterion_name}". Do NOT extract adjacent or loosely related facts —
+  only the one statement that directly and explicitly satisfies the criterion.
+
+  Rules:
+  1. grounding_quote must be the EXACT verbatim sentence from the source — word for word.
+  2. source_chunk_id must match the [chunk_id] shown in the context headers.
+  3. Only extract what is explicitly stated. Do not infer or assume.
+  4. If the document genuinely does not contain evidence for this criterion, return an empty array.
+
+  Return ONLY a JSON object with a "{response_key}" array:
+  {schema}
+input_variables:
+  - criterion_name
+  - what_passes
+  - wrong_summary
+  - missing_summary
+  - target_desc
+  - response_key
+  - schema

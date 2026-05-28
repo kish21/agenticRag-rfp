@@ -14,6 +14,7 @@ import uuid
 from typing import Optional
 
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 from app.schemas.output_models import (
     ComplianceDecision,
     ComplianceStatus,
@@ -37,15 +38,7 @@ async def _llm_verify_threshold(
 ) -> dict:
     """Ask the LLM whether a single chunk satisfies the mandatory check threshold."""
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a compliance verifier. "
-                "Check whether the provided text passage satisfies ALL stated conditions. "
-                "Only return satisfies=true if every condition in 'Passes when' is explicitly met. "
-                "Return only valid JSON."
-            ),
-        },
+        {"role": "system", "content": get_prompt("evaluation/verify_threshold")},
         {
             "role": "user",
             "content": (
@@ -58,7 +51,10 @@ async def _llm_verify_threshold(
         },
     ]
     raw = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"satisfies": False, "evidence": "", "confidence": 0.0}
 
 
 # Stash most-recent critic verdict per (check_name, vendor_id) so callers
@@ -219,15 +215,7 @@ async def _evaluate_mandatory_check(
         else "No facts extracted for this requirement."
     )
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a compliance evaluation engine. "
-                "Evaluate strictly based on the extracted facts provided. "
-                "Do not assume or infer beyond what is explicitly stated.\n"
-                "Return only valid JSON."
-            ),
-        },
+        {"role": "system", "content": get_prompt("evaluation/evaluate_check")},
         {
             "role": "user",
             "content": (
@@ -247,7 +235,10 @@ async def _evaluate_mandatory_check(
         },
     ]
     raw = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
-    parsed = json.loads(raw)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = {"decision": "insufficient_evidence", "confidence": 0.0, "reasoning": "LLM returned invalid JSON", "evidence_used": [], "contradictions_found": [], "decision_basis": "not_addressed"}
 
     try:
         decision = ComplianceStatus(parsed.get("decision", "insufficient_evidence"))
@@ -292,7 +283,7 @@ async def _evaluate_mandatory_check(
     except ValueError:
         decision_basis = DecisionBasis.NOT_ADDRESSED
 
-    evidence = chunk_evidence if chunk_evidence else parsed.get("evidence_used", [])
+    evidence = chunk_evidence if chunk_evidence else (parsed.get("evidence_used") or [])
 
     return ComplianceDecision(
         check_id=check.check_id,
@@ -318,14 +309,7 @@ async def _score_criterion(
         else "No specific facts extracted for this criterion — score based on the broader evidence below if present, otherwise score 0."
     )
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a scoring engine. Score based only on the extracted facts. "
-                "Apply the rubric strictly. Do not award credit for facts not present.\n"
-                "Return only valid JSON with numeric values (not null) for all fields."
-            ),
-        },
+        {"role": "system", "content": get_prompt("evaluation/score_criterion")},
         {
             "role": "user",
             "content": (
@@ -350,9 +334,12 @@ async def _score_criterion(
         },
     ]
     raw = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
-    parsed = json.loads(raw)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = {"raw_score": 0, "confidence": 0.0, "rubric_band_applied": "0-2", "evidence_used": [], "score_rationale": "LLM returned invalid JSON", "variance_estimate": 3.0}
 
-    raw_score = max(0, min(10, int(parsed.get("raw_score") or 0)))
+    raw_score = max(0, min(10, int(float(parsed.get("raw_score") or 0))))
 
     return CriterionScore(
         criterion_id=criterion.criterion_id,
@@ -361,7 +348,7 @@ async def _score_criterion(
         weighted_contribution=round((raw_score / 10) * criterion.weight, 4),
         confidence=float(parsed.get("confidence", 0.5)),
         rubric_band_applied=parsed.get("rubric_band_applied", "0-2"),
-        evidence_used=parsed.get("evidence_used", []),
+        evidence_used=(parsed.get("evidence_used") or []),
         score_rationale=parsed.get("score_rationale", ""),
         variance_estimate=float(parsed.get("variance_estimate", 1.0)),
     )
@@ -403,16 +390,6 @@ async def run_evaluation_agent(
         except Exception as e:
             warnings.append(f"Check {check.check_id} failed: {e}")
 
-    # All standard facts as fallback context when custom targets return nothing
-    all_standard_facts = (
-        facts.get("certifications", []) +
-        facts.get("insurance", []) +
-        facts.get("slas", []) +
-        facts.get("projects", []) +
-        facts.get("pricing", []) +
-        facts.get("extracted_facts", [])
-    )
-
     # Score every criterion
     criterion_scores: list[CriterionScore] = []
     for criterion in evaluation_setup.scoring_criteria:
@@ -421,9 +398,11 @@ async def run_evaluation_agent(
             target = target_by_id.get(tid)
             if target:
                 relevant.extend(_get_facts_for_target(facts, target))
-        # Fall back to all extracted facts so the LLM always has context to score from
         if not relevant:
-            relevant = all_standard_facts
+            warnings.append(
+                f"Criterion {criterion.criterion_id} ({criterion.name}): no targeted facts found — "
+                "scored with empty context, LLM will apply 0-2 rubric band"
+            )
         try:
             score = await _score_criterion(criterion, relevant, vendor_id)
             criterion_scores.append(score)

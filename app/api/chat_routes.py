@@ -144,7 +144,7 @@ async def chat_with_document(
         {"role": "user", "content": user_content},
     ]
 
-    answer = await call_llm(messages, temperature=0.2, max_tokens=1024)
+    answer = await call_llm(messages, temperature=0.0, max_tokens=1024)
     suggested_criteria = _parse_criteria(answer)
 
     return DocumentChatResponse(answer=answer, suggested_criteria=suggested_criteria)

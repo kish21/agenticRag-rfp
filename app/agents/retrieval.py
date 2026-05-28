@@ -14,6 +14,7 @@ import time
 import uuid
 
 from app.providers.llm import call_llm
+from app.prompts.registry import get_prompt
 from app.schemas.output_models import RetrievalOutput, RetrievedChunk
 from app.retrieval.qdrant import collection_name, search_dense, search_hybrid
 from app.retrieval.pipeline import get_dense_embedding
@@ -28,21 +29,9 @@ from app.infra.audit import log_retrieval
 # ---------------------------------------------------------------------------
 
 async def _rewrite_query(query: str) -> str:
+    system = get_prompt("retrieval/rewrite_query")
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "Rewrite for document retrieval. Expand to formal document language.\n"
-                "Return ONLY the rewritten query, nothing else.\n\n"
-                "Examples:\n"
-                'User: "do they have ISO cert?" → '
-                '"ISO 27001 information security management certification current valid holder accredited"\n'
-                'User: "what are their SLAs?" → '
-                '"service level agreement SLA response time resolution time uptime guarantee availability percentage"\n'
-                'User: "how much does it cost?" → '
-                '"total contract value pricing annual fee commercial proposal cost breakdown invoicing"'
-            ),
-        },
+        {"role": "system", "content": system},
         {"role": "user", "content": query},
     ]
     result = await call_llm(messages, temperature=0.0)
@@ -50,13 +39,16 @@ async def _rewrite_query(query: str) -> str:
 
 
 async def _generate_hyde_document(query: str, doc_type: str = "vendor_response") -> str:
-    templates = settings.platform.hyde_templates
-    template = templates.get(doc_type) or templates.get("vendor_response", "")
+    prompt_key = f"retrieval/hyde_{doc_type}"
+    try:
+        system = get_prompt(prompt_key)
+    except KeyError:
+        system = get_prompt("retrieval/hyde_vendor_response")
     messages = [
-        {"role": "system", "content": template},
+        {"role": "system", "content": system},
         {"role": "user", "content": query},
     ]
-    result = await call_llm(messages, temperature=0.1)
+    result = await call_llm(messages, temperature=0.0)
     return result.strip()
 
 

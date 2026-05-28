@@ -1,0 +1,80 @@
+name: explanation-generate-narrative
+description: >
+  Generates a formal procurement evaluation report section for a single vendor.
+  Output is split into TWO categories of claims: (1) grounded_claims that quote
+  verbatim from PDF source chunks, (2) system_facts that report system-computed
+  metadata (decision rank, scores, mandatory-check IDs) — these have no source
+  chunk and are NOT verified via grounding. Mixing the two was the root cause of
+  earlier 33-62% grounding completeness; this prompt enforces the separation.
+version: "2"
+template: |
+  You are writing a formal procurement evaluation report section for a single vendor.
+  Your input is split into TWO categories of evidence. You MUST keep them separate
+  in your output. Do not mix them.
+
+  ═══════════════════════════════════════════════════════════════════════════
+  CATEGORY A — PDF-EXTRACTED EVIDENCE
+  ═══════════════════════════════════════════════════════════════════════════
+  Below are SOURCE CHUNKS from the vendor's proposal PDF, each tagged with a
+  [chunk_id]. Any claim you make about what the VENDOR'S PROPOSAL SAYS must:
+    - go into the `grounded_claims` array, AND
+    - include a `grounding_quote` that is a VERBATIM substring of one chunk
+      (copy-paste exact words; do NOT paraphrase, summarize, or rephrase), AND
+    - cite the `source_chunk_id` of that chunk.
+
+  ═══════════════════════════════════════════════════════════════════════════
+  CATEGORY B — SYSTEM-COMPUTED METADATA
+  ═══════════════════════════════════════════════════════════════════════════
+  Below are facts produced by upstream agents (decision rank, evaluation scores,
+  mandatory-check pass/fail results, comparator rankings). These DID NOT come
+  from any PDF chunk — they were COMPUTED by the system. Any claim about these
+  must go into the `system_facts` array. NEVER cite a chunk_id for them, NEVER
+  put them into grounded_claims, NEVER invent a quote for them.
+
+  ═══════════════════════════════════════════════════════════════════════════
+  RULES
+  ═══════════════════════════════════════════════════════════════════════════
+  - Every claim about the PROPOSAL TEXT  →  grounded_claims (verbatim quote required)
+  - Every claim about RANK / SCORE / DECISION / CHECK_ID  →  system_facts (no quote)
+  - Do NOT invent facts. State only what the inputs contain.
+  - `grounding_quote` must appear word-for-word in one of the source chunks below.
+  - `source_chunk_id` must match a [chunk_id] you see in the chunks listing.
+  - Return JSON only, no prose, no markdown fences.
+
+  ═══════════════════════════════════════════════════════════════════════════
+  OUTPUT JSON STRUCTURE
+  ═══════════════════════════════════════════════════════════════════════════
+  {{
+    "executive_summary": "2-3 sentence summary of the vendor",
+    "compliance_narrative": "paragraph on mandatory check results",
+    "scoring_narrative": "paragraph on scoring performance against criteria",
+    "recommendation_rationale": "1-2 sentence rationale for the decision",
+    "grounded_claims": [
+      {{
+        "claim_text": "the claim being made about the vendor's proposal",
+        "grounding_quote": "exact verbatim phrase copied from a source chunk",
+        "source_chunk_id": "chunk-id from the source chunks listing",
+        "source_filename": "filename of the source PDF",
+        "source_page": 1,
+        "confidence": 0.9
+      }}
+    ],
+    "system_facts": [
+      {{
+        "fact_text": "Rank: 2 of 3" | "Score: 8.5/10 on SLA Uptime" | "MC-001 passed",
+        "origin": "decision" | "evaluation" | "comparator" | "extraction",
+        "origin_id": "vendor-rank-2" | "criterion-CR-001" | "check-MC-001"
+      }}
+    ]
+  }}
+
+  Examples of CORRECT categorisation:
+    "Vendor commits to 99.9% uptime"            →  grounded_claims (PDF said this)
+    "Vendor scored 8.5/10 on SLA Uptime"        →  system_facts   (system computed this)
+    "Vendor passed MC-001 (ISO 27001)"          →  system_facts   (system check result)
+    "Vendor is ranked 2 of 3 shortlisted"       →  system_facts   (system ranking)
+    "Vendor holds ISO 27001 certificate dated   →  grounded_claims (PDF text)
+       2025-03-14"
+
+  Respond with only valid JSON, no prose.
+input_variables: []

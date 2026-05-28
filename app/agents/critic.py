@@ -9,7 +9,7 @@ from app.schemas.output_models import (
     CriticOutput, CriticFlag, CriticSeverity, CriticVerdict,
     RetrievalOutput, ExtractionOutput, EvaluationOutput,
     ComparatorOutput, DecisionOutput, ExplanationOutput,
-    IngestionOutput
+    IngestionOutput, PlannerOutput,
 )
 
 
@@ -49,6 +49,51 @@ def _verdict(flags: list[CriticFlag]) -> CriticVerdict:
     if soft:
         return CriticVerdict.APPROVED_WITH_WARNINGS
     return CriticVerdict.APPROVED
+
+
+def critic_after_planner(
+    output: PlannerOutput,
+    validation_errors: list[str],
+) -> CriticOutput:
+    flags = []
+
+    if not output.vendor_ids:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "planner_agent",
+            "no_vendors",
+            "Plan contains no vendor IDs — nothing to evaluate",
+            "vendor_ids=[]",
+            "Provide at least one vendor ID before running evaluation."
+        ))
+
+    if not output.tasks:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "planner_agent",
+            "empty_plan",
+            "Plan contains no tasks",
+            f"plan_id={output.plan_id}",
+            "Plan generation failed. Check evaluation_setup is complete."
+        ))
+
+    for error in validation_errors:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "planner_agent",
+            "plan_validation_error",
+            error,
+            f"plan_id={output.plan_id}",
+            "Fix evaluation_setup before proceeding — plan does not cover all requirements."
+        ))
+
+    return CriticOutput(
+        critic_run_id=str(uuid.uuid4()),
+        evaluated_agent="planner_agent",
+        evaluated_output_id=output.plan_id,
+        flags=flags,
+        hard_flag_count=sum(1 for f in flags if f.severity == CriticSeverity.HARD),
+        soft_flag_count=sum(1 for f in flags if f.severity == CriticSeverity.SOFT),
+        overall_verdict=_verdict(flags),
+        requires_human_review=any(f.severity == CriticSeverity.HARD for f in flags),
+    )
 
 
 def critic_after_ingestion(output: IngestionOutput) -> CriticOutput:
@@ -121,6 +166,17 @@ def critic_after_retrieval(
             f"query='{output.original_query}'",
             "Widen search query and retry. If still empty, "
             "mark as insufficient_evidence."
+        ))
+
+    if not output.empty_retrieval and output.confidence < 0.4:
+        flags.append(_make_flag(
+            CriticSeverity.SOFT, "retrieval_agent",
+            "low_retrieval_confidence",
+            f"Retrieval confidence {output.confidence:.2f} is below 0.4 — "
+            "vendor document may not address this criterion",
+            f"confidence={output.confidence}, chunks={len(output.chunks)}",
+            "Review retrieved chunks manually. Consider broadening query or checking "
+            "if vendor document covers this requirement."
         ))
 
     if not output.empty_retrieval:
@@ -289,6 +345,17 @@ def critic_after_comparator(output: ComparatorOutput) -> CriticOutput:
             "Cannot proceed to Decision Agent without a ranking."
         ))
 
+    missing = set(output.vendor_ids) - set(output.overall_ranking)
+    if missing:
+        flags.append(_make_flag(
+            CriticSeverity.HARD, "comparator_agent",
+            "vendors_missing_from_ranking",
+            f"{len(missing)} vendor(s) requested but absent from overall ranking",
+            f"missing_vendors={sorted(missing)}",
+            "Evaluation likely failed for these vendors. "
+            "Do not proceed to Decision Agent — ranking is incomplete. Escalate to human review."
+        ))
+
     if output.ranking_confidence < 0.5:
         flags.append(_make_flag(
             CriticSeverity.SOFT, "comparator_agent",
@@ -333,6 +400,17 @@ def critic_after_decision(output: DecisionOutput) -> CriticOutput:
                 "CANNOT REJECT WITHOUT EVIDENCE. Legal exposure. "
                 "Find evidence or change decision."
             ))
+
+    if output.requires_human_review and output.review_reasons:
+        for reason in output.review_reasons:
+            if "insufficient evidence" in reason.lower():
+                flags.append(_make_flag(
+                    CriticSeverity.SOFT, "decision_agent",
+                    "shortlisted_vendor_unresolved_checks",
+                    reason,
+                    f"vendor has mandatory checks with insufficient_evidence status",
+                    "Flag in report. Approver must confirm these checks before award."
+                ))
 
     if not output.shortlisted_vendors and output.rejected_vendors:
         flags.append(_make_flag(
@@ -380,7 +458,24 @@ def critic_after_explanation(
         ))
 
     for narrative in output.vendor_narratives:
-        if narrative.ungrounded_claims_removed > 3:
+        if len(narrative.grounded_claims) == 0 and narrative.ungrounded_claims_removed == 0:
+            flags.append(_make_flag(
+                CriticSeverity.HARD, "explanation_agent",
+                "empty_narrative",
+                f"Vendor {narrative.vendor_id} has zero claims — LLM produced no narrative content",
+                f"vendor={narrative.vendor_id}",
+                "LLM failed to generate any claims. Check source chunks and retry."
+            ))
+        elif len(narrative.grounded_claims) == 0 and narrative.ungrounded_claims_removed > 0:
+            flags.append(_make_flag(
+                CriticSeverity.HARD, "explanation_agent",
+                "all_claims_ungrounded",
+                f"All {narrative.ungrounded_claims_removed} claims for {narrative.vendor_id} "
+                "failed grounding verification — no verifiable content remains",
+                f"vendor={narrative.vendor_id}, removed={narrative.ungrounded_claims_removed}",
+                "LLM is hallucinating. Source chunks may be insufficient. Do not publish report."
+            ))
+        elif narrative.ungrounded_claims_removed > 3:
             flags.append(_make_flag(
                 CriticSeverity.SOFT, "explanation_agent",
                 "many_claims_removed",
@@ -391,11 +486,14 @@ def critic_after_explanation(
                 "High hallucination in explanation. Check source data quality."
             ))
 
+    import re as _re
     for narrative in output.vendor_narratives:
         for claim in narrative.grounded_claims[:5]:
             source = source_chunks.get(claim.source_chunk_id, "")
             if source and claim.grounding_quote:
-                if claim.grounding_quote not in source:
+                norm_source = _re.sub(r'\s+', ' ', source).strip()
+                norm_quote  = _re.sub(r'\s+', ' ', claim.grounding_quote).strip()
+                if norm_quote not in norm_source:
                     flags.append(_make_flag(
                         CriticSeverity.HARD, "explanation_agent",
                         "grounding_verification_failed",

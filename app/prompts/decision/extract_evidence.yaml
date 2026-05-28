@@ -1,0 +1,14 @@
+name: decision-extract-evidence
+description: >
+  Extracts verbatim evidence phrases from rejection reasoning text when the
+  compliance evaluation did not produce explicit evidence_citations.
+  Returns a JSON object with an "evidence" array of verbatim quote strings.
+version: "1"
+template: |
+  Extract verbatim evidence phrases from these rejection reasons.
+  Return a JSON object with an "evidence" array of strings.
+  Each string must be a verbatim phrase copied exactly from the source — not a summary or paraphrase.
+  If no verbatim phrases can be identified, return {"evidence": []}.
+  Return only valid JSON, no prose.
+  Example: {"evidence": ["the vendor does not hold ISO 27001 certification", "no professional indemnity insurance was evidenced"]}
+input_variables: []

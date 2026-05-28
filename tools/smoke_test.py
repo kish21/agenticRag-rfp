@@ -123,8 +123,9 @@ def critic_summary(critic) -> None:
     flags = getattr(critic, "flags", [])
     for f in flags:
         sev = getattr(f, "severity", "")
-        msg = getattr(f, "message", "")
-        print(f"  [{sev}] {msg}")
+        msg = getattr(f, "description", "") or getattr(f, "message", "")
+        check = getattr(f, "check_name", "")
+        print(f"  [{sev}] {check}: {msg}")
     if not flags:
         print("  No flags raised.")
 
@@ -528,14 +529,26 @@ async def run_ingestion(vendor_id_or_pdf: str, state: dict) -> None:
         print("\n[HARD BLOCK] Ingestion critic blocked. Fix issues above before continuing.")
         sys.exit(1)
 
+    # Read back the actual doc_id stored in vendor_documents by PostgreSQL
+    from app.db.fact_store import get_engine as _get_eng
+    import sqlalchemy as _sa
+    with _get_eng().connect() as _conn:
+        _row = _conn.execute(_sa.text("""
+            SELECT doc_id FROM vendor_documents
+            WHERE org_id = CAST(:org_id AS uuid) AND vendor_id = :vendor_id
+              AND rfp_id = :rfp_id
+            ORDER BY ingested_at DESC LIMIT 1
+        """), {"org_id": org_id, "vendor_id": vendor_id, "rfp_id": rfp_id}).fetchone()
+    actual_doc_id = str(_row[0]) if _row else doc_id
+
     # Accumulate per-vendor ingestion state (supports multiple vendors)
     ingested = state.get("ingested_vendors", {})
-    ingested[vendor_id] = {"doc_id": doc_id, "chunk_count": output.total_chunks}
+    ingested[vendor_id] = {"doc_id": actual_doc_id, "chunk_count": output.total_chunks}
     state.update({
         "run_id":             run_id,
         "org_id":             org_id,
         "vendor_id":          vendor_id,   # last ingested — used by extraction
-        "doc_id":             doc_id,
+        "doc_id":             actual_doc_id,
         "ingested_vendors":   ingested,
         "ingestion_chunk_ids": [],
         "ingestion_chunk_count": output.total_chunks,
@@ -557,6 +570,8 @@ async def run_extraction(state: dict) -> None:
 
     run_id    = require_state("run_id",    state, "extraction")
     org_id    = require_state("org_id",    state, "extraction")
+    rfp_id    = require_state("rfp_id",    state, "extraction")
+    setup_id  = require_state("setup_id",  state, "extraction")
     vendor_id = require_state("vendor_id", state, "extraction")
     doc_id    = require_state("doc_id",    state, "extraction")
 
@@ -564,24 +579,34 @@ async def run_extraction(state: dict) -> None:
     kv("vendor_id", vendor_id)
     kv("doc_id",    doc_id)
 
-    # Build a minimal EvaluationSetup from default criteria
-    from app.schemas.output_models import EvaluationSetup, MandatoryCheck, ScoringCriterion
-    setup_id = str(uuid.uuid4())
-    evaluation_setup = EvaluationSetup(
-        setup_id=setup_id, org_id=org_id, rfp_id=SMOKE_RFP_ID,
-        mandatory_checks=[], scoring_criteria=[], extraction_targets=[],
+    # Load EvaluationSetup from DB (same object built in run_rfp)
+    from app.db.fact_store import get_engine
+    from app.schemas.output_models import EvaluationSetup
+    import sqlalchemy as sa, json as _json
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(sa.text("""
+            SELECT setup_json FROM evaluation_setups
+            WHERE setup_id = :setup_id AND org_id = CAST(:org_id AS uuid)
+            LIMIT 1
+        """), {"setup_id": setup_id, "org_id": org_id}).fetchone()
+    if not row:
+        print(f"[ABORT] EvaluationSetup not found for setup_id={setup_id}")
+        sys.exit(1)
+    evaluation_setup = EvaluationSetup.model_validate(
+        _json.loads(row[0]) if isinstance(row[0], str) else row[0]
     )
 
-    # Build RetrievalOutput from stored chunks (retrieve all for extraction)
     from app.agents.retrieval import run_retrieval_agent
-    from app.schemas.output_models import EvaluationSetup as ES
 
     print("\n  Retrieving chunks for extraction…")
-    retrieval_output = await run_retrieval_agent(
+    retrieval_output, _ = await run_retrieval_agent(
         query="vendor certifications SLA insurance projects pricing",
         vendor_id=vendor_id,
         org_id=org_id,
-        top_k=50,
+        rfp_id=rfp_id,
+        n_candidates=50,
+        n_final=30,
     )
     kv("Chunks retrieved", len(retrieval_output.chunks))
 
@@ -628,9 +653,14 @@ async def run_extraction(state: dict) -> None:
         print("\n[HARD BLOCK] Extraction critic blocked. Fix issues above before continuing.")
         sys.exit(1)
 
+    extraction_outputs = state.get("extraction_outputs", {})
+    extraction_outputs[vendor_id] = output.model_dump(mode="json")
+    source_chunks = state.get("source_chunks", {})
+    source_chunks.update({c.chunk_id: c.text for c in retrieval_output.chunks})
     state.update({
-        "setup_id":    setup_id,
         "extraction_total": total_facts,
+        "extraction_outputs": extraction_outputs,
+        "source_chunks": source_chunks,
     })
     save_state(state)
     print(f"\n[OK] EXTRACTION DONE — {total_facts} facts stored. Ready for: --agent retrieval\n")
@@ -644,6 +674,7 @@ async def run_retrieval(state: dict) -> None:
     org_id    = require_state("org_id",    state, "retrieval")
     vendor_id = require_state("vendor_id", state, "retrieval")
 
+    rfp_id = state.get("rfp_id", SMOKE_RFP_ID)
     query = "vendor SLA uptime guarantee ISO 27001 certification incident response"
     kv("query", query)
     kv("org_id",    org_id)
@@ -652,11 +683,12 @@ async def run_retrieval(state: dict) -> None:
     from app.agents.retrieval import run_retrieval_agent
 
     print("\n  Running retrieval agent (with HyDE + BGE reranker)…")
-    output = await run_retrieval_agent(
+    output, critic = await run_retrieval_agent(
         query=query,
         vendor_id=vendor_id,
         org_id=org_id,
-        top_k=10,
+        rfp_id=rfp_id,
+        n_candidates=10,
     )
 
     section("TOP 10 RETRIEVED CHUNKS")
@@ -671,8 +703,6 @@ async def run_retrieval(state: dict) -> None:
         section("HYDE-EXPANDED QUERY")
         print(f"  {output.hyde_query[:300]}")
 
-    from app.agents.critic import critic_after_retrieval
-    critic = critic_after_retrieval(output)
     critic_summary(critic)
 
     from app.schemas.output_models import CriticVerdict
@@ -680,7 +710,10 @@ async def run_retrieval(state: dict) -> None:
         print("\n[HARD BLOCK] Retrieval critic blocked. Fix issues above before continuing.")
         sys.exit(1)
 
+    source_chunks = state.get("source_chunks", {})
+    source_chunks.update({c.chunk_id: c.text for c in output.chunks})
     state["retrieval_chunk_count"] = len(output.chunks)
+    state["source_chunks"] = source_chunks
     save_state(state)
     print(f"\n[OK] RETRIEVAL DONE — {len(output.chunks)} chunks returned. Ready for: --agent planner\n")
 
@@ -691,6 +724,7 @@ async def run_planner(state: dict) -> None:
     section("AGENT 4 — PLANNER")
 
     org_id   = require_state("org_id",   state, "planner")
+    rfp_id   = require_state("rfp_id",   state, "planner")
     setup_id = require_state("setup_id", state, "planner")
 
     # Load EvaluationSetup from PostgreSQL — same object the UI built in run_rfp
@@ -712,19 +746,21 @@ async def run_planner(state: dict) -> None:
         sys.exit(1)
 
     import json
-    evaluation_setup = EvaluationSetup(**json.loads(row[0]))
+    raw = row[0]
+    evaluation_setup = EvaluationSetup.model_validate(json.loads(raw) if isinstance(raw, str) else raw)
     vendor_ids = state.get("vendor_ids", [SMOKE_VENDOR_ID])
 
     section("CRITERIA FROM DATABASE")
     for sc in evaluation_setup.scoring_criteria:
         print(f"  {getattr(sc,'criterion_id',''):<20} {getattr(sc,'name',''):<40} weight={getattr(sc,'weight','?')}")
 
-    from app.agents.planner import run_planner_agent
+    from app.agents.planner import run_planner
     print("\n  Running planner agent…")
-    output = await run_planner_agent(
-        criteria=[sc.model_dump() for sc in evaluation_setup.scoring_criteria],
-        vendor_ids=vendor_ids,
+    output, critic = await run_planner(
+        rfp_id=rfp_id,
         org_id=org_id,
+        vendor_ids=vendor_ids,
+        evaluation_setup=evaluation_setup,
     )
 
     section("TASK DAG")
@@ -732,10 +768,8 @@ async def run_planner(state: dict) -> None:
     kv("Total tasks", len(tasks))
     for t in tasks:
         deps = getattr(t, "depends_on", [])
-        print(f"  {getattr(t,'task_id',''):<30} agent={getattr(t,'assigned_agent','?'):<14} priority={getattr(t,'priority','?')}  deps={deps}")
+        print(f"  {getattr(t,'task_id',''):<30} agent={getattr(t,'agent','?'):<14} priority={getattr(t,'priority','?')}  deps={deps}")
 
-    from app.agents.critic import critic_after_planner
-    critic = critic_after_planner(output)
     critic_summary(critic)
 
     from app.schemas.output_models import CriticVerdict
@@ -763,26 +797,29 @@ async def run_evaluation(state: dict) -> None:
     kv("vendor_id", vendor_id)
     kv("setup_id",  setup_id)
 
-    # Build EvaluationSetup from saved criteria
-    criteria_rows = state.get("criteria_rows", [])
-    if not criteria_rows:
-        import csv, io
-        criteria_rows = list(csv.DictReader(io.StringIO(DEFAULT_CRITERIA_CSV)))
-
-    from app.schemas.output_models import EvaluationSetup, ScoringCriterion, MandatoryCheck
-    scoring = [
-        ScoringCriterion(
-            criterion_id=r.get("criterion_id", f"c{i}"),
-            name=r.get("name", ""),
-            weight=float(r.get("weight", 0.0)),
-            source="csv",
-        )
-        for i, r in enumerate(criteria_rows)
-    ]
-    evaluation_setup = EvaluationSetup(
-        setup_id=setup_id, org_id=org_id, rfp_id=SMOKE_RFP_ID,
-        mandatory_checks=[], scoring_criteria=scoring, extraction_targets=[],
+    # Load EvaluationSetup from DB (same object built in run_rfp)
+    from app.db.fact_store import get_engine
+    from app.schemas.output_models import EvaluationSetup, ExtractionOutput
+    import sqlalchemy as sa, json as _json
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(sa.text("""
+            SELECT setup_json FROM evaluation_setups
+            WHERE setup_id = :setup_id AND org_id = CAST(:org_id AS uuid)
+            LIMIT 1
+        """), {"setup_id": setup_id, "org_id": org_id}).fetchone()
+    if not row:
+        print(f"[ABORT] EvaluationSetup not found for setup_id={setup_id}")
+        sys.exit(1)
+    evaluation_setup = EvaluationSetup.model_validate(
+        _json.loads(row[0]) if isinstance(row[0], str) else row[0]
     )
+
+    # Load ExtractionOutput from state if available
+    extraction_output = None
+    extraction_outputs_raw = state.get("extraction_outputs", {})
+    if vendor_id in extraction_outputs_raw:
+        extraction_output = ExtractionOutput.model_validate(extraction_outputs_raw[vendor_id])
 
     from app.agents.evaluation import run_evaluation_agent
     print("\n  Running evaluation agent (reads PostgreSQL facts, NOT Qdrant)…")
@@ -803,6 +840,7 @@ async def run_evaluation(state: dict) -> None:
             vendor_id=vendor_id,
             org_id=org_id,
             evaluation_setup=evaluation_setup,
+            extraction_output=extraction_output,
             run_id=state.get("run_id", ""),
         )
     finally:
@@ -844,9 +882,12 @@ async def run_evaluation(state: dict) -> None:
         print("\n[HARD BLOCK] Evaluation critic blocked. Fix issues above before continuing.")
         sys.exit(1)
 
+    evaluation_outputs = state.get("evaluation_outputs", {})
+    evaluation_outputs[vendor_id] = output.model_dump(mode="json")
     state.update({
         "evaluation_total_score": getattr(output, "total_weighted_score", 0),
         "evaluation_score_confidence": getattr(output, "score_confidence", 0),
+        "evaluation_outputs": evaluation_outputs,
     })
     save_state(state)
     score = getattr(output, "total_weighted_score", 0)
@@ -859,24 +900,52 @@ async def run_comparator(state: dict) -> None:
     section("AGENT 6 — COMPARATOR")
 
     org_id   = require_state("org_id",   state, "comparator")
+    rfp_id   = require_state("rfp_id",   state, "comparator")
     setup_id = require_state("setup_id", state, "comparator")
+    vendor_ids = state.get("vendor_ids", [SMOKE_VENDOR_ID])
+
+    # Load EvaluationSetup from DB
+    from app.db.fact_store import get_engine
+    from app.schemas.output_models import EvaluationSetup, EvaluationOutput
+    import sqlalchemy as sa, json as _json
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(sa.text("""
+            SELECT setup_json FROM evaluation_setups
+            WHERE setup_id = :setup_id AND org_id = CAST(:org_id AS uuid)
+            LIMIT 1
+        """), {"setup_id": setup_id, "org_id": org_id}).fetchone()
+    if not row:
+        print(f"[ABORT] EvaluationSetup not found for setup_id={setup_id}")
+        sys.exit(1)
+    evaluation_setup = EvaluationSetup.model_validate(
+        _json.loads(row[0]) if isinstance(row[0], str) else row[0]
+    )
+
+    # Load EvaluationOutputs from state
+    evaluation_outputs_raw = state.get("evaluation_outputs", {})
+    if not evaluation_outputs_raw:
+        print("[ABORT] No evaluation outputs in state. Run --agent evaluation first.")
+        sys.exit(1)
+    evaluation_outputs = {
+        vid: EvaluationOutput.model_validate(data)
+        for vid, data in evaluation_outputs_raw.items()
+    }
 
     from app.agents.comparator import run_comparator_agent
     print("\n  Running comparator agent…")
     output, critic = await run_comparator_agent(
+        vendor_ids=vendor_ids,
         org_id=org_id,
-        setup_id=setup_id,
-        vendor_ids=[SMOKE_VENDOR_ID],
-        run_id=state.get("run_id", ""),
+        rfp_id=rfp_id,
+        evaluation_setup=evaluation_setup,
+        evaluation_outputs=evaluation_outputs,
     )
 
     section("RANKING")
-    rankings = getattr(output, "vendor_rankings", []) or getattr(output, "rankings", [])
-    for v in rankings:
-        name  = getattr(v, "vendor_id", "?")
-        score = getattr(v, "total_score", "?")
-        rank  = getattr(v, "rank", "?")
-        print(f"  #{rank}  {name:<30}  score={score}")
+    rankings = getattr(output, "overall_ranking", [])
+    for i, vid in enumerate(rankings, 1):
+        print(f"  #{i}  {vid}")
 
     critic_summary(critic)
 
@@ -886,6 +955,7 @@ async def run_comparator(state: dict) -> None:
         sys.exit(1)
 
     state["comparator_vendor_count"] = len(rankings)
+    state["comparator_output"] = output.model_dump(mode="json")
     save_state(state)
     print(f"\n[OK] COMPARATOR DONE — {len(rankings)} vendors ranked. Ready for: --agent decision\n")
 
@@ -896,15 +966,31 @@ async def run_decision(state: dict) -> None:
     section("AGENT 7 — DECISION")
 
     org_id   = require_state("org_id",   state, "decision")
-    setup_id = require_state("setup_id", state, "decision")
+
+    # Load EvaluationOutputs from state
+    from app.schemas.output_models import EvaluationOutput, ComparatorOutput
+    import json as _json
+    evaluation_outputs_raw = state.get("evaluation_outputs", {})
+    if not evaluation_outputs_raw:
+        print("[ABORT] No evaluation outputs in state. Run --agent evaluation first.")
+        sys.exit(1)
+    evaluation_outputs = {
+        vid: EvaluationOutput.model_validate(data)
+        for vid, data in evaluation_outputs_raw.items()
+    }
+
+    comparator_raw = state.get("comparator_output")
+    if not comparator_raw:
+        print("[ABORT] No comparator output in state. Run --agent comparator first.")
+        sys.exit(1)
+    comparator_output = ComparatorOutput.model_validate(comparator_raw)
 
     from app.agents.decision import run_decision_agent
     print("\n  Running decision agent…")
     output, critic = await run_decision_agent(
-        org_id=org_id,
-        setup_id=setup_id,
-        vendor_ids=[SMOKE_VENDOR_ID],
-        run_id=state.get("run_id", ""),
+        evaluation_outputs=evaluation_outputs,
+        comparator_output=comparator_output,
+        contract_value=SMOKE_CONTRACT_VALUE,
     )
 
     section("DECISION OUTPUT")
@@ -935,6 +1021,7 @@ async def run_decision(state: dict) -> None:
         print("\n[HARD BLOCK] Decision critic blocked.")
         sys.exit(1)
 
+    state["decision_output"] = output.model_dump(mode="json")
     save_state(state)
     decision_str = "SHORTLISTED" if shortlisted else "REJECTED"
     tier = getattr(routing, "approval_tier", "?") if routing else "?"
@@ -946,16 +1033,43 @@ async def run_decision(state: dict) -> None:
 async def run_explanation(state: dict) -> None:
     section("AGENT 8 — EXPLANATION")
 
-    org_id   = require_state("org_id",   state, "explanation")
-    setup_id = require_state("setup_id", state, "explanation")
+    org_id = require_state("org_id", state, "explanation")
+
+    from app.schemas.output_models import (
+        EvaluationOutput, ExtractionOutput, DecisionOutput,
+    )
+
+    evaluation_outputs_raw = state.get("evaluation_outputs", {})
+    if not evaluation_outputs_raw:
+        print("[ABORT] No evaluation outputs in state. Run --agent evaluation first.")
+        sys.exit(1)
+    evaluation_outputs = {
+        vid: EvaluationOutput.model_validate(data)
+        for vid, data in evaluation_outputs_raw.items()
+    }
+
+    extraction_outputs_raw = state.get("extraction_outputs", {})
+    extraction_outputs = {
+        vid: ExtractionOutput.model_validate(data)
+        for vid, data in extraction_outputs_raw.items()
+    }
+
+    decision_raw = state.get("decision_output")
+    if not decision_raw:
+        print("[ABORT] No decision output in state. Run --agent decision first.")
+        sys.exit(1)
+    decision_output = DecisionOutput.model_validate(decision_raw)
+
+    source_chunks: dict[str, str] = state.get("source_chunks", {})
 
     from app.agents.explanation import run_explanation_agent
     print("\n  Running explanation agent…")
     output, critic = await run_explanation_agent(
-        org_id=org_id,
-        setup_id=setup_id,
-        vendor_ids=[SMOKE_VENDOR_ID],
-        run_id=state.get("run_id", ""),
+        decision_output=decision_output,
+        evaluation_outputs=evaluation_outputs,
+        extraction_outputs=extraction_outputs,
+        source_chunks=source_chunks,
+        currency="GBP",
     )
 
     section("REPORT SUMMARY")

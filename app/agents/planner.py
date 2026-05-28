@@ -3,7 +3,9 @@ Planner Agent — decomposes an EvaluationSetup into a typed task DAG.
 Does not retrieve, extract, or evaluate — only plans.
 """
 import uuid
+from app.config import settings
 from app.schemas.output_models import EvaluationSetup, PlannerOutput, TaskItem
+from app.agents.critic import critic_after_planner
 
 
 async def run_planner(
@@ -11,12 +13,26 @@ async def run_planner(
     org_id: str,
     vendor_ids: list[str],
     evaluation_setup: EvaluationSetup,
-) -> PlannerOutput:
+) -> tuple[PlannerOutput, object]:
     """
     Builds a deterministic task DAG from evaluation_setup.
     Task IDs encode the check_id / criterion_id so validate_plan
     can verify coverage without relying on LLM-generated structure.
     """
+    if not vendor_ids:
+        output = PlannerOutput(
+            plan_id=str(uuid.uuid4()),
+            rfp_id=rfp_id,
+            org_id=org_id,
+            vendor_ids=[],
+            tasks=[],
+            estimated_duration_seconds=0,
+            confidence=0.0,
+            warnings=["No vendor IDs provided — plan is empty"],
+        )
+        critic = critic_after_planner(output, ["No vendor IDs provided"])
+        return output, critic
+
     tasks: list[TaskItem] = []
 
     # 1. One retrieve task per vendor
@@ -106,16 +122,21 @@ async def run_planner(
         priority=3,
     ))
 
-    return PlannerOutput(
+    duration_per_task = settings.platform.infrastructure.task_duration_estimate_seconds
+    output = PlannerOutput(
         plan_id=str(uuid.uuid4()),
         rfp_id=rfp_id,
         org_id=org_id,
         vendor_ids=vendor_ids,
         tasks=tasks,
-        estimated_duration_seconds=len(tasks) * 30,
+        estimated_duration_seconds=len(tasks) * duration_per_task,
         confidence=1.0,
         warnings=[],
     )
+
+    validation_errors = validate_plan(output, evaluation_setup)
+    critic = critic_after_planner(output, validation_errors)
+    return output, critic
 
 
 def validate_plan(

@@ -30,6 +30,12 @@ if os.getenv("LANGSMITH_VERIFY_SSL", "true").lower() == "false":
         return _orig_req(self, method, url, **kwargs)
     _req.Session.request = _ls_no_ssl
 
+# BGE reranker (sentence-transformers) tries to reach huggingface.co on every
+# startup to check for model updates. Norton blocks that HTTPS too.
+# Set HF_HUB_OFFLINE=1 so it uses the local model cache without network checks.
+if os.getenv("SSL_VERIFY", "true").lower() == "false":
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 
 # ─── Platform (engineering) shape ─────────────────────────────────────
 class PlatformEmbedding(BaseModel):
@@ -67,6 +73,17 @@ class PlatformInfra(BaseModel):
     retrieval_critic_confidence_floor: float
     extraction_critic_max_retries: int
     extraction_critic_confidence_floor: float
+    task_duration_estimate_seconds: int
+
+class PlatformGovernanceTier(BaseModel):
+    tier: int
+    approver_role: str
+    max_value: float | None
+    sla_hours: int
+
+class PlatformGovernance(BaseModel):
+    approval_tiers: list[PlatformGovernanceTier]
+    recommendation_thresholds: dict[str, float]
 
 class PlatformConfig(BaseModel):
     embedding: PlatformEmbedding
@@ -74,6 +91,7 @@ class PlatformConfig(BaseModel):
     retrieval: PlatformRetrieval
     llm: PlatformLLM
     infrastructure: PlatformInfra
+    governance: PlatformGovernance
     hyde_templates: dict[str, str]    # doc_type -> template
     retrieval_critic_prompt: str
     extraction_critic_prompt: str

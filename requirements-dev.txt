@@ -1,0 +1,18 @@
+# ═══════════════════════════════════════════════════════
+# requirements-dev.txt — developer / test-only dependencies
+# ═══════════════════════════════════════════════════════
+# Install:    pip install -r requirements.txt -r requirements-dev.txt
+# Production: do NOT install this file — keeps prod images lean.
+#
+# These packages are only imported by tests/, tools/, and local dev workflows.
+# Nothing under app/ depends on them at runtime.
+
+-r requirements.txt
+
+# ── Test framework ────────────────────────────────────────
+pytest==8.3.5
+pytest-asyncio==0.25.3
+faker==37.0.0
+
+# ── Dev tooling ───────────────────────────────────────────
+grandalf==0.8                # ASCII graph rendering for LangGraph in tools/smoke_test_graph.py (GPL-2.0 — dev-only, never bundled in production)

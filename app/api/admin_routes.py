@@ -50,3 +50,58 @@ async def get_agent(
     if config is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     return {"agent_id": agent_id, "config": config}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 9 — Multi-user RFP visibility administration
+# ═══════════════════════════════════════════════════════════════════════════
+# Endpoints for admins to manage matrix department membership and approval
+# assignments. These NEVER run autonomously; access lists are decided by
+# humans and inherited by runs (see Phase 9 invariant).
+
+from app.domain.visibility import (
+    add_user_to_department as _add_user_to_dept,
+    assign_approver as _assign_approver,
+)
+
+
+class UserDeptAssignment(BaseModel):
+    user_id: str
+    department_id: str
+    role_in_dept: str = "member"   # 'member' | 'lead' | 'observer'
+
+
+@router.post("/user-departments")
+async def add_user_department(
+    body: UserDeptAssignment,
+    user: TokenData = Depends(get_current_user),
+    _: None = Depends(require_role("platform_admin", "company_admin", "department_admin")),
+):
+    """Grant a user membership in a department. Idempotent — re-adding with a
+    different role updates the role_in_dept."""
+    try:
+        _add_user_to_dept(body.user_id, body.department_id, body.role_in_dept)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "user_id": body.user_id, "department_id": body.department_id}
+
+
+class ApprovalAssignmentRequest(BaseModel):
+    run_id: str
+    approver_user_id: str
+    approver_role: str  # 'cfo' | 'cto' | 'cpo' | 'legal' | etc.
+
+
+@router.post("/approval-assignments")
+async def add_approval_assignment(
+    body: ApprovalAssignmentRequest,
+    user: TokenData = Depends(get_current_user),
+    _: None = Depends(require_role("platform_admin", "company_admin", "department_admin")),
+):
+    """Assign an approver to an evaluation_run. Re-assigning the same user
+    resets status to 'pending'."""
+    try:
+        _assign_approver(body.run_id, body.approver_user_id, body.approver_role)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "run_id": body.run_id, "approver_user_id": body.approver_user_id}

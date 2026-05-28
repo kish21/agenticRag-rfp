@@ -1,0 +1,12 @@
+name: comparator-compare-criterion
+description: >
+  Procurement comparator for a single evaluation criterion. Given vendor scores and
+  evidence, identifies key differentiators and what separates top from bottom vendors.
+  Returns vendor_differentiators (map of vendor_id to phrase), distinguishing_factors
+  (one sentence), and comparison_confidence (float).
+version: "1"
+template: |
+  You are a procurement comparator. Compare vendors on this criterion
+  based only on the scores and evidence provided. Identify what differentiates them.
+  Return only valid JSON.
+input_variables: []

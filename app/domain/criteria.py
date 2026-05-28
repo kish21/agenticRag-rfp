@@ -3,6 +3,7 @@ Merges org criteria, department criteria, and RFP-extracted
 criteria into one EvaluationSetup.
 All LLM calls use call_llm() — never OpenAI directly.
 """
+import hashlib
 import json
 import re
 import uuid
@@ -10,6 +11,19 @@ from app.db.fact_store import get_engine
 from app.providers.llm import call_llm
 from app.prompts.registry import get_prompt
 import sqlalchemy as sa
+
+
+def _stable_id(*parts: str) -> str:
+    """Deterministic 8-char uppercase ID derived from input parts.
+
+    Replaces uuid.uuid4()[:8].upper() at criterion/check generation sites.
+    Same input criterion (name + rubric + source) always produces the same
+    ID across runs — this is the foundation of cross-run byte-identity for
+    decision_output.json. UUIDs would have made every smoke run different
+    even though the inputs were identical.
+    """
+    blob = "|".join(str(p) for p in parts).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:8].upper()
 
 # Common suffixes the LLM appends that don't change the meaning of a check.
 # Stripping these lets "ISO 27001" match "ISO 27001 Certification Requirement".
@@ -400,7 +414,7 @@ def merge_criteria(
     for c in (user_criteria or {}).get("mandatory_checks", []):
         name_key = _normalize_name(c["name"])
         if name_key not in mandatory_names:
-            uc_id = str(uuid.uuid4())[:8].upper()
+            uc_id = _stable_id("user", "mc", name_key)
             mandatory_checks.append({
                 "check_id": f"MC-USER-{uc_id}",
                 "name": c["name"],
@@ -415,7 +429,7 @@ def merge_criteria(
     for c in (user_criteria or {}).get("scoring_criteria", []):
         name_key = _normalize_name(c["name"])
         if name_key not in scoring_names:
-            uc_id = str(uuid.uuid4())[:8].upper()
+            uc_id = _stable_id("user", "sc", name_key)
             scoring_criteria.append({
                 "criterion_id": f"SC-USER-{uc_id}",
                 "name": c["name"],
@@ -434,7 +448,7 @@ def merge_criteria(
     for c in rfp_criteria.get("mandatory_checks", []):
         name_key = _normalize_name(c["name"])
         if name_key not in mandatory_names:
-            mc_id = str(uuid.uuid4())[:8].upper()
+            mc_id = _stable_id("rfp", "mc", name_key)
             mandatory_checks.append({
                 "check_id": f"MC-RFP-{mc_id}",
                 "name": c["name"],
@@ -450,7 +464,7 @@ def merge_criteria(
     for c in rfp_criteria.get("scoring_criteria", []):
         name_key = _normalize_name(c["name"])
         if name_key not in scoring_names:
-            sc_id = str(uuid.uuid4())[:8].upper()  # noqa: F841 (reused var name is fine)
+            sc_id = _stable_id("rfp", "sc", name_key)
             scoring_criteria.append({
                 "criterion_id": f"SC-RFP-{sc_id}",
                 "name": c["name"],
@@ -611,7 +625,7 @@ async def detect_and_fill_gaps(merged: dict, department: str) -> tuple[dict, dic
             suggested: list[dict] = json.loads(clean.strip())
 
             for s in suggested:
-                mc_id = str(uuid.uuid4())[:8].upper()
+                mc_id = _stable_id("gen", "mc", _normalize_name(s.get("name", "")))
                 new_check = {
                     "check_id":              f"MC-GEN-{mc_id}",
                     "name":                  s.get("name", ""),

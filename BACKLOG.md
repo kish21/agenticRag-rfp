@@ -282,6 +282,36 @@ Product features and ideas captured during development. Not scheduled — review
 
 ---
 
+### AI-007 — LLM-Assisted Critic Checks (Semantic Grounding + Answer Quality + Contradiction Detection)
+**Summary:** Add three LLM-powered soft checks to the Critic Agent to catch issues that pure Python rules cannot detect. All three produce soft flags only — hard blocks remain deterministic Python and are never handed to an LLM.
+
+**Why soft flags only for LLM checks:** Hard blocks stop the pipeline and must be explainable in an audit trail. "The grounding quote was not found verbatim in the source" is auditable. "The LLM judged this suspicious" is not. LLM checks surface warnings for human review; they never make blocking decisions on their own.
+
+**Rule — use a different LLM for critic checks:** If GPT-4o produced the output being checked, the critic must use a different model (e.g. Claude or a smaller local model). A model checking its own output will rationalise its own mistakes. This is enforced via `CRITIC_LLM_PROVIDER` in `.env`, separate from `LLM_PROVIDER`.
+
+**Three checks to add:**
+
+**Check 1 — Semantic grounding verification (after Extraction + Explanation)**
+Current: verbatim string match. If LLM wrote "ISO 27001 certified annually" and source says "ISO 27001 certification, renewed each year" — same meaning, critic flags it as a grounding failure (false positive). LLM check: "Is this quote a faithful representation of what the source text says, or is it fabricated?" Reduces false positives without weakening the grounding requirement.
+
+**Check 2 — Answer-bearing quality (after Retrieval)**
+Current: checks if two words with >4 characters overlap between query and chunk. That is too weak. LLM check: reads the question and the retrieved chunk together and scores how directly the chunk answers the question. Makes the retrieval critic flag useless retrievals even when they technically contain text.
+
+**Check 3 — Cross-chunk contradiction detection (after Retrieval)**
+Current: contradictions are only flagged if the Evaluation Agent already spotted them. The Critic does not independently verify. LLM check: reads all retrieved chunks for a vendor side by side and flags if any two chunks make contradictory claims about the same fact ("Chunk 3 says uptime is 99.9%, Chunk 7 says uptime is 99.5%"). Catches data integrity issues before they reach Evaluation.
+
+**Where it lands:**
+- `app/agents/critic.py` — add `_llm_semantic_grounding()`, `_llm_answer_quality()`, `_llm_contradiction_check()` helpers
+- `app/providers/llm.py` — support `CRITIC_LLM_PROVIDER` env var to use a different model
+- `platform.yaml` — `critic.llm_checks_enabled: false` (off by default, customer opt-in)
+- `app/domain/org_settings.py` — add `critic_llm_checks: bool = False` field
+
+**Default:** Off. Customers who want richer audit trails can enable it in org settings. Adds ~$0.002 per evaluation run when enabled.
+
+**Priority:** Medium — current Python checks cover the critical cases. LLM checks add depth, not coverage.
+
+---
+
 ### AI-004 — Scoring Bias Detection
 **Summary:** Test whether the scoring agent gives systematically different scores for identical content when the vendor name is changed (e.g. "Acme Corp" vs "TechNova Ltd"). Bias in automated scoring is a regulatory risk in procurement.
 

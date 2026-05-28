@@ -22,11 +22,35 @@ _PROMPTS_DIR = Path(__file__).parent
 # Map short names → (langsmith_identifier, local_yaml_file)
 # Key format: "agent/prompt_name"  matches LangSmith Hub namespace: meridian/agent/prompt-name
 _REGISTRY: dict[str, tuple[str, str]] = {
-    # ── Setup (pre-agent) ──────────────────────────────────────────────────────
+    # ── Setup (Agent 00) ───────────────────────────────────────────────────────
     "setup/extract_rfp_criteria":    ("setup-extract-rfp-criteria",    "setup/extract_rfp_criteria.yaml"),
     "setup/generate_score_guides":   ("setup-generate-score-guides",   "setup/generate_score_guides.yaml"),
     "setup/suggest_mandatory_checks":("setup-suggest-mandatory-checks","setup/suggest_mandatory_checks.yaml"),
     "setup/interpret_criteria_sheet":("setup-interpret-criteria-sheet","setup/interpret_criteria_sheet.yaml"),
+
+    # ── Retrieval (Agent 02) ───────────────────────────────────────────────────
+    "retrieval/rewrite_query":        ("retrieval-rewrite-query",        "retrieval/rewrite_query.yaml"),
+    "retrieval/hyde_vendor_response": ("retrieval-hyde-vendor-response", "retrieval/hyde_vendor_response.yaml"),
+    "retrieval/hyde_rfp_requirement": ("retrieval-hyde-rfp-requirement", "retrieval/hyde_rfp_requirement.yaml"),
+    "retrieval/hyde_policy_document": ("retrieval-hyde-policy-document", "retrieval/hyde_policy_document.yaml"),
+
+    # ── Extraction (Agent 03) ──────────────────────────────────────────────────
+    "extraction/extract_facts":       ("extraction-extract-facts",       "extraction/extract_facts.yaml"),
+    "extraction/retry_extract":       ("extraction-retry-extract",       "extraction/retry_extract.yaml"),
+
+    # ── Evaluation (Agent 04) ──────────────────────────────────────────────────
+    "evaluation/verify_threshold":    ("evaluation-verify-threshold",    "evaluation/verify_threshold.yaml"),
+    "evaluation/evaluate_check":      ("evaluation-evaluate-check",      "evaluation/evaluate_check.yaml"),
+    "evaluation/score_criterion":     ("evaluation-score-criterion",     "evaluation/score_criterion.yaml"),
+
+    # ── Comparator (Agent 05) ──────────────────────────────────────────────────
+    "comparator/compare_criterion":   ("comparator-compare-criterion",   "comparator/compare_criterion.yaml"),
+
+    # ── Decision (Agent 06) ───────────────────────────────────────────────────
+    "decision/extract_evidence":      ("decision-extract-evidence",      "decision/extract_evidence.yaml"),
+
+    # ── Explanation (Agent 07) ────────────────────────────────────────────────
+    "explanation/generate_narrative": ("explanation-generate-narrative", "explanation/generate_narrative.yaml"),
 }
 
 # In-process cache: name → raw template string
@@ -44,7 +68,13 @@ def _langsmith_session():
 
 @lru_cache(maxsize=1)
 def _langsmith_available() -> bool:
-    """Returns True only if LANGSMITH_API_KEY is set and hub is reachable."""
+    """Returns True only if LANGSMITH_API_KEY is set, hub is reachable, AND
+    PROMPTS_FORCE_LOCAL is not enabled. Local-YAML override is critical for dev
+    workflows where the YAML has been updated but the Hub version is stale
+    (e.g. Phase 1 grounded_claims/system_facts split — the local YAML moves
+    first, the Hub version follows once the new prompt is validated)."""
+    if os.getenv("PROMPTS_FORCE_LOCAL", "false").lower() == "true":
+        return False
     if not os.getenv("LANGSMITH_API_KEY"):
         return False
     try:

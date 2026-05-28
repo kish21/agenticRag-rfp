@@ -11,7 +11,7 @@ Usage:
 """
 import sys, os, json, inspect, re
 from pathlib import Path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, str(Path(os.path.abspath(__file__)).parent.parent))
 
 RESULTS = []
 

@@ -11,10 +11,26 @@ Supported providers:
   modal       — Qwen 2.5 72B via vLLM on Modal A100 (OpenAI-compatible endpoint)
                 Set MODAL_LLM_ENDPOINT after: modal deploy app_modal.py --env rag
 """
+import hashlib
 import time
 from typing import Optional
 from langsmith import traceable
 from app.config import settings
+
+
+def stable_seed(*parts: str) -> int:
+    """Derive a deterministic 32-bit integer seed from arbitrary string parts.
+
+    Used as the `seed=` argument to LLM calls so that the same (run_id, agent,
+    vendor_id) tuple produces the same model output across re-runs on providers
+    that support seeded sampling (OpenAI, Azure, OpenRouter, Modal). Anthropic
+    ignores `seed` — silently — and relies on temperature=0 + cache.
+
+    Returns an int in [0, 2**32) — fits OpenAI's seed contract and is small
+    enough to be stable across SDK versions.
+    """
+    blob = "|".join(str(p) for p in parts).encode("utf-8")
+    return int(hashlib.sha256(blob).hexdigest()[:8], 16)
 
 
 def _http_client():
@@ -115,14 +131,25 @@ def get_model_name() -> str:
 @traceable(run_type="llm", name="call_llm")
 async def call_llm(
     messages: list[dict],
-    temperature: float = 0.1,
+    temperature: float = 0.0,
     max_tokens: int = 4096,
     response_format: Optional[dict] = None,
+    seed: Optional[int] = None,
 ) -> str:
     """
     Unified LLM call across all providers.
     Agents call this — never the provider SDK directly.
     Returns the text content of the response.
+
+    Determinism contract (Phase 1):
+      • temperature defaults to 0.0 (was 0.1 — non-deterministic)
+      • seed parameter plumbed to OpenAI / Azure / OpenRouter / Modal where
+        supported. Anthropic and Ollama silently ignore seed.
+      • Anthropic branch now passes temperature through (previously dropped).
+      • If seed is None, auto-derive from sha256(messages) so the same input
+        always produces the same seed value. Callers can override by passing
+        an explicit seed (e.g. critic retries pass a different seed to force
+        a fresh sample without using cache).
     """
     from app.infra.rate_limiter import call_with_backoff
 
@@ -131,6 +158,16 @@ async def call_llm(
 
     from app.infra.cost_tracker import record_llm_call
     model_name = get_model_name()
+
+    if seed is None:
+        # Auto-derive from message content for cross-run determinism.
+        # Same prompt → same seed → same output, on every provider that honours seed.
+        import json as _json
+        try:
+            payload = _json.dumps(messages, sort_keys=True, default=str)
+        except Exception:
+            payload = repr(messages)
+        seed = stable_seed(payload)
 
     if provider == "anthropic":
         system_msg = next(
@@ -143,6 +180,7 @@ async def call_llm(
             resp = await client.messages.create(
                 model=model_name,
                 max_tokens=max_tokens,
+                temperature=temperature,   # Phase 1 fix: was silently dropped
                 system=system_msg or "You are a helpful assistant.",
                 messages=user_msgs,
             )
@@ -163,6 +201,8 @@ async def call_llm(
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if seed is not None:
+            kwargs["seed"] = seed
         if response_format:
             kwargs["response_format"] = response_format
 
@@ -192,6 +232,10 @@ async def call_llm(
         # Qwen follows JSON instructions in the prompt without it (same as Anthropic path).
         if response_format and provider != "modal":
             kwargs["response_format"] = response_format
+        # seed is supported by OpenAI, OpenRouter (most models), Modal (vLLM);
+        # Ollama silently ignores. Don't send it to Ollama to avoid future SDK breakage.
+        if seed is not None and provider != "ollama":
+            kwargs["seed"] = seed
 
         async def _call():
             t0 = time.monotonic()
