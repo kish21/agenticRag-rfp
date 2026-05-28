@@ -68,7 +68,21 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
+# Updated for Phase 4 — each vendor-iterating stage is split into start/per_vendor/done.
+# These are the LangGraph node names that should fire during a healthy run.
 EXPECTED_NODES = [
+    "planner", "ingestion",
+    "retrieval_start", "retrieval_per_vendor", "retrieval_done",
+    "extraction_start", "extraction_per_vendor", "extraction_done",
+    "evaluation_start", "evaluation_per_vendor", "evaluation_done",
+    "comparator", "decision",
+    "explanation_start", "explanation_per_vendor", "explanation_finalise",
+]
+
+# Logical "agent" stage names that appear in the agent_events SSE stream
+# (one emit per stage regardless of how many per-vendor branches ran).
+# Used for the DB-event verification at the end of a run.
+EXPECTED_AGENT_EVENTS = [
     "planner", "ingestion", "retrieval", "extraction",
     "evaluation", "comparator", "decision", "explanation",
 ]
@@ -434,9 +448,23 @@ def _verify_graph_executed(run: dict, node_trace: list[dict]) -> list[str]:
     if run["status"] != "complete":
         failures.append(f"final status is '{run['status']}', expected 'complete'")
     nodes_ran = {t["node"] for t in node_trace}
-    missing = [n for n in EXPECTED_NODES if n not in nodes_ran]
-    if missing:
-        failures.append(f"nodes the graph never invoked: {missing}")
+    # Phase 4 fan-out: missing non-per-vendor nodes is a hard fail. Missing
+    # `*_per_vendor` nodes is OK when vendor_ids is empty (no vendors -> no
+    # parallel branches were ever spawned).
+    n_vendors = (run.get("n_vendors") or 0)
+    has_vendors = (n_vendors > 0)
+    for node_name in EXPECTED_NODES:
+        if node_name in nodes_ran:
+            continue
+        if node_name.endswith("_per_vendor") and not has_vendors:
+            continue   # legitimately not spawned when no vendors submitted
+        failures.append(f"node never invoked: {node_name}")
+    # Cross-check the SSE event stream — at least one 'done' event per agent.
+    events = run.get("agent_events") or []
+    done_agents = {e.get("agent") for e in events if e.get("status") == "done"}
+    missing_agents = [a for a in EXPECTED_AGENT_EVENTS if a not in done_agents]
+    if missing_agents:
+        failures.append(f"agents that never emitted 'done': {missing_agents}")
     if not run["decision_output"]:
         failures.append("decision_output is empty/null")
     if not run["completed_at"]:

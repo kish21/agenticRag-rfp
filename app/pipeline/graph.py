@@ -1,98 +1,184 @@
 """
 LangGraph StateGraph — wires the 9-agent pipeline with conditional edges.
 
-Topology:
-  planner → ingestion → retrieval → extraction → evaluation
-          → comparator → decision → explanation → END
+Topology (Phase 4 — parallel vendor execution):
 
-After every node:
-  • CriticVerdict.BLOCKED  →  _route_after() returns END immediately
-  • Otherwise              →  proceeds to the next node
+  planner → ingestion
+                ↓
+            retrieval_start ─→ [fan-out via Send] ─→ retrieval_per_vendor  (×N parallel)
+                                                          ↓
+                                                  retrieval_done
+                                                          ↓
+                                              [fan-out] → extraction_per_vendor (×N parallel)
+                                                          ↓
+                                                  extraction_done
+                                                          ↓
+                                              [fan-out] → evaluation_per_vendor (×N parallel)
+                                                          ↓
+                                                  evaluation_done
+                                                          ↓
+                                                    comparator        (sync barrier — reads merged dicts)
+                                                          ↓
+                                                    decision
+                                                          ↓
+                                              explanation_start
+                                                          ↓
+                                              [fan-out] → explanation_per_vendor (×N parallel)
+                                                          ↓
+                                              explanation_finalise   (stitches + critic + emits done)
+                                                          ↓
+                                                         END
 
-Benefits over the old sequential-await approach:
-  • astream() yields a state diff after each node — frontend can show live progress
-  • LangSmith renders the full DAG in its trace view
-  • A BLOCKED critic routes to END cleanly without a try/except waterfall
-  • State is snapshotted at each node — replay is trivial
+Behaviour:
+  • Per-vendor failures append to state.failed_vendors and DO NOT block the
+    pipeline — Phase 4 isolation. Other vendors keep going. Comparator /
+    Decision treat missing vendors as "no submission".
+  • CRITIC HARD BLOCK from any non-per-vendor node still routes to END via
+    _route_after() — preserves Phase 1's blocking-on-pipeline-fatal behaviour.
+  • Vendor-iterating "start" / "done" nodes run exactly once per stage and
+    just emit SSE events so the frontend UX stays compatible.
 """
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Send
 
 from .state import PipelineState
 from .nodes import (
     planner_node,
     ingestion_node,
-    retrieval_node,
-    extraction_node,
-    evaluation_node,
+    # Retrieval (3 nodes — fan-out pattern)
+    retrieval_start, retrieval_per_vendor, retrieval_done,
+    # Extraction (3 nodes)
+    extraction_start, extraction_per_vendor, extraction_done,
+    # Evaluation (3 nodes)
+    evaluation_start, evaluation_per_vendor, evaluation_done,
+    # Cross-vendor stages
     comparator_node,
     decision_node,
-    explanation_node,
+    # Explanation (3 nodes — fan-out + final stitching)
+    explanation_start, explanation_per_vendor, explanation_finalise,
 )
 
-# Node name constants — avoids magic strings in edge definitions
+# Node name constants
 _PLANNER    = "planner"
 _INGESTION  = "ingestion"
-_RETRIEVAL  = "retrieval"
-_EXTRACTION = "extraction"
-_EVALUATION = "evaluation"
+
+_RETRIEVAL_START      = "retrieval_start"
+_RETRIEVAL_PER_VENDOR = "retrieval_per_vendor"
+_RETRIEVAL_DONE       = "retrieval_done"
+
+_EXTRACTION_START      = "extraction_start"
+_EXTRACTION_PER_VENDOR = "extraction_per_vendor"
+_EXTRACTION_DONE       = "extraction_done"
+
+_EVALUATION_START      = "evaluation_start"
+_EVALUATION_PER_VENDOR = "evaluation_per_vendor"
+_EVALUATION_DONE       = "evaluation_done"
+
 _COMPARATOR = "comparator"
 _DECISION   = "decision"
-_EXPLANATION = "explanation"
 
+_EXPLANATION_START      = "explanation_start"
+_EXPLANATION_PER_VENDOR = "explanation_per_vendor"
+_EXPLANATION_FINALISE   = "explanation_finalise"
+
+
+# ── Routing helpers ──────────────────────────────────────────────────────────
 
 def _route_after(state: PipelineState) -> str:
-    """Shared conditional router: any HARD critic block routes straight to END."""
+    """For non-per-vendor nodes: any HARD critic block routes straight to END.
+    Per-vendor nodes don't use this — they isolate failures via failed_vendors."""
     return END if state.get("blocked") else "continue"
 
 
-def build_graph() -> CompiledStateGraph:
-    """
-    Construct and compile the evaluation pipeline StateGraph.
+def _fan_out(target_node: str):
+    """Build a conditional-edge function that fans out one Send per vendor_id.
+    The Send payload carries the full state plus a `vendor_id` field that the
+    per-vendor node reads to know which vendor it's processing."""
+    def _edge(state: PipelineState):
+        # If the prior stage marked the pipeline blocked (rare — only via the
+        # non-per-vendor nodes upstream), short-circuit to END.
+        if state.get("blocked"):
+            return END
+        vendor_ids = state.get("vendor_ids") or []
+        if not vendor_ids:
+            return END
+        return [Send(target_node, {**state, "vendor_id": v}) for v in vendor_ids]
+    return _edge
 
-    No checkpointer is attached — state lives in-memory for the duration of
-    one evaluation run. Add a SqliteSaver / AsyncPostgresSaver here later if
-    you need durable mid-run snapshots.
-    """
+
+def build_graph() -> CompiledStateGraph:
+    """Construct and compile the evaluation pipeline StateGraph with Phase 4
+    parallel per-vendor fan-out."""
     g: StateGraph = StateGraph(PipelineState)
 
-    # Register nodes
+    # ── Register all nodes ──────────────────────────────────────────────────
     g.add_node(_PLANNER,     planner_node)
     g.add_node(_INGESTION,   ingestion_node)
-    g.add_node(_RETRIEVAL,   retrieval_node)
-    g.add_node(_EXTRACTION,  extraction_node)
-    g.add_node(_EVALUATION,  evaluation_node)
-    g.add_node(_COMPARATOR,  comparator_node)
-    g.add_node(_DECISION,    decision_node)
-    g.add_node(_EXPLANATION, explanation_node)
 
-    # Entry point
+    g.add_node(_RETRIEVAL_START,      retrieval_start)
+    g.add_node(_RETRIEVAL_PER_VENDOR, retrieval_per_vendor)
+    g.add_node(_RETRIEVAL_DONE,       retrieval_done)
+
+    g.add_node(_EXTRACTION_START,      extraction_start)
+    g.add_node(_EXTRACTION_PER_VENDOR, extraction_per_vendor)
+    g.add_node(_EXTRACTION_DONE,       extraction_done)
+
+    g.add_node(_EVALUATION_START,      evaluation_start)
+    g.add_node(_EVALUATION_PER_VENDOR, evaluation_per_vendor)
+    g.add_node(_EVALUATION_DONE,       evaluation_done)
+
+    g.add_node(_COMPARATOR, comparator_node)
+    g.add_node(_DECISION,   decision_node)
+
+    g.add_node(_EXPLANATION_START,      explanation_start)
+    g.add_node(_EXPLANATION_PER_VENDOR, explanation_per_vendor)
+    g.add_node(_EXPLANATION_FINALISE,   explanation_finalise)
+
+    # ── Entry point ─────────────────────────────────────────────────────────
     g.set_entry_point(_PLANNER)
 
-    # Conditional edges after each node:
-    #   blocked=True  → END
-    #   blocked=False → next node
-    g.add_conditional_edges(_PLANNER,     _route_after,
+    # ── Non-per-vendor stages: planner → ingestion (with blocked→END) ──────
+    g.add_conditional_edges(_PLANNER,   _route_after,
                             {END: END, "continue": _INGESTION})
-    g.add_conditional_edges(_INGESTION,   _route_after,
-                            {END: END, "continue": _RETRIEVAL})
-    g.add_conditional_edges(_RETRIEVAL,   _route_after,
-                            {END: END, "continue": _EXTRACTION})
-    g.add_conditional_edges(_EXTRACTION,  _route_after,
-                            {END: END, "continue": _EVALUATION})
-    g.add_conditional_edges(_EVALUATION,  _route_after,
-                            {END: END, "continue": _COMPARATOR})
-    g.add_conditional_edges(_COMPARATOR,  _route_after,
+    g.add_conditional_edges(_INGESTION, _route_after,
+                            {END: END, "continue": _RETRIEVAL_START})
+
+    # ── Retrieval stage: start → fan-out → per_vendor (×N) → done ──────────
+    g.add_conditional_edges(_RETRIEVAL_START, _fan_out(_RETRIEVAL_PER_VENDOR),
+                            [_RETRIEVAL_PER_VENDOR, END])
+    g.add_edge(_RETRIEVAL_PER_VENDOR, _RETRIEVAL_DONE)
+    g.add_edge(_RETRIEVAL_DONE, _EXTRACTION_START)
+
+    # ── Extraction stage ───────────────────────────────────────────────────
+    g.add_conditional_edges(_EXTRACTION_START, _fan_out(_EXTRACTION_PER_VENDOR),
+                            [_EXTRACTION_PER_VENDOR, END])
+    g.add_edge(_EXTRACTION_PER_VENDOR, _EXTRACTION_DONE)
+    g.add_edge(_EXTRACTION_DONE, _EVALUATION_START)
+
+    # ── Evaluation stage ───────────────────────────────────────────────────
+    g.add_conditional_edges(_EVALUATION_START, _fan_out(_EVALUATION_PER_VENDOR),
+                            [_EVALUATION_PER_VENDOR, END])
+    g.add_edge(_EVALUATION_PER_VENDOR, _EVALUATION_DONE)
+    g.add_edge(_EVALUATION_DONE, _COMPARATOR)
+
+    # ── Cross-vendor sync barrier and downstream ───────────────────────────
+    g.add_conditional_edges(_COMPARATOR, _route_after,
                             {END: END, "continue": _DECISION})
-    g.add_conditional_edges(_DECISION,    _route_after,
-                            {END: END, "continue": _EXPLANATION})
+    g.add_conditional_edges(_DECISION,   _route_after,
+                            {END: END, "continue": _EXPLANATION_START})
 
-    # Explanation always goes to END (it is the terminal node)
-    g.add_edge(_EXPLANATION, END)
+    # ── Explanation stage (fan-out + finalise) ─────────────────────────────
+    g.add_conditional_edges(_EXPLANATION_START, _fan_out(_EXPLANATION_PER_VENDOR),
+                            [_EXPLANATION_PER_VENDOR, END])
+    g.add_edge(_EXPLANATION_PER_VENDOR, _EXPLANATION_FINALISE)
+    g.add_edge(_EXPLANATION_FINALISE, END)
 
+    # Recursion limit guard — Phase 4 has no cycles but Phase 2 (critic retry)
+    # will introduce them. Setting a generous floor now means Phase 2 won't
+    # need to touch graph.py just to relax recursion behaviour.
     return g.compile()
 
 
 # Module-level singleton — built once on first import, reused across requests.
-# Thread-safe: CompiledStateGraph is stateless between invocations.
 evaluation_graph: CompiledStateGraph = build_graph()

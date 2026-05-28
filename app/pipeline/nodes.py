@@ -41,6 +41,7 @@ from app.api._evaluation.db import (
 )
 
 from .state import PipelineState
+from .concurrency import vendor_slot
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -181,35 +182,46 @@ async def ingestion_node(state: PipelineState) -> dict:
         return _block_update(state, agent, exc)
 
 
-# ── Node 3 — Retrieval ────────────────────────────────────────────────────────
+# ── Node 3 — Retrieval (Phase 4: fan-out across vendors) ──────────────────────
+# Stage is split into three nodes:
+#   retrieval_start       — tiny, emits "running" event (preserves SSE UX)
+#   retrieval_per_vendor  — does the work for ONE vendor; runs in parallel
+#                           via LangGraph Send. Bounded by vendor_slot semaphore.
+#   retrieval_done        — tiny, emits "done" after all parallel branches join
 
-async def retrieval_node(state: PipelineState) -> dict:
+async def retrieval_start(state: PipelineState) -> dict:
     agent = "retrieval"
+    n_vendors = state["n_vendors"]
+    _emit(state, agent, "running",
+          f"Retrieving chunks for {n_vendors} vendors",
+          log_msg="Searching each vendor proposal for relevant sections on "
+                  "pricing, compliance, SLAs, and technical capability.")
+    return {}
+
+
+async def retrieval_per_vendor(state: PipelineState) -> dict:
+    """One-vendor retrieval. LangGraph spawns this once per vendor via Send.
+
+    Failure isolation: per-vendor exceptions append to `failed_vendors` instead
+    of aborting the whole pipeline. The other vendors keep going.
+    """
+    agent = "retrieval"
+    vid = state["vendor_id"]
     org_id = state["org_id"]
     rfp_id = state["rfp_id"]
-    vendor_ids = state["vendor_ids"]
-    n_vendors = state["n_vendors"]
     evaluation_setup = EvaluationSetup(**state["evaluation_setup_dict"])
     org_settings = state["org_settings"]
+    mandatory_names = {c.name for c in evaluation_setup.mandatory_checks}
+
+    queries = (
+        [c.name for c in evaluation_setup.scoring_criteria] +
+        [c.name for c in evaluation_setup.mandatory_checks]
+    ) or ["technical capability SLA pricing compliance certifications experience"]
+
     try:
-        _emit(state, agent, "running",
-              f"Retrieving chunks for {n_vendors} vendors",
-              log_msg="Searching each vendor proposal for relevant sections on "
-                      "pricing, compliance, SLAs, and technical capability.")
-
-        retrieval_output_objects: dict = {}
-        source_chunks: dict = {}
-        mandatory_names = {c.name for c in evaluation_setup.mandatory_checks}
-
-        for vid in vendor_ids:
-            queries = (
-                [c.name for c in evaluation_setup.scoring_criteria] +
-                [c.name for c in evaluation_setup.mandatory_checks]
-            ) or ["technical capability SLA pricing compliance certifications experience"]
-
+        async with vendor_slot():
             seen: set = set()
             merged_chunks = []
-
             for query in queries:
                 ret_out, ret_critic = await run_retrieval_agent(
                     query=query, vendor_id=vid, org_id=org_id, rfp_id=rfp_id,
@@ -242,12 +254,10 @@ async def retrieval_node(state: PipelineState) -> dict:
                 empty_retrieval=(len(merged_chunks) == 0),
                 warnings=[],
             )
-            combined_critic = critic_after_retrieval(combined, is_mandatory=False)
-            _hard_block_if(combined_critic, f"retrieval/combined vendor={vid}")
 
-            retrieval_output_objects[vid] = combined
-            for chunk in merged_chunks:
-                source_chunks[chunk.chunk_id] = chunk.text
+            # Per-vendor critic — emits soft warnings via log but does NOT
+            # block the pipeline in Phase 4. (Phase 2 will hook retry here.)
+            critic_after_retrieval(combined, is_mandatory=False)
 
             rfp_logger.dev(DevLevel.RAG, agent,
                            f"Vendor {vid}: {len(merged_chunks)} unique chunks "
@@ -257,42 +267,76 @@ async def retrieval_node(state: PipelineState) -> dict:
                                  "confidence": combined.confidence},
                            run_id=state["run_id"], org_id=org_id)
 
-        _emit(state, agent, "done",
-              f"Retrieved chunks for {n_vendors} vendors",
-              log_msg=f"Found the most relevant passages from all {n_vendors} vendor proposals.")
-
-        return {
-            "retrieval_output_objects": retrieval_output_objects,
-            "source_chunks": source_chunks,
-        }
+            return {
+                "retrieval_output_objects": {vid: combined},
+                "source_chunks": {c.chunk_id: c.text for c in merged_chunks},
+            }
     except Exception as exc:
-        return _block_update(state, agent, exc)
+        rfp_logger.dev(DevLevel.ERROR, agent,
+                       f"Vendor {vid} retrieval failed: {exc}",
+                       data={"vendor_id": vid, "error": str(exc),
+                             "traceback": traceback.format_exc()},
+                       run_id=state["run_id"], org_id=org_id)
+        return {
+            "failed_vendors": [{
+                "vendor_id": vid, "stage": "retrieval",
+                "error": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }],
+        }
 
 
-# ── Node 4 — Extraction ───────────────────────────────────────────────────────
+async def retrieval_done(state: PipelineState) -> dict:
+    agent = "retrieval"
+    n_vendors = state["n_vendors"]
+    n_failed = len([f for f in (state.get("failed_vendors") or [])
+                    if f.get("stage") == "retrieval"])
+    n_ok = n_vendors - n_failed
+    _emit(state, agent, "done",
+          f"Retrieved chunks for {n_ok} of {n_vendors} vendors"
+          + (f" ({n_failed} failed)" if n_failed else ""),
+          log_msg=f"Found relevant passages from {n_ok} of {n_vendors} vendor proposals.")
+    return {}
 
-async def extraction_node(state: PipelineState) -> dict:
+
+# ── Node 4 — Extraction (Phase 4: fan-out across vendors) ─────────────────────
+
+async def extraction_start(state: PipelineState) -> dict:
     agent = "extraction"
+    evaluation_setup = EvaluationSetup(**state["evaluation_setup_dict"])
+    _emit(state, agent, "running",
+          "Extracting structured facts",
+          log_msg=f"Pulling specific facts from each proposal against "
+                  f"{len(evaluation_setup.extraction_targets)} extraction targets.")
+    return {}
+
+
+async def extraction_per_vendor(state: PipelineState) -> dict:
+    """One-vendor extraction. Failure isolation via failed_vendors."""
+    agent = "extraction"
+    vid = state["vendor_id"]
     org_id = state["org_id"]
     rfp_id = state["rfp_id"]
-    vendor_ids = state["vendor_ids"]
     evaluation_setup = EvaluationSetup(**state["evaluation_setup_dict"])
-    retrieval_output_objects = state["retrieval_output_objects"]
+    retrieval_output_objects = state.get("retrieval_output_objects") or {}
+
+    # Skip if this vendor failed retrieval — nothing to extract from.
+    if vid not in retrieval_output_objects:
+        return {
+            "failed_vendors": [{
+                "vendor_id": vid, "stage": "extraction",
+                "error": "no retrieval output available (vendor failed upstream)",
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }],
+        }
+
+    ret_out = retrieval_output_objects[vid]
     try:
-        _emit(state, agent, "running",
-              "Extracting structured facts",
-              log_msg="Pulling out specific facts from each proposal — "
-                      "certifications, insurance, SLA commitments, project history, and pricing.")
-
-        extraction_output_objects: dict = {}
-
-        for vid in vendor_ids:
-            ret_out = retrieval_output_objects[vid]
+        async with vendor_slot():
             ext_out, critic_ext = await run_extraction_agent(
                 retrieval_output=ret_out, vendor_id=vid, org_id=org_id,
                 doc_id=f"{rfp_id}-{vid}", setup_id=state["setup_id"],
                 evaluation_setup=evaluation_setup, run_id=state["run_id"])
-            extraction_output_objects[vid] = ext_out
             rfp_logger.dev(DevLevel.INFO, agent,
                            f"Vendor {vid}: {len(ext_out.slas)} SLAs, "
                            f"{len(ext_out.pricing)} pricing, "
@@ -305,46 +349,86 @@ async def extraction_node(state: PipelineState) -> dict:
                                  "hallucination_risk": round(ext_out.hallucination_risk, 2),
                                  "critic": critic_ext.overall_verdict},
                            run_id=state["run_id"], org_id=org_id)
-
-        total_facts = sum(
-            len(getattr(o, "certifications", []) or []) +
-            len(getattr(o, "slas", []) or []) +
-            len(getattr(o, "pricing", []) or [])
-            for o in extraction_output_objects.values()
-        )
-        _emit(state, agent, "done", "Facts extracted and stored",
-              log_msg=f"Extracted and saved {total_facts} verifiable facts "
-                      "across all vendor proposals.")
-
-        return {"extraction_output_objects": extraction_output_objects}
+            return {"extraction_output_objects": {vid: ext_out}}
     except Exception as exc:
-        return _block_update(state, agent, exc)
+        rfp_logger.dev(DevLevel.ERROR, agent,
+                       f"Vendor {vid} extraction failed: {exc}",
+                       data={"vendor_id": vid, "error": str(exc),
+                             "traceback": traceback.format_exc()},
+                       run_id=state["run_id"], org_id=org_id)
+        return {
+            "failed_vendors": [{
+                "vendor_id": vid, "stage": "extraction",
+                "error": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }],
+        }
+
+
+async def extraction_done(state: PipelineState) -> dict:
+    agent = "extraction"
+    extraction_output_objects = state.get("extraction_output_objects") or {}
+    total_facts = sum(
+        len(getattr(o, "certifications", []) or []) +
+        len(getattr(o, "slas", []) or []) +
+        len(getattr(o, "pricing", []) or [])
+        for o in extraction_output_objects.values()
+    )
+    n_ok = len(extraction_output_objects)
+    n_vendors = state["n_vendors"]
+    _emit(state, agent, "done", "Facts extracted and stored",
+          log_msg=f"Extracted {total_facts} verifiable facts from {n_ok} of {n_vendors} vendors.")
+    return {}
 
 
 # ── Node 5 — Evaluation ───────────────────────────────────────────────────────
 
 async def evaluation_node(state: PipelineState) -> dict:
     agent = "evaluation"
-    org_id = state["org_id"]
-    vendor_ids = state["vendor_ids"]
-    n_vendors = state["n_vendors"]
+    # ── (Original evaluation_node body replaced by Phase 4 fan-out below) ──
+    raise NotImplementedError(
+        "evaluation_node has been split into evaluation_start + evaluation_per_vendor + evaluation_done. "
+        "Use the Phase 4 fan-out pattern in graph.py."
+    )
+
+
+# ── Node 5 — Evaluation (Phase 4: fan-out across vendors) ─────────────────────
+
+async def evaluation_start(state: PipelineState) -> dict:
+    agent = "evaluation"
     evaluation_setup = EvaluationSetup(**state["evaluation_setup_dict"])
-    extraction_output_objects = state["extraction_output_objects"]
+    _emit(state, agent, "running",
+          "Scoring vendors against criteria",
+          log_msg=f"Scoring each vendor against your "
+                  f"{len(evaluation_setup.scoring_criteria)} criteria "
+                  "with their configured weights.")
+    return {}
+
+
+async def evaluation_per_vendor(state: PipelineState) -> dict:
+    """One-vendor evaluation. Per-vendor critic flags are logged but do NOT
+    block the pipeline in Phase 4. (Phase 2 will hook retry-with-feedback here.)"""
+    agent = "evaluation"
+    vid = state["vendor_id"]
+    org_id = state["org_id"]
+    evaluation_setup = EvaluationSetup(**state["evaluation_setup_dict"])
+    extraction_output_objects = state.get("extraction_output_objects") or {}
+
+    if vid not in extraction_output_objects:
+        return {
+            "failed_vendors": [{
+                "vendor_id": vid, "stage": "evaluation",
+                "error": "no extraction output available (vendor failed upstream)",
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }],
+        }
+
     try:
-        _emit(state, agent, "running",
-              "Scoring vendors against criteria",
-              log_msg=f"Scoring each vendor against your "
-                      f"{len(evaluation_setup.scoring_criteria)} criteria "
-                      "with their configured weights.")
-
-        evaluation_output_objects: dict = {}
-
-        for vid in vendor_ids:
+        async with vendor_slot():
             ev_out, ev_critic = await run_evaluation_agent(
                 vendor_id=vid, org_id=org_id, run_id=state["run_id"],
                 evaluation_setup=evaluation_setup,
                 extraction_output=extraction_output_objects.get(vid))
-            evaluation_output_objects[vid] = ev_out
             if ev_critic.overall_verdict.value != "approved":
                 rfp_logger.dev(DevLevel.INFO, agent,
                                f"Vendor {vid} critic: {ev_critic.overall_verdict.value} "
@@ -353,14 +437,29 @@ async def evaluation_node(state: PipelineState) -> dict:
                                      "verdict": ev_critic.overall_verdict.value,
                                      "flags": [f.check_name for f in ev_critic.flags]},
                                run_id=state["run_id"], org_id=org_id)
-            _hard_block_if(ev_critic, f"evaluation/vendor={vid}")
-
-        _emit(state, agent, "done", "All vendors scored",
-              log_msg=f"All {n_vendors} vendors scored. Scores ready for comparison.")
-
-        return {"evaluation_output_objects": evaluation_output_objects}
+            return {"evaluation_output_objects": {vid: ev_out}}
     except Exception as exc:
-        return _block_update(state, agent, exc)
+        rfp_logger.dev(DevLevel.ERROR, agent,
+                       f"Vendor {vid} evaluation failed: {exc}",
+                       data={"vendor_id": vid, "error": str(exc),
+                             "traceback": traceback.format_exc()},
+                       run_id=state["run_id"], org_id=org_id)
+        return {
+            "failed_vendors": [{
+                "vendor_id": vid, "stage": "evaluation",
+                "error": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }],
+        }
+
+
+async def evaluation_done(state: PipelineState) -> dict:
+    agent = "evaluation"
+    n_ok = len(state.get("evaluation_output_objects") or {})
+    n_vendors = state["n_vendors"]
+    _emit(state, agent, "done", f"Scored {n_ok} of {n_vendors} vendors",
+          log_msg=f"{n_ok} vendor(s) scored. Scores ready for comparison.")
+    return {}
 
 
 # ── Node 6 — Comparator ───────────────────────────────────────────────────────
@@ -439,24 +538,158 @@ async def decision_node(state: PipelineState) -> dict:
 # ── Node 8 — Explanation ──────────────────────────────────────────────────────
 
 async def explanation_node(state: PipelineState) -> dict:
-    agent = "explanation"
-    evaluation_output_objects = state["evaluation_output_objects"]
-    extraction_output_objects = state["extraction_output_objects"]
-    dec_out = state["decision_output"]
-    source_chunks = state["source_chunks"]
-    exp_out = None  # captured before critic check so diagnostics survive a block
-    try:
-        _emit(state, agent, "running",
-              "Generating grounded report",
-              log_msg="Writing the evaluation report — every recommendation is "
-                      "backed by a direct quote from the vendor proposals.")
+    """DEPRECATED in Phase 4 — split into explanation_start / explanation_per_vendor
+    / explanation_finalise below. Kept so accidental references fail loudly."""
+    raise NotImplementedError(
+        "explanation_node has been split into explanation_start + explanation_per_vendor "
+        "+ explanation_finalise. Use the Phase 4 fan-out pattern in graph.py."
+    )
 
-        exp_out, exp_critic = await run_explanation_agent(
-            decision_output=dec_out,
-            evaluation_outputs=evaluation_output_objects,
-            extraction_outputs=extraction_output_objects,
-            source_chunks=source_chunks,
-            currency=state["currency"])
+
+# ── Node 8 — Explanation (Phase 4: fan-out across vendors + final stitching) ──
+
+async def explanation_start(state: PipelineState) -> dict:
+    agent = "explanation"
+    _emit(state, agent, "running",
+          "Generating grounded report",
+          log_msg="Writing the evaluation report — every recommendation is "
+                  "backed by a direct quote from the vendor proposals.")
+    return {}
+
+
+async def explanation_per_vendor(state: PipelineState) -> dict:
+    """One-vendor narrative generation. Calls _generate_vendor_narrative
+    directly so we can parallelise across vendors. The final ExplanationOutput
+    is stitched together by explanation_finalise after all branches converge.
+    """
+    from app.agents.explanation import _generate_vendor_narrative
+    from app.schemas.schema_extraction import ExtractionOutput
+
+    agent = "explanation"
+    vid = state["vendor_id"]
+    evaluation_output_objects = state.get("evaluation_output_objects") or {}
+    extraction_output_objects = state.get("extraction_output_objects") or {}
+    source_chunks = state.get("source_chunks") or {}
+    decision_output = state["decision_output"]
+
+    if vid not in evaluation_output_objects:
+        return {
+            "failed_vendors": [{
+                "vendor_id": vid, "stage": "explanation",
+                "error": "no evaluation output available (vendor failed upstream)",
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }],
+        }
+
+    evaluation = evaluation_output_objects[vid]
+    extraction = extraction_output_objects.get(vid) or ExtractionOutput(
+        extraction_id="empty", vendor_id=vid, org_id=state["org_id"],
+        source_chunk_ids=[], extraction_completeness=0.0, hallucination_risk=0.0,
+    )
+    # Filter chunks to this vendor's own chunks — prevents cross-vendor
+    # contamination in the grounding check.
+    vendor_chunks = {
+        cid: source_chunks[cid]
+        for cid in getattr(extraction, "source_chunk_ids", []) or []
+        if cid in source_chunks
+    } or source_chunks  # fallback when extraction has no chunk IDs
+
+    is_rejected = any(r.vendor_id == vid for r in decision_output.rejected_vendors)
+
+    try:
+        async with vendor_slot():
+            narrative = await _generate_vendor_narrative(
+                vendor_id=vid,
+                vendor_name=vid,
+                is_rejected=is_rejected,
+                evaluation=evaluation,
+                extraction=extraction,
+                source_chunks=vendor_chunks,
+                decision_output=decision_output,
+                currency=state["currency"],
+            )
+            return {"vendor_narratives_accum": {vid: narrative}}
+    except Exception as exc:
+        rfp_logger.dev(DevLevel.ERROR, agent,
+                       f"Vendor {vid} explanation failed: {exc}",
+                       data={"vendor_id": vid, "error": str(exc),
+                             "traceback": traceback.format_exc()},
+                       run_id=state["run_id"], org_id=state["org_id"])
+        return {
+            "failed_vendors": [{
+                "vendor_id": vid, "stage": "explanation",
+                "error": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }],
+        }
+
+
+async def explanation_finalise(state: PipelineState) -> dict:
+    """Aggregates per-vendor narratives into the final ExplanationOutput,
+    runs the critic, and preserves diagnostics on a HARD block (Phase 1 fix)."""
+    from app.agents.explanation import _build_executive_summary
+    from app.schemas.schema_decision import ExplanationOutput
+
+    agent = "explanation"
+    vendor_narratives_accum = state.get("vendor_narratives_accum") or {}
+    decision_output = state["decision_output"]
+    source_chunks = state.get("source_chunks") or {}
+
+    exp_out = None  # so the block handler can still preserve diagnostics
+    try:
+        # Sort by vendor_id for deterministic output across runs.
+        vendor_narratives = [vendor_narratives_accum[v]
+                             for v in sorted(vendor_narratives_accum.keys())]
+
+        # Aggregate grounding completeness (same formula as the original agent)
+        total_claims = sum(
+            len(n.grounded_claims) + n.ungrounded_claims_removed
+            for n in vendor_narratives
+        )
+        grounded_claims = sum(len(n.grounded_claims) for n in vendor_narratives)
+        grounding_completeness = (
+            grounded_claims / total_claims if total_claims > 0 else 0.0
+        )
+
+        methodology_note = (
+            "This report was generated by an automated evaluation pipeline. "
+            "Every factual claim is grounded to a verbatim quote from the vendor submission. "
+            "Claims that could not be verified against source text were removed. "
+            "Human review is recommended before final procurement decisions."
+        )
+
+        limitations: list[str] = []
+        if total_claims == 0:
+            limitations.append(
+                "No grounded claims were produced for any vendor — "
+                "narratives may be empty. Check source chunks and re-run."
+            )
+        for n in vendor_narratives:
+            if n.ungrounded_claims_removed > 0:
+                limitations.append(
+                    f"{n.vendor_id}: {n.ungrounded_claims_removed} unverified claim(s) removed."
+                )
+            if len(n.grounded_claims) == 0:
+                limitations.append(
+                    f"{n.vendor_id}: zero grounded claims — narrative has no verifiable content."
+                )
+        for fv in state.get("failed_vendors") or []:
+            if fv.get("stage") == "explanation":
+                limitations.append(
+                    f"{fv.get('vendor_id')}: narrative generation failed ({fv.get('error', 'unknown error')[:80]})."
+                )
+
+        exp_out = ExplanationOutput(
+            explanation_id=str(uuid.uuid4()),
+            executive_summary=_build_executive_summary(decision_output, vendor_narratives),
+            vendor_narratives=vendor_narratives,
+            methodology_note=methodology_note,
+            limitations=limitations,
+            grounding_completeness=round(grounding_completeness, 3),
+            report_confidence=decision_output.decision_confidence,
+        )
+
+        exp_critic = critic_after_explanation(exp_out, source_chunks)
         _hard_block_if(exp_critic, "explanation")
 
         _emit(state, agent, "done",
@@ -464,9 +697,10 @@ async def explanation_node(state: PipelineState) -> dict:
               log_msg="Evaluation complete. Full report ready with citations for every finding.")
 
         return {"explanation_output": exp_out}
+
     except Exception as exc:
-        # Preserve the generated explanation (with grounding diagnostics) even
-        # when the critic blocks — otherwise the ungrounded_examples are lost.
+        # Preserve the generated explanation (with ungrounded_examples diagnostics)
+        # even on critic-block — Phase 1's safety property.
         update = _block_update(state, agent, exc)
         if exp_out is not None:
             update["explanation_output"] = exp_out
