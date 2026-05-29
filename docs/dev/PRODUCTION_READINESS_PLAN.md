@@ -273,6 +273,67 @@ Combined with Phase 2's critic-as-controller: each per-vendor sub-task has its o
 ### Intent
 Vendor proposals arrive over days/weeks via folder, email, or cloud storage. The pipeline should ingest + extract them in the background as they arrive, so when the user clicks "Evaluate" the data is already in PostgreSQL. End-to-end user-perceived latency drops from ~5 min to ~30 sec.
 
+### Grounding correction — what actually exists today (added 2026-05-29)
+
+The original Phase 5 design assumed an `rfps` table, an `invited_vendors` table, and a per-RFP creation flow already existed. **None of these exist in the current codebase.** Today an "RFP" is just a `rfp_id` string label generated on-the-fly inside the `/api/v1/evaluate/start` endpoint ([app/api/evaluation_routes.py:74](app/api/evaluation_routes.py#L74)) where the user uploads the RFP file plus all vendor files together in one HTTP multipart form. There is no concept of vendors uploading over time.
+
+Phase 5 therefore has a **Phase 5.0 foundation** step that must precede 5a/5b/5c — creating the `rfps` and `invited_vendors` tables, building the RFP-creation API + UI, and provisioning the drop-folder convention. The existing single-upload form is preserved as the implementation of `autonomy_mode='manual'` so existing demos/customers continue to work unchanged.
+
+Honest revised estimate: **~3 weeks** (not 3.5 days). Delivered as 5 PRs (PR-A through PR-E).
+
+### 5.0 — Foundation prerequisites (NEW — must precede 5a)
+
+**New tables:**
+```sql
+CREATE TABLE rfps (
+  rfp_id              TEXT PRIMARY KEY,           -- existing rfp_id convention; not a UUID FK on legacy tables
+  org_id              UUID NOT NULL,
+  title               TEXT NOT NULL,
+  department          TEXT,
+  created_by_email    TEXT NOT NULL,
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  submission_deadline TIMESTAMPTZ,                -- nullable; UI default = created_at + 14 days
+  submission_status   TEXT NOT NULL DEFAULT 'open'
+      CHECK (submission_status IN ('open','closed','processing','facts_ready','evaluated')),
+  autonomy_mode       TEXT NOT NULL DEFAULT 'auto_to_evaluate'
+      CHECK (autonomy_mode IN ('manual','auto_to_evaluate','auto_to_report'))
+);
+
+CREATE TABLE invited_vendors (
+  rfp_id      TEXT NOT NULL REFERENCES rfps(rfp_id) ON DELETE CASCADE,
+  vendor_id   TEXT NOT NULL,
+  vendor_name TEXT,
+  invited_by  TEXT NOT NULL,
+  invited_at  TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (rfp_id, vendor_id)
+);
+
+CREATE TABLE event_log (
+  event_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_type  TEXT NOT NULL,    -- 'rfp.facts_ready' | 'rfp.evaluation_complete' | 'rfp.late_addendum' | 'rfp.attribution_failed'
+  org_id      UUID NOT NULL,
+  rfp_id      TEXT NOT NULL,
+  payload     JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ DEFAULT now(),
+  delivered_at TIMESTAMPTZ                       -- set by Phase 8 dispatcher, null = not yet delivered
+);
+CREATE INDEX ix_event_log_pending ON event_log(created_at) WHERE delivered_at IS NULL;
+```
+
+**Existing tables — NOT refactored in Phase 5.** `evaluation_runs`, `vendor_documents`, `extracted_facts` keep their plain `rfp_id TEXT` columns. The relationship between `rfps.rfp_id` and the legacy tables is application-enforced, not FK-enforced. (Tracked as a follow-up cleanup post-Phase-5.)
+
+**Mode semantics:**
+- `manual` — today's behaviour. Customer uses the existing single-form upload at `/api/v1/evaluate/start`. No watcher activity. Files in `drops/` are ignored.
+- `auto_to_evaluate` (default) — Phase 5 watcher receives files; deadline scheduler processes through extraction; stops at `facts_ready`. Emits `rfp.facts_ready` event. Customer clicks Evaluate → ~30s.
+- `auto_to_report` — schema-accepted from day 1, but the scheduler rejects with "Phase 7 PDF not yet implemented" until Phase 7 ships. Falls back to `auto_to_evaluate` behaviour.
+
+**RFP creation flow (new API + UI):**
+- `POST /api/v1/rfps` — create RFP shell (title, department, deadline, autonomy_mode). Returns `rfp_id`.
+- `POST /api/v1/rfps/{rfp_id}/vendors` — invite vendor (creates `invited_vendors` row + provisions `drops/{rfp_id}/{vendor_id}/` folder).
+- `POST /api/v1/rfps/{rfp_id}/deadline` — set/extend deadline (only while `submission_status='open'`).
+- `GET /api/v1/rfps/{rfp_id}` — RFP summary with vendor list, status, deadline, received-files count per vendor.
+- Frontend page `frontend/app/procurement/rfps/new/page.tsx` — replaces the empty placeholder at `frontend/app/procurement/upload/page.tsx` which is preserved as the "manual mode" upload path.
+
 ### 5a — Attribution layer (defense in depth)
 
 **Default mechanism: structured drop folders (path = attribution).**
@@ -335,13 +396,9 @@ returns     stages (facts already in PostgreSQL). Only Retrieval refresh,
 
 ### 5b — State / idempotency (`ingestion_jobs`)
 
-```sql
--- RFP-level submission lifecycle (new columns)
-ALTER TABLE rfps ADD COLUMN
-    submission_deadline   TIMESTAMPTZ,
-    submission_status     TEXT DEFAULT 'open'
-        CHECK (submission_status IN ('open','closed','processing','facts_ready','evaluated'));
+`rfps.submission_deadline`, `rfps.submission_status`, and `rfps.autonomy_mode` are created in **Phase 5.0** above. This sub-section adds the per-file job table:
 
+```sql
 CREATE TABLE ingestion_jobs (
   job_id          UUID PRIMARY KEY,
   org_id          UUID NOT NULL,
@@ -418,36 +475,132 @@ CREATE TABLE ingestion_jobs (
 - Comparator + Decision + Explanation re-run with the updated vendor's score.
 - Report explicitly highlights "Vendor X submitted addendum on YYYY-MM-DD, accepted by [user]" in the audit trail.
 
-### Files
-- [app/db/schema.sql](app/db/schema.sql) — `submission_deadline`, `submission_status` columns + `ingestion_jobs` table.
-- [app/db/fact_store.py](app/db/fact_store.py) — `enqueue_ingestion_job()`, `mark_rfp_facts_ready()`, `get_rfp_rollup()`.
-- [app/jobs/ingestion_watcher.py](app/jobs/) (NEW) — receive-only watcher.
-- [app/jobs/deadline_processor.py](app/jobs/) (NEW) — Modal cron, lifecycle transitions.
-- [app/jobs/email_watcher.py](app/jobs/) (NEW, optional) — IMAP/Microsoft Graph.
-- [app/jobs/llm_attribution.py](app/jobs/) (NEW) — LLM-fallback attribution for ambiguous files.
-- [app/pipeline/ingestion_graph.py](app/pipeline/) (NEW) — 3-node sub-graph.
-- [app/pipeline/nodes.py](app/pipeline/nodes.py) — short-circuit on facts_already_extracted.
-- [app/api/admin_routes.py](app/api/admin_routes.py) — attribution queue + late-addendum acceptance endpoints.
-- [app/api/evaluation_routes.py](app/api/evaluation_routes.py) — `POST /rfps/{rfp_id}/deadline` to set/extend the deadline.
-- [deploy/modal.py](deploy/modal.py) — schedule entries for watcher + deadline_processor.
-- [tests/test_ingestion_attribution.py](tests/) (NEW).
-- [tests/test_ingestion_idempotency.py](tests/) (NEW).
-- [tests/test_deadline_lifecycle.py](tests/) (NEW) — RFP lifecycle state machine + late-rejection.
+### Delivery plan — 5 PRs (revised 2026-05-29)
 
-### Exit / pass criteria — Phase 5
-- [ ] `rfps.submission_deadline` + `submission_status` columns exist; status transitions enforced via CHECK constraint.
-- [ ] `ingestion_jobs` table exists with the UNIQUE constraint on (rfp_id, vendor_id, content_hash) and the expanded status set (`received`, `superseded`, `queued`, `processing`, `facts_ready`, `failed`, `duplicate`, `needs_attribution`, `rejected_late`).
-- [ ] Watcher service starts via `python -m app.jobs.ingestion_watcher` and survives PostgreSQL reconnect (integration test).
-- [ ] Deadline scheduler starts via `python -m app.jobs.deadline_processor` and processes expired RFPs every cron tick.
-- [ ] Drop a file into `drops/{rfp_id}/{vendor_id}/` BEFORE deadline → `ingestion_jobs` row exists with `status='received'` within 5 seconds; NO `extracted_facts` rows yet.
-- [ ] Drop a file AFTER deadline → `ingestion_jobs` row exists with `status='rejected_late'`; admin queue shows it.
-- [ ] Same vendor uploads twice before deadline → older job marked `superseded`, newer becomes the active job; only the newer one gets ingested at deadline.
-- [ ] Same hash uploaded twice → `status='duplicate'`, no further processing.
-- [ ] Deadline passes (test by setting `submission_deadline` to NOW() - 1min) → within one cron tick, RFP status flips `open → closed → processing`; all received jobs become `queued`; ingestion + extraction run in parallel across vendors; final RFP status `facts_ready`.
-- [ ] Uninvited vendor's file → `status='needs_attribution'`, admin queue shows file with LLM attribution reasoning.
-- [ ] User-triggered evaluation AFTER background processing completes in ≤60 seconds (5-vendor fixture); logs show ingestion + extraction were skipped.
-- [ ] Customer notified via at least 3 channels (email + Teams + in-app) when RFP reaches `facts_ready` — Phase 8 subscription matched on `trigger='on_facts_ready'`.
-- [ ] `tests/test_ingestion_attribution.py`, `tests/test_ingestion_idempotency.py`, `tests/test_deadline_lifecycle.py` all green in CI.
+| PR | Scope | Files |
+|---|---|---|
+| **PR-A — Foundation schema** | `rfps`, `invited_vendors`, `ingestion_jobs`, `event_log` tables. Alembic migration `0006_phase5_foundation.py`. `app/db/fact_store.py` helpers. `app/domain/rfp.py` extended with `RFP` Pydantic model. | schema.sql, alembic/versions/0006_*, fact_store.py, domain/rfp.py, tests/test_phase5_schema.py |
+| **PR-B — RFP creation API + UI** | `POST/GET /api/v1/rfps`, `POST /api/v1/rfps/{id}/vendors`, `POST /api/v1/rfps/{id}/deadline`. Frontend page `frontend/app/procurement/rfps/new/page.tsx`. Drop folder provisioning helper. | api/rfp_routes.py (NEW), frontend pages, tests/test_rfp_api.py |
+| **PR-C — Watcher service** | `app/jobs/ingestion_watcher.py` (watchdog-based local fs). Path-based attribution. LLM-fallback attribution for root drops. Deadline-gate enforcement. | jobs/ingestion_watcher.py, jobs/llm_attribution.py, tests/test_ingestion_attribution.py, tests/test_ingestion_idempotency.py |
+| **PR-D — Deadline processor + sub-graph** | `app/jobs/deadline_processor.py` (Modal cron). `app/pipeline/ingestion_graph.py` (3-node sub-graph). Modal schedule entries. Event emission on `facts_ready`. | jobs/deadline_processor.py, pipeline/ingestion_graph.py, deploy/modal.py, tests/test_deadline_lifecycle.py |
+| **PR-E — Short-circuit + admin endpoints** | Pipeline short-circuit (skip ingestion/extraction nodes when facts present). Admin attribution queue API + UI. Late-addendum acceptance. | pipeline/nodes.py, api/admin_routes.py, frontend admin queue page, tests/test_pipeline_shortcircuit.py |
+
+### Files (consolidated)
+- [app/db/schema.sql](app/db/schema.sql) — `rfps`, `invited_vendors`, `ingestion_jobs`, `event_log` tables.
+- [alembic/versions/0006_phase5_foundation.py](alembic/versions/) (NEW) — migration.
+- [app/db/fact_store.py](app/db/fact_store.py) — `create_rfp()`, `invite_vendor()`, `set_deadline()`, `enqueue_ingestion_job()`, `mark_rfp_facts_ready()`, `get_rfp_rollup()`, `emit_event()`, `facts_already_extracted()`.
+- [app/domain/rfp.py](app/domain/rfp.py) — `RFP`, `InvitedVendor`, `IngestionJob` Pydantic models + state-machine helpers.
+- [app/api/rfp_routes.py](app/api/) (NEW) — RFP CRUD + vendor invite + deadline endpoints.
+- [app/api/admin_routes.py](app/api/admin_routes.py) — attribution queue, late-addendum acceptance.
+- [app/jobs/ingestion_watcher.py](app/jobs/) (NEW) — receive-only watcher.
+- [app/jobs/deadline_processor.py](app/jobs/) (NEW) — Modal cron.
+- [app/jobs/llm_attribution.py](app/jobs/) (NEW) — LLM fallback attribution.
+- [app/jobs/email_watcher.py](app/jobs/) (DEFERRED — only built if a customer asks for email upload).
+- [app/pipeline/ingestion_graph.py](app/pipeline/) (NEW) — sub-graph.
+- [app/pipeline/nodes.py](app/pipeline/nodes.py) — short-circuit on `facts_already_extracted()`.
+- [deploy/modal.py](deploy/modal.py) — schedules for watcher poller + deadline_processor.
+- [frontend/app/procurement/rfps/new/page.tsx](frontend/app/procurement/rfps/) (NEW) — new RFP creation page.
+- [frontend/app/procurement/admin/attribution-queue/page.tsx](frontend/app/procurement/admin/) (NEW) — admin queue.
+- Tests: `test_phase5_schema.py`, `test_rfp_api.py`, `test_ingestion_attribution.py`, `test_ingestion_idempotency.py`, `test_deadline_lifecycle.py`, `test_pipeline_shortcircuit.py`.
+
+### Exit / pass criteria — Phase 5 (revised, organised by PR)
+
+Every criterion below is testable and has a documented evidence column. PR cannot merge without its criteria row marked `PASS` + evidence link.
+
+#### PR-A — Foundation schema
+
+| # | Criterion | Evidence required |
+|---|---|---|
+| A1 | `rfps`, `invited_vendors`, `ingestion_jobs`, `event_log` tables exist with the exact columns + CHECK constraints in 5.0. | `psql \d rfps`, `\d invited_vendors`, `\d ingestion_jobs`, `\d event_log` output pasted in PR description. |
+| A2 | Alembic migration `0006_phase5_foundation.py` applies cleanly to a fresh DB AND downgrades cleanly. | CI step: `alembic upgrade head && alembic downgrade -1 && alembic upgrade head`. |
+| A3 | CHECK constraint on `submission_status` rejects invalid values. | `tests/test_phase5_schema.py::test_invalid_submission_status_rejected` green. |
+| A4 | CHECK constraint on `autonomy_mode` rejects invalid values. | `tests/test_phase5_schema.py::test_invalid_autonomy_mode_rejected` green. |
+| A5 | UNIQUE constraint on `ingestion_jobs(rfp_id, vendor_id, content_hash)` rejects duplicates. | `tests/test_phase5_schema.py::test_duplicate_content_hash_rejected` green. |
+| A6 | `fact_store.create_rfp()`, `invite_vendor()`, `set_deadline()`, `enqueue_ingestion_job()`, `mark_rfp_facts_ready()`, `emit_event()`, `facts_already_extracted()` exist and are unit-tested. | 7 named test functions in `test_phase5_schema.py`, all green. |
+| A7 | `RFP` Pydantic model in `app/domain/rfp.py` enforces autonomy_mode + submission_status enums. | `tests/test_phase5_schema.py::test_rfp_model_validation` green. |
+
+#### PR-B — RFP creation API + UI
+
+| # | Criterion | Evidence required |
+|---|---|---|
+| B1 | `POST /api/v1/rfps` creates an RFP shell with default `autonomy_mode='auto_to_evaluate'` and default `submission_deadline = now() + 14 days` when omitted. | `tests/test_rfp_api.py::test_create_rfp_defaults` green. |
+| B2 | `POST /api/v1/rfps/{id}/vendors` creates `invited_vendors` row AND provisions `drops/{rfp_id}/{vendor_id}/` folder on disk. | `tests/test_rfp_api.py::test_invite_vendor_provisions_folder` green. |
+| B3 | `POST /api/v1/rfps/{id}/deadline` rejects extension after `submission_status` ≠ `open` with HTTP 409. | `tests/test_rfp_api.py::test_deadline_locked_after_close` green. |
+| B4 | RBAC: only users in the RFP's department or with `platform_admin` role can create/edit. | `tests/test_rfp_api.py::test_rbac_rfp_create` green (2 cases). |
+| B5 | Phase 9 invariant respected: RFP creation does NOT write to `user_departments` / `rfp_collaborators` / `approval_assignments`. | `tests/test_access_invariant.py` still green. |
+| B6 | Frontend page at `/procurement/rfps/new` renders, accepts the 4 required fields, calls the API, and redirects to the new RFP detail page. | Manual screenshot in PR description + frontend e2e test. |
+| B7 | Existing `/api/v1/evaluate/start` (manual upload) still works unchanged for `autonomy_mode='manual'`. | `tools/smoke_test_graph.py` still passes on the standard fixture. |
+
+#### PR-C — Watcher service
+
+| # | Criterion | Evidence required |
+|---|---|---|
+| C1 | `python -m app.jobs.ingestion_watcher` starts cleanly, watches all `drops/*/*/` folders. | Process launches, log line confirms watch set. |
+| C2 | Drop `proposal.pdf` into `drops/{rfp_id}/{vendor_id}/` BEFORE deadline → `ingestion_jobs` row appears with `status='received'` within 5 seconds; NO `extracted_facts` rows; NO Qdrant chunks. | `tests/test_ingestion_attribution.py::test_path_based_attribution` green. |
+| C3 | Drop file AFTER deadline → `status='rejected_late'`. | `tests/test_ingestion_attribution.py::test_late_rejection` green. |
+| C4 | Drop file for vendor NOT in `invited_vendors` → `status='needs_attribution'`. | `tests/test_ingestion_attribution.py::test_uninvited_vendor` green. |
+| C5 | Same vendor drops 2 different files before deadline → 1st marked `superseded`, 2nd becomes `received`. | `tests/test_ingestion_idempotency.py::test_supersede_on_reupload` green. |
+| C6 | Same content hash dropped twice → 2nd marked `duplicate`. | `tests/test_ingestion_idempotency.py::test_duplicate_hash` green. |
+| C7 | Drop into root `drops/{rfp_id}/` (no vendor folder) → LLM attribution runs; confidence ≥0.85 auto-attributes (audit-logged), <0.85 → `needs_attribution`. | `tests/test_ingestion_attribution.py::test_llm_fallback_high_confidence` + `test_llm_fallback_low_confidence` green. |
+| C8 | Watcher survives PostgreSQL reconnect (kill+restart postgres container; watcher resumes). | Integration test `tests/test_ingestion_idempotency.py::test_watcher_pg_reconnect` green. |
+
+#### PR-D — Deadline processor + sub-graph
+
+| # | Criterion | Evidence required |
+|---|---|---|
+| D1 | `python -m app.jobs.deadline_processor` runs as Modal cron; visible in `modal app list`. | Modal dashboard screenshot. |
+| D2 | Set `rfps.submission_deadline = NOW() - 1 minute` → within one cron tick (≤5 min), `submission_status` flips `open → closed → processing`. | `tests/test_deadline_lifecycle.py::test_deadline_triggers_close` green. |
+| D3 | All `ingestion_jobs(status='received')` for that RFP flip to `queued`, then `processing`, then `facts_ready`. | `tests/test_deadline_lifecycle.py::test_jobs_advance_through_states` green. |
+| D4 | Vendors fan out IN PARALLEL — 5-vendor fixture finishes in <0.4× sequential wall-clock. | Benchmark log in PR description. |
+| D5 | When all jobs reach `facts_ready`, `rfps.submission_status` flips to `facts_ready` AND `event_log` row with `event_type='rfp.facts_ready'` is created. | `tests/test_deadline_lifecycle.py::test_facts_ready_emits_event` green. |
+| D6 | `autonomy_mode='auto_to_report'` is accepted by schema but scheduler rejects with `event_type='rfp.evaluation_failed'` reason "Phase 7 PDF not yet implemented". | `tests/test_deadline_lifecycle.py::test_mode_c_gated` green. |
+| D7 | `autonomy_mode='manual'` RFPs are SKIPPED by the scheduler entirely — no state transitions, no LLM calls. | `tests/test_deadline_lifecycle.py::test_manual_mode_untouched` green. |
+| D8 | Ingestion sub-graph writes `extracted_facts` with `setup_id` snapshot tag (rubric frozen at deadline). | `tests/test_deadline_lifecycle.py::test_setup_id_snapshot` green. |
+
+#### PR-E — Short-circuit + admin endpoints
+
+| # | Criterion | Evidence required |
+|---|---|---|
+| E1 | User-triggered `/api/v1/evaluate/start` AFTER background processing completes in ≤60 seconds on 5-vendor fixture. | Benchmark log + `agent_events.json` showing ingestion/extraction events skipped. |
+| E2 | Pipeline log records 5 `ingestion.skipped` events + 5 `extraction.skipped` events. | Greppable in `evaluation_runs.agent_events`. |
+| E3 | `GET /api/v1/admin/attribution-queue` returns all `needs_attribution` jobs scoped to admin's org. | `tests/test_pipeline_shortcircuit.py::test_admin_queue_scoped` green. |
+| E4 | `POST /api/v1/admin/attribution-queue/{job_id}/assign` lets admin assign to a vendor — job flips `needs_attribution → received` (or → `queued` if past deadline + accepted as late). | `tests/test_pipeline_shortcircuit.py::test_admin_assign` green. |
+| E5 | `POST /api/v1/admin/late-addendum/{job_id}/accept` promotes `rejected_late → queued`. | `tests/test_pipeline_shortcircuit.py::test_late_addendum_accept` green. |
+| E6 | All 65 existing checkpoints still pass: `python tools/checkpoint_runner.py status` shows 65/66 (Q09 above-threshold, unchanged). | CI checkpoint job green. |
+| E7 | `tools/smoke_test_graph.py` on standard 2-vendor fixture still reaches `status='complete'` end-to-end. | Smoke run artifact attached to PR. |
+
+### Test results tracking
+
+A test-results table will be maintained at the top of each PR description in this format:
+
+```
+| Criterion | Status | Evidence |
+|-----------|--------|----------|
+| A1        | PASS   | logs/A1_psql_describe.txt |
+| A2        | PASS   | CI run #1234 step 'alembic-roundtrip' |
+| A3        | PASS   | tests/test_phase5_schema.py::test_invalid_submission_status_rejected |
+| ...       | ...    | ... |
+```
+
+PR cannot be marked ready-for-review until every row is PASS. CI must run the named test functions explicitly (no broad `pytest` — names must match the criteria table).
+
+### Phase 5 final acceptance test (must pass before Phase 5 declared complete)
+
+A single scripted end-to-end scenario in `tests/test_phase5_e2e.py`:
+
+1. Create RFP `e2e-phase5-test` with deadline NOW + 60 seconds, mode `auto_to_evaluate`.
+2. Invite 3 vendors.
+3. Drop 1 valid file per vendor into respective `drops/` folders.
+4. Drop 1 duplicate of vendor 1's file (expect `duplicate`).
+5. Drop 1 file for an UNINVITED vendor (expect `needs_attribution`).
+6. Wait 60 seconds for deadline.
+7. Wait ≤ 5 minutes for scheduler tick.
+8. Assert: `submission_status='facts_ready'`, 3 ingestion_jobs in `facts_ready`, 1 in `duplicate`, 1 in `needs_attribution`.
+9. Assert: `event_log` has exactly 1 row with `event_type='rfp.facts_ready'`.
+10. Trigger user-evaluation via API; assert wall-clock ≤ 60 seconds.
+11. Assert: final `evaluation_runs.status='complete'` with `decision_output` non-null.
+
+This e2e test is the single source of truth for "Phase 5 is done."
 
 ---
 
