@@ -76,6 +76,17 @@ frontend/.env.local
 .claude/daily_build_log.md
 .claude/__pycache__/
 
+# Personal toolkit skills — synced from product-toolkit, not project-specific
+.claude/skills/
+.claude/commands/anti-ai-ui.md
+.claude/commands/frontend-component.md
+.claude/commands/frontend-design.md
+.claude/commands/mcp-builder.md
+.claude/commands/new-component.md
+.claude/commands/skill-creator.md
+.claude/commands/theme-factory.md
+.claude/commands/web-artifacts-builder.md
+
 # IDE
 .idea/
 .vscode/
