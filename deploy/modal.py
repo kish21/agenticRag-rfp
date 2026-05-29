@@ -257,6 +257,25 @@ def embed_single_on_modal(text: str, model_name: str) -> list[float]:
 #     await check_flag_rates()
 
 
+# ── Phase 5: deadline-driven background processing ───────────────────
+# Every 5 minutes: advance RFP lifecycle (open → closed → processing →
+# facts_ready), fan ingestion+extraction across queued jobs in parallel,
+# emit `rfp.facts_ready` events for Phase 8 to consume.
+
+@app.function(
+    image=pdf_image,
+    secrets=[platform_secrets],
+    schedule=modal.Period(minutes=5),
+    min_containers=0,
+    timeout=900,
+)
+async def phase5_deadline_tick():
+    """Phase 5 scheduler — see app/jobs/deadline_processor.py."""
+    from app.jobs.deadline_processor import main_once
+    report = await main_once()
+    print(f"Phase 5 deadline tick: {report}")
+
+
 if __name__ == "__main__":
     print("Modal app defined. Deploy with: modal deploy app_modal.py")
     print("Test locally with: modal run app_modal.py::extract_pdf_on_modal")
