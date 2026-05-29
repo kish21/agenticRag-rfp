@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { FONT, DISPLAY, MONO } from "@/lib/theme";
 import { AGENTS, AGENT_LABELS } from "@/lib/constants";
 
@@ -18,13 +18,16 @@ function fmtSeconds(s: number): string {
 }
 
 export function ProgressPage({ agentStatuses, isMobile, onCancel }: ProgressPageProps) {
-  const startRef    = useRef<number>(Date.now());
+  // React 19: `useRef(Date.now())` is impure during render (linter flag).
+  // Use useState lazy-initializer instead — runs the impure call exactly
+  // once at mount, never on subsequent renders.
+  const [startAt] = useState<number>(() => Date.now());
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000);
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startAt) / 1000)), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [startAt]);
 
   const done  = Object.values(agentStatuses).filter(a => a.status === "done").length;
   const total = AGENTS.length;

@@ -119,7 +119,6 @@ export function CreateRFPForm() {
           });
         } catch (err) {
           failed.push(v.vendor_id.trim());
-          // eslint-disable-next-line no-console
           console.error("Vendor invite failed", v.vendor_id, err);
         }
       }

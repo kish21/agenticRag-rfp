@@ -12,10 +12,15 @@ export default function NewRFPPage() {
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
+    // Mount-only auth guard. The setState flips authChecked from false to
+    // true ONCE per mount, after we confirm the cookie session exists.
+    // The intermediate blank-render is intentional (prevents flicker of
+    // protected content before redirect).
     if (!isLoggedIn()) {
       router.replace("/login");
       return;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAuthChecked(true);
   }, [router]);
 

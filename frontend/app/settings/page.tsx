@@ -15,7 +15,11 @@ export default function SettingsPage() {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
   useEffect(() => {
+    // Mount-only auth + load user info from localStorage. See ThemeProvider
+    // for the rationale on suppressing react-hooks/set-state-in-effect for
+    // these client-only initialization patterns.
     if (!isLoggedIn()) { router.push("/login"); return; }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUserInfo(getUserInfo());
   }, [router]);
 

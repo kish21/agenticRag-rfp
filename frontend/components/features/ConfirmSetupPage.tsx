@@ -107,6 +107,14 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
   const weightOff = Math.abs(scoringTotal - 1.0) > 0.02 && (setup?.scoring_criteria.length ?? 0) > 0;
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
+  //
+  // fetchSetup polls itself via setTimeout when the backend is still
+  // merging extracted RFP criteria. Recursive useCallback would trigger
+  // "Cannot access variable before declared" (TDZ) at line 124 since
+  // `fetchSetup` is the name being defined. Solve via a ref that always
+  // points at the latest closure.
+
+  const fetchSetupRef = useRef<((isRefresh?: boolean) => Promise<void>) | null>(null);
 
   const fetchSetup = useCallback(async (isRefresh = false) => {
     try {
@@ -121,7 +129,7 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
           setRfpPolling(true);
           pollRef.current = setTimeout(() => {
             pollCountRef.current += 1;
-            fetchSetup(true);
+            fetchSetupRef.current?.(true);
           }, 3000);
         } else {
           setRfpPolling(false);
@@ -138,7 +146,15 @@ export function ConfirmSetupPage({ runId, onConfirmed, onBack, onAuth401 }: Conf
     }
   }, [runId, onAuth401]);
 
+  // Keep the ref pointing at the latest closure so the setTimeout callback
+  // always calls the current version (closure capture is intentional here).
+  useEffect(() => { fetchSetupRef.current = fetchSetup; }, [fetchSetup]);
+
   useEffect(() => {
+    // fetchSetup is async — all setState calls inside it run AFTER the
+    // first await, well after this effect commits. The linter's static
+    // analysis cannot see through `async`, so we suppress here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSetup();
     return () => { if (pollRef.current) clearTimeout(pollRef.current); };
   }, [fetchSetup]);
