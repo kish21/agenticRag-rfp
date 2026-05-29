@@ -111,6 +111,7 @@ async def add_approval_assignment(
 # These endpoints let an admin resolve ingestion_jobs that landed in a
 # terminal state requiring human review. RBAC: any procurement admin.
 
+from typing import Optional  # noqa: E402
 import sqlalchemy as sa  # noqa: E402
 
 from app.api.rfp_routes import _ensure_safe_id, provision_drop_folder  # noqa: E402
@@ -254,3 +255,72 @@ async def accept_late_addendum(
             detail="Job not found, wrong org, or not in rejected_late state.",
         )
     return {"job_id": row.job_id, "rfp_id": row.rfp_id, "vendor_id": row.vendor_id, "status": "queued"}
+
+
+# ── Phase 3 PR-B: LLM cache admin invalidation (3.15) ────────────────
+
+
+@router.delete("/llm-cache")
+async def purge_llm_cache(
+    model: Optional[str] = None,
+    before: Optional[str] = None,    # ISO timestamp string
+    cache_key: Optional[str] = None,
+    user: TokenData = Depends(_require_admin_attribution_role),
+) -> dict:
+    """
+    3.15 — Bulk-delete cached LLM responses.
+
+    Filters (any combination, all AND'd):
+      - cache_key: delete exactly one entry by key
+      - model:     delete all entries for that provider model
+      - before:    delete entries created strictly before this ISO timestamp
+
+    At least one filter is required (no bare "delete everything" call).
+    Returns the number of rows deleted. Audit-logged via app.infra.audit.
+    """
+    from datetime import datetime
+
+    from app.infra.audit import audit
+
+    if cache_key is None and model is None and before is None:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of cache_key, model, before is required.",
+        )
+
+    where_parts: list[str] = []
+    params: dict = {}
+    if cache_key is not None:
+        where_parts.append("cache_key = :k")
+        params["k"] = cache_key
+    if model is not None:
+        where_parts.append("model = :m")
+        params["m"] = model
+    if before is not None:
+        try:
+            cutoff = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid 'before' timestamp: {exc}",
+            ) from exc
+        where_parts.append("created_at < :before")
+        params["before"] = cutoff
+
+    sql = "DELETE FROM llm_response_cache WHERE " + " AND ".join(where_parts)
+    engine = get_engine()
+    with engine.begin() as conn:
+        result = conn.execute(sa.text(sql), params)
+        deleted = result.rowcount
+
+    audit(
+        org_id=user.org_id, run_id=None, event_type="admin.llm_cache_purge",
+        actor=user.email,
+        detail={
+            "deleted": deleted, "filters": {
+                "cache_key": cache_key, "model": model, "before": before,
+            },
+        },
+    )
+    return {"deleted": deleted, "filters": {
+        "cache_key": cache_key, "model": model, "before": before,
+    }}

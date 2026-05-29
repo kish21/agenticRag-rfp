@@ -32,10 +32,32 @@ logger = logging.getLogger("phase3.llm_cache")
 
 _TRUE = ("1", "true", "yes", "on")
 
+# Per-request override — set by the bypass-cache rerun endpoint via
+# contextvars.copy_context() before the background pipeline starts.
+# When True, call_llm() skips both cache read and write regardless of
+# the LLM_CACHE_ENABLED env var.
+from contextvars import ContextVar
+
+_cache_disabled_for_request: ContextVar[bool] = ContextVar(
+    "_cache_disabled_for_request", default=False,
+)
+
 
 def enabled() -> bool:
-    """Process-wide cache toggle. Default ON; set LLM_CACHE_ENABLED=false to disable."""
+    """Cache toggle.
+    - Per-request bypass (ContextVar) wins if set to True.
+    - Otherwise: LLM_CACHE_ENABLED env (default ON).
+    """
+    if _cache_disabled_for_request.get():
+        return False
     return os.getenv("LLM_CACHE_ENABLED", "true").lower() in _TRUE
+
+
+def disable_for_current_context() -> None:
+    """Disables the cache for THIS asyncio context (and any contextvars-aware
+    background tasks copy_context()'d from it). Used by the bypass-cache
+    rerun endpoint."""
+    _cache_disabled_for_request.set(True)
 
 
 @dataclass(frozen=True)
