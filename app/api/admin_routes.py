@@ -105,3 +105,152 @@ async def add_approval_assignment(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok", "run_id": body.run_id, "approver_user_id": body.approver_user_id}
+
+
+# ── Phase 5 PR-E: attribution queue + late-addendum acceptance ───────
+# These endpoints let an admin resolve ingestion_jobs that landed in a
+# terminal state requiring human review. RBAC: any procurement admin.
+
+import sqlalchemy as sa  # noqa: E402
+
+from app.api.rfp_routes import _ensure_safe_id, provision_drop_folder  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.db.fact_store import (  # noqa: E402
+    get_engine,
+    get_rfp_lifecycle,
+    invite_vendor,
+    is_invited_vendor,
+)
+
+
+def _require_admin_attribution_role(
+    user: TokenData = Depends(get_current_user),
+) -> TokenData:
+    if user.role not in set(settings.product.rfp_defaults.write_roles):
+        raise HTTPException(status_code=403, detail="Insufficient role")
+    return user
+
+
+class AssignVendorRequest(BaseModel):
+    vendor_id: str
+    invite_if_missing: bool = True
+
+
+@router.get("/attribution-queue")
+async def list_attribution_queue(
+    user: TokenData = Depends(_require_admin_attribution_role),
+) -> dict:
+    """E3 — Returns all ingestion_jobs with status='needs_attribution' or
+    'rejected_late' scoped to the caller's org."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sa.text(
+                """
+                SELECT job_id::text AS job_id, rfp_id, vendor_id, filename,
+                       source_uri, status, received_at, attribution_confidence,
+                       error
+                FROM ingestion_jobs
+                WHERE org_id = :o
+                  AND status IN ('needs_attribution', 'rejected_late')
+                ORDER BY received_at DESC
+                """
+            ),
+            {"o": user.org_id},
+        ).fetchall()
+    return {"jobs": [dict(r._mapping) for r in rows]}
+
+
+@router.post("/attribution-queue/{job_id}/assign")
+async def assign_attribution(
+    job_id: str,
+    body: AssignVendorRequest,
+    user: TokenData = Depends(_require_admin_attribution_role),
+) -> dict:
+    """E4 — Assign a needs_attribution job to a vendor.
+
+    - If the vendor isn't on the RFP's invited_vendors and invite_if_missing
+      is True, the vendor is auto-invited (drop folder provisioned).
+    - Job flips to 'received' if RFP is still open, otherwise to 'queued'
+      (so the next deadline_processor tick will pick it up). This treats
+      admin-resolved attribution as an accepted late addendum when the
+      window is already closed.
+    """
+    _ensure_safe_id(body.vendor_id, "vendor_id")
+    engine = get_engine()
+    with engine.connect() as conn:
+        job = conn.execute(
+            sa.text(
+                """
+                SELECT rfp_id, status, org_id::text AS org_id
+                FROM ingestion_jobs WHERE job_id = :j
+                """
+            ),
+            {"j": job_id},
+        ).fetchone()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.org_id != user.org_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "needs_attribution":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is {job.status}; only needs_attribution can be assigned.",
+        )
+
+    rfp = get_rfp_lifecycle(rfp_id=job.rfp_id)
+    if rfp is None:
+        raise HTTPException(status_code=409, detail="RFP no longer exists")
+
+    if not is_invited_vendor(rfp_id=job.rfp_id, vendor_id=body.vendor_id):
+        if not body.invite_if_missing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"vendor_id '{body.vendor_id}' is not invited.",
+            )
+        invite_vendor(
+            rfp_id=job.rfp_id, vendor_id=body.vendor_id, invited_by=user.email,
+        )
+        provision_drop_folder(job.rfp_id, body.vendor_id)
+
+    new_status = "received" if rfp["submission_status"] == "open" else "queued"
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                UPDATE ingestion_jobs
+                SET vendor_id = :v, status = :s, error = NULL
+                WHERE job_id = :j AND status = 'needs_attribution'
+                """
+            ),
+            {"v": body.vendor_id, "s": new_status, "j": job_id},
+        )
+    return {"job_id": job_id, "vendor_id": body.vendor_id, "status": new_status}
+
+
+@router.post("/late-addendum/{job_id}/accept")
+async def accept_late_addendum(
+    job_id: str,
+    user: TokenData = Depends(_require_admin_attribution_role),
+) -> dict:
+    """E5 — Promote a rejected_late job to queued so the next
+    deadline_processor tick re-runs ingestion for it."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            sa.text(
+                """
+                UPDATE ingestion_jobs
+                SET status = 'queued', error = NULL
+                WHERE job_id = :j AND status = 'rejected_late' AND org_id = :o
+                RETURNING job_id::text AS job_id, rfp_id, vendor_id
+                """
+            ),
+            {"j": job_id, "o": user.org_id},
+        ).fetchone()
+    if not row:
+        raise HTTPException(
+            status_code=409,
+            detail="Job not found, wrong org, or not in rejected_late state.",
+        )
+    return {"job_id": row.job_id, "rfp_id": row.rfp_id, "vendor_id": row.vendor_id, "status": "queued"}
