@@ -141,6 +141,14 @@ Phase 5 (background ingestion) shipped with two exit criteria deferred to live i
 
 Phase 5 added an `rfps` table but left existing `vendor_documents`, `extracted_facts`, `evaluation_runs`, etc. with plain `rfp_id TEXT` columns (no FK to `rfps`). Intentional scope cap — full FK refactor was deferred to keep PR-A small. **Fix.** Add FKs in a follow-up migration, backfill orphan `rfp_id` strings into the `rfps` table (with `title='<unknown — legacy>'`), then enforce FK. **Effort:** Half a day if no orphans exist; up to 2 days with backfill.
 
+### P2.0b — Phase 3 live cost-savings benchmark (criterion 3.17)
+
+Phase 3 (LLM response cache) shipped with one exit criterion deferred to live integration: **3.17** — second smoke run on the standard fixture with cache hot must show wall-clock < 60s (vs ~5 min uncached), ≥95% cache hit rate, and $0 LLM spend (verified via `summary.json`). Today only unit-level and concurrency tests cover the cache. The 3.17 benchmark requires live OpenAI calls + a populated cache. **Fix.** Run `tools/smoke_test_graph.py` once cold to populate the cache, then a second time and assert `summary.json.cache.hit_rate >= 0.95`. Add a `--assert-cache-hit-rate=0.95` flag to `tools/smoke_test_graph.py` for CI-friendliness. **Effort:** Half a day.
+
+### P2.0c — Phase 2c finish critic-as-controller
+
+Phase 2 plan promised all 9 agents under the Critic-as-controller pattern (retry-with-feedback, 3-way routing: continue / retry / block). Today only **Explanation** has the full pattern. The other 7 agents (Planner, Ingestion, Retrieval-partial, Extraction, Evaluation, Comparator, Decision) still run the critic inline and can only block. **Fix.** Promote Critic-as-controller to dedicated LangGraph nodes for Extraction + Evaluation first (highest leverage per the original Phase 2 plan); Planner / Ingestion / Comparator / Decision remain deferred as "reliable enough in smoke runs." **Effort:** 1 day for Extraction + Evaluation.
+
 ### P2.1 — Replace TF-IDF sparse with proper BM25
 
 **Fix.** Switch to Qdrant's native BM25 sparse vectors. Re-ingestion required. **Effort:** Half a day including backfill.

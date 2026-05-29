@@ -3,22 +3,26 @@
 > Evidence-based metrics for technical evaluators, architects, and customer stakeholders.
 > Each claim links to the test, commit, or smoke-run that proves it.
 
-**Last updated:** 2026-05-28 · **Branch:** `fix/retrieval-agent-fixes`
+**Last updated:** 2026-05-29 · **Branch:** `master` (Phase 3 + Phase 5 merged)
 
 ---
 
 ## Executive summary at a glance
 
-| Dimension | Before this work | After Phase 1 + 4 + 9 | Evidence |
+| Dimension | Before this work | After Phase 1 + 3 + 4 + 5 + 9 | Evidence |
 |---|---|---|---|
 | Grounding completeness on standard RFP | 33–62% (varied between runs) | **100%** on two consecutive runs | Phase 1, commit `7374fa9` |
-| Same-input reproducibility | Different output every run | **Same shortlist, scores within ±0.05** | `tests/test_determinism.py` (8 tests) |
+| Same-input reproducibility | Different output every run | **Functional determinism** (same shortlist, scores within ±0.05) + Phase 3 byte-identical replay from cache | `tests/test_determinism.py` (8 tests) + `tests/test_llm_cache.py::test_call_llm_hits_cache_without_provider_call` |
+| Cost on a re-run of a previously-evaluated RFP | ~$1-3 of OpenAI per re-run | **$0** (cache hit) | Phase 3 — `RunCostAccumulator.cache_savings_usd` in `summary.json` |
 | Wall-clock for 2-vendor evaluation (measured) | ~5 min (sequential) | **~1 min** (parallel) | Smoke run `20260528T152757Z` |
 | Wall-clock for 15-vendor evaluation (projected) | ~17 min sequential | **~3-4 min** at `MAX_VENDOR_CONCURRENCY=5` | Extrapolated from per-vendor measurements |
+| User-perceived wait when clicking Evaluate (autonomous mode) | ~5 min every time | **~30s** (Phase 5 background processing + Phase 5 PR-E short-circuit) | `tests/test_phase5_e2e.py` |
 | Multi-tenant visibility | Wide role OR own runs only — no middle | **Default-deny across 5 access patterns**: admin / dept / collaborator / approver / owner | `tests/test_visibility_matrix.py` (14 tests) |
 | Per-vendor failure isolation | One vendor failure → whole pipeline aborts | **One vendor fails → others continue** with `failed_vendors` audit trail | `tests/test_parallel_fanout.py` (4 tests) |
-| Test suite | Manual smoke only | **40+ automated tests** across topology, routing, parallelism, determinism, access | All green in CI |
-| Architectural style | Fixed linear DAG | **Agentic RAG with parallel fan-out + sync barrier at Comparator** | `app/pipeline/graph.py` |
+| RFP lifecycle | Single click does everything synchronously | **Vendors upload over a deadline window; system processes autonomously at deadline; admin can resolve attribution disputes** | Phase 5 — `tests/test_phase5_e2e.py` (full 11-step lifecycle) |
+| Cached-result safety | N/A | **3 escape hatches** — Critic auto-correct, `/rerun?bypass_cache=true` with divergence flag, admin bulk-purge — so a wrong cached answer can never trap a user | Phase 3 PR-B — `tests/test_llm_cache_admin.py` (7 tests) |
+| Test suite | Manual smoke only | **85+ automated tests** across topology, routing, parallelism, determinism, access, ingestion lifecycle, LLM cache, admin endpoints | All green in CI |
+| Architectural style | Fixed linear DAG | **Agentic RAG with parallel fan-out + sync barrier at Comparator + content-addressed LLM cache + deadline-driven background ingestion** | `app/pipeline/graph.py`, `app/jobs/deadline_processor.py`, `app/providers/llm_cache.py` |
 
 ---
 
@@ -242,12 +246,22 @@ TestDanInvitedReviewer::test_dan_cannot_view_other_runs                PASSED
 | `tests/test_parallel_fanout.py` | 4 | Phase 4 — parallel wall-clock, semaphore bound, failure isolation, deterministic narrative ordering |
 | `tests/test_visibility_matrix.py` | 14 | Phase 9 — 5 personas, 5 access patterns, default-deny |
 | `tests/test_access_invariant.py` | 3 | Phase 9 — static assertion that ingestion never writes to access tables |
-| **Total** | **40** | All passing as of commit `c25aea1` + Phase 4 (pending) |
+| `tests/test_codereview_regressions.py` | 6 | Phase 2 + 4 regression scars (per-vendor HARD-block guards, etc.) |
+| `tests/test_phase5_schema.py` | 11 | Phase 5 — CHECK constraints, UNIQUE constraints, fact_store helpers, Pydantic models |
+| `tests/test_rfp_api.py` | 7 | Phase 5 — RFP creation API + RBAC + Phase 9 invariant + manual upload preserved |
+| `tests/test_ingestion_attribution.py` | 6 | Phase 5 — path-based attribution, late rejection, uninvited vendor, root drop, orphan |
+| `tests/test_ingestion_idempotency.py` | 3 | Phase 5 — supersede on re-upload, duplicate hash, PG reconnect |
+| `tests/test_deadline_lifecycle.py` | 7 | Phase 5 — `open → closed → processing → facts_ready` transitions, event emission, Mode C gating, manual-mode skip, setup_id snapshot |
+| `tests/test_pipeline_shortcircuit.py` | 7 | Phase 5 PR-E — short-circuit emits `skipped` events, admin queue scoping, attribution assign, late-addendum accept |
+| `tests/test_phase5_e2e.py` | 1 | Phase 5 final acceptance — full 11-step lifecycle (create → invite → drop → deadline → tick → assert) |
+| `tests/test_llm_cache.py` | 10 | Phase 3 PR-A — hit / miss / store / whitespace / seed / cache_bust / retry-via-feedback / env disable / parallel-write race / cost-tracker integration |
+| `tests/test_llm_cache_admin.py` | 7 | Phase 3 PR-B — ContextVar bypass, env disable, admin DELETE filters (key / model / before), RBAC |
+| **Total** | **~105+** | All passing as of post-Phase-3-cleanup commit; CI provisions Postgres service + bootstraps from schema.sql + alembic stamp head |
 
 Run all phase tests together:
 ```bash
-pytest tests/test_determinism.py tests/test_pipeline_graph.py tests/test_visibility_matrix.py tests/test_access_invariant.py tests/test_parallel_fanout.py -v
-# 40 passed in ~8s
+pytest tests/ -v --tb=short --ignore=tests/regression --ignore=tests/integration
+# ~105+ passed in ~12s against a local Postgres
 ```
 
 ---
@@ -271,19 +285,19 @@ pytest tests/test_determinism.py tests/test_pipeline_graph.py tests/test_visibil
 
 | Phase | Status | What it adds |
 |---|---|---|
-| **1** Determinism + grounding | ✅ COMPLETE | grounding 33-62% → 100% |
-| **2** Critic-as-controller (retry-with-feedback) | Planned | LLM-driven self-correction — every step can re-try with structured feedback |
-| **3** LLM response cache | Planned | Bit-exact replay for audit; ~12-second re-runs after first run; dev iteration acceleration |
-| **4** Parallel vendor execution | ✅ COMPLETE | 15-vendor wall-clock 30 min → ~2 min |
-| **5** Deadline-based background ingestion | Planned (design committed) | RFPs deadline-driven; files store on arrival, process after deadline closes |
+| **1** Determinism + grounding | ✅ COMPLETE | grounding 33-62% → 100%, content-derived seeds, Anthropic temp regression fixed |
+| **2** Critic-as-controller (retry-with-feedback) | ⚠ PARTIAL | Explanation fully done (3-route critic node + retry-with-feedback). Other 7 agents still run the critic inline and can only block. **Phase 2c to finish for Extraction + Evaluation — tracked as BACKLOG.md P2.0c.** |
+| **3** LLM response cache | ✅ COMPLETE | $0 re-runs (cache key includes provider \| model \| temperature \| seed \| prompt \| response_format \| cache_bust); ON CONFLICT DO NOTHING parallel-safe; 3 escape hatches (Critic auto-correct, `/rerun?bypass_cache=true` with divergence flag, admin DELETE invalidation); cost-tracker reports cache_hits/misses/savings; tenant-blind by design. **3.17 live cost-savings benchmark deferred — tracked as BACKLOG.md P2.0b.** |
+| **4** Parallel vendor execution | ✅ COMPLETE | 15-vendor wall-clock 30 min → ~3-4 min via LangGraph `Send` API + Semaphore(5) |
+| **5** Deadline-based background ingestion | ✅ COMPLETE | RFPs first-class entity (`rfps` table), 3 autonomy modes (manual / auto_to_evaluate / auto_to_report), receive-only watcher + Modal-cron deadline scheduler + ingestion sub-graph, admin attribution queue, pipeline short-circuit on user-triggered Evaluate. Mode C gated until Phase 7 ships PDF. **D1/D4/E1 deferred to live integration — BACKLOG.md P2.0; legacy-table FK refactor — P2.0a.** |
 | **6** Incremental re-evaluation for addenda | Planned | Late addenda re-evaluate only the affected vendor, ~30% of original run time |
 | **6b** RFP source versioning | Planned | Mid-process rubric changes detected and flagged, no silent answer mis-mapping |
-| **7** Customer-grade PDF report | Planned | 12-section audit-grade PDF with podium, scorecards, pairwise comparisons, audit trail |
-| **8** Delivery abstraction (email / Teams / S3 / Slack) | Planned | Fire-and-forget evaluation; PDF arrives in user's preferred channel |
+| **7** Customer-grade PDF report | Planned (NEXT) | 12-section audit-grade PDF with podium, scorecards, pairwise comparisons, audit trail; flips Mode C on |
+| **8** Delivery abstraction (email / Teams / S3 / Slack) | Planned | Fire-and-forget evaluation; reads from Phase 5's `event_log` |
 | **9** Multi-tenant visibility | ✅ COMPLETE | 5 access patterns, default-deny, static invariant enforcement |
 | **10** Architecture rationale doc | Planned | Sales-grade "why multi-agent over single LLM" explainer |
 
-Full plan with exit criteria per phase: [docs/dev/PRODUCTION_READINESS_PLAN.md](docs/dev/PRODUCTION_READINESS_PLAN.md).
+Full plan with exit criteria per phase: [docs/dev/PRODUCTION_READINESS_PLAN.md](docs/dev/PRODUCTION_READINESS_PLAN.md). Deferred items tracked in [docs/dev/BACKLOG.md](BACKLOG.md) under P2.0–P2.0c.
 
 ---
 
