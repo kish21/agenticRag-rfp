@@ -83,6 +83,10 @@ class LLMCall:
 class RunCostAccumulator:
     run_id: str
     calls: list[LLMCall] = field(default_factory=list)
+    # Phase 3 — LLM cache observability
+    cache_hits: int = 0
+    cache_misses: int = 0
+    cache_savings_usd: float = 0.0
 
     @property
     def total_prompt_tokens(self) -> int:
@@ -104,6 +108,11 @@ class RunCostAccumulator:
     def total_latency_ms(self) -> int:
         return sum(c.latency_ms for c in self.calls)
 
+    @property
+    def cache_hit_rate(self) -> float:
+        total = self.cache_hits + self.cache_misses
+        return (self.cache_hits / total) if total else 0.0
+
     def summary(self) -> dict:
         by_agent: dict[str, dict] = {}
         for c in self.calls:
@@ -122,6 +131,10 @@ class RunCostAccumulator:
             "total_completion_tokens": self.total_completion_tokens,
             "total_cost_usd": round(self.total_cost_usd, 6),
             "total_latency_ms": self.total_latency_ms,
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "cache_hit_rate": round(self.cache_hit_rate, 4),
+            "cache_savings_usd": round(self.cache_savings_usd, 6),
             "by_agent": {k: {**v, "cost_usd": round(v["cost_usd"], 6)} for k, v in by_agent.items()},
         }
 
@@ -170,6 +183,34 @@ def record_llm_call(
         latency_ms=latency_ms,
         cost_usd=cost,
     ))
+
+
+def record_cache_event(
+    *,
+    hit: bool,
+    model: str,
+    prompt_tokens: Optional[int],
+    completion_tokens: Optional[int],
+) -> None:
+    """
+    Phase 3 — record an LLM cache lookup outcome on the active run.
+    On `hit=True`, increments cache_hits and adds the avoided cost to
+    cache_savings_usd (estimated from the cached row's token counts).
+    On `hit=False`, increments cache_misses only — the provider call
+    that follows will be recorded separately via record_llm_call().
+    """
+    run_id = _current_run_id.get()
+    if run_id is None:
+        return
+    acc = _accumulators.get(run_id)
+    if acc is None:
+        return
+    if hit:
+        acc.cache_hits += 1
+        if prompt_tokens is not None and completion_tokens is not None:
+            acc.cache_savings_usd += estimate_cost(model, prompt_tokens, completion_tokens)
+    else:
+        acc.cache_misses += 1
 
 
 def get_run_cost(run_id: str) -> Optional[RunCostAccumulator]:

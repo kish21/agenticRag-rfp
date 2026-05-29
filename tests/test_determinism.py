@@ -55,6 +55,10 @@ class TestCallLLMSeedAutoDerive:
     @pytest.mark.asyncio
     async def test_same_messages_produce_same_auto_seed(self, monkeypatch):
         monkeypatch.setenv("LLM_PROVIDER", "openai")
+        # Phase 3: these tests verify seed plumbing — they pre-date the cache
+        # and call call_llm() twice expecting two provider calls. Disable the
+        # cache so the second call is not a no-op cache hit.
+        monkeypatch.setenv("LLM_CACHE_ENABLED", "false")
         seeds_captured: list[int] = []
 
         async def fake_create(**kwargs):
@@ -81,6 +85,10 @@ class TestCallLLMSeedAutoDerive:
     @pytest.mark.asyncio
     async def test_different_messages_produce_different_seeds(self, monkeypatch):
         monkeypatch.setenv("LLM_PROVIDER", "openai")
+        # Phase 3: these tests verify seed plumbing — they pre-date the cache
+        # and call call_llm() twice expecting two provider calls. Disable the
+        # cache so the second call is not a no-op cache hit.
+        monkeypatch.setenv("LLM_CACHE_ENABLED", "false")
         seeds_captured: list[int] = []
 
         async def fake_create(**kwargs):
@@ -102,6 +110,10 @@ class TestCallLLMSeedAutoDerive:
     @pytest.mark.asyncio
     async def test_explicit_seed_overrides_auto(self, monkeypatch):
         monkeypatch.setenv("LLM_PROVIDER", "openai")
+        # Phase 3: these tests verify seed plumbing — they pre-date the cache
+        # and call call_llm() twice expecting two provider calls. Disable the
+        # cache so the second call is not a no-op cache hit.
+        monkeypatch.setenv("LLM_CACHE_ENABLED", "false")
         seeds_captured: list[int] = []
 
         async def fake_create(**kwargs):
@@ -126,7 +138,8 @@ class TestAnthropicTemperaturePassed:
     """Regression test for the Phase 1 bug: Anthropic branch silently dropped temperature."""
 
     @pytest.mark.asyncio
-    async def test_anthropic_branch_passes_temperature_to_sdk(self):
+    async def test_anthropic_branch_passes_temperature_to_sdk(self, monkeypatch):
+        monkeypatch.setenv("LLM_CACHE_ENABLED", "false")
         captured: dict = {}
 
         async def fake_create(**kwargs):

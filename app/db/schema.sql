@@ -796,3 +796,22 @@ CREATE TABLE IF NOT EXISTS event_log (
 CREATE INDEX IF NOT EXISTS ix_event_log_pending
     ON event_log(created_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_event_log_rfp ON event_log(rfp_id);
+
+-- ── Phase 3 — LLM response cache ─────────────────────────────────────
+-- Content-addressed cache for `call_llm()` responses. Tenant-blind on
+-- purpose — see docs/dev/PRODUCTION_READINESS_PLAN.md Phase 3 "Tenant
+-- blindness" subsection. Do NOT add an org_id column.
+
+CREATE TABLE IF NOT EXISTS llm_response_cache (
+    cache_key         TEXT PRIMARY KEY,
+    provider          TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    response          TEXT NOT NULL,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_hit_at       TIMESTAMPTZ,
+    hit_count         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_llm_cache_created ON llm_response_cache(created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_cache_model   ON llm_response_cache(model);
