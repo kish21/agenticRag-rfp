@@ -541,6 +541,69 @@ def get_rfp_rollup(*, rfp_id: str) -> dict:
         }
 
 
+def get_rfp_lifecycle(*, rfp_id: str) -> dict | None:
+    """Returns minimal RFP context the watcher needs at file-arrival time.
+    Returns None if the rfp_id is unknown. None of the values can be NULL."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                """
+                SELECT rfp_id, org_id::text AS org_id, submission_status,
+                       submission_deadline, autonomy_mode
+                FROM rfps WHERE rfp_id = :r
+                """
+            ),
+            {"r": rfp_id},
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "rfp_id": row.rfp_id,
+        "org_id": row.org_id,
+        "submission_status": row.submission_status,
+        "submission_deadline": row.submission_deadline,
+        "autonomy_mode": row.autonomy_mode,
+    }
+
+
+def is_invited_vendor(*, rfp_id: str, vendor_id: str) -> bool:
+    """Returns True iff (rfp_id, vendor_id) exists in invited_vendors."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                "SELECT 1 FROM invited_vendors "
+                "WHERE rfp_id = :r AND vendor_id = :v LIMIT 1"
+            ),
+            {"r": rfp_id, "v": vendor_id},
+        ).fetchone()
+    return row is not None
+
+
+def supersede_prior_received(*, rfp_id: str, vendor_id: str, new_job_id: str) -> int:
+    """
+    Marks any existing (rfp_id, vendor_id) jobs in status='received' as
+    'superseded', pointing them at new_job_id. Returns the number of
+    rows affected. Called by the watcher AFTER it inserts the new job.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        result = conn.execute(
+            sa.text(
+                """
+                UPDATE ingestion_jobs
+                SET status = 'superseded', superseded_by = :new_id
+                WHERE rfp_id = :r AND vendor_id = :v
+                  AND status = 'received'
+                  AND job_id <> :new_id
+                """
+            ),
+            {"r": rfp_id, "v": vendor_id, "new_id": new_job_id},
+        )
+        return result.rowcount
+
+
 def emit_event(
     *, event_type: str, org_id: str, rfp_id: str, payload: dict | None = None
 ) -> str:

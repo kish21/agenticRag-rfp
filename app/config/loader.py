@@ -49,6 +49,7 @@ class PlatformIngestion(BaseModel):
     max_chunk_chars_for_rerank: int
     drops_root: str
     safe_id_pattern: str
+    llm_attribution_confidence_floor: float = Field(ge=0.0, le=1.0)
 
 class PlatformRetrieval(BaseModel):
     embedding_model: str
