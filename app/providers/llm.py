@@ -135,6 +135,8 @@ async def call_llm(
     max_tokens: int = 4096,
     response_format: Optional[dict] = None,
     seed: Optional[int] = None,
+    use_cache: bool = True,
+    cache_bust: Optional[str] = None,
 ) -> str:
     """
     Unified LLM call across all providers.
@@ -148,15 +150,24 @@ async def call_llm(
       • Anthropic branch now passes temperature through (previously dropped).
       • If seed is None, auto-derive from sha256(messages) so the same input
         always produces the same seed value. Callers can override by passing
-        an explicit seed (e.g. critic retries pass a different seed to force
-        a fresh sample without using cache).
+        an explicit seed.
+
+    Cache contract (Phase 3):
+      • If LLM_CACHE_ENABLED=true (default) AND use_cache=True, the response
+        is looked up in llm_response_cache before the provider is called.
+        Cache hit → return cached + increment hit_count. Miss → dispatch
+        normally, then INSERT ... ON CONFLICT DO NOTHING.
+      • use_cache=False → skip both read and write (still calls provider).
+      • cache_bust="X" → include X in the key so callers can force a fresh
+        sample under a new cache slot (e.g., critic retries, model debug).
+      • Cache is tenant-blind on purpose; do NOT add org_id.
     """
     from app.infra.rate_limiter import call_with_backoff
+    from app.providers import llm_cache
 
     provider = settings.llm_provider.lower()
-    client = get_llm_client()
 
-    from app.infra.cost_tracker import record_llm_call
+    from app.infra.cost_tracker import record_llm_call, record_cache_event
     model_name = get_model_name()
 
     if seed is None:
@@ -168,6 +179,52 @@ async def call_llm(
         except Exception:
             payload = repr(messages)
         seed = stable_seed(payload)
+
+    # ── Phase 3: cache lookup ────────────────────────────────────────
+    cache_active = use_cache and llm_cache.enabled()
+    cache_key: Optional[str] = None
+    if cache_active:
+        cache_key = llm_cache.build_cache_key(
+            provider=provider,
+            model=model_name,
+            temperature=temperature,
+            seed=seed,
+            response_format=response_format,
+            messages=messages,
+            cache_bust=cache_bust,
+        )
+        hit = llm_cache.lookup(cache_key)
+        if hit is not None:
+            record_cache_event(
+                hit=True,
+                model=hit.model,
+                prompt_tokens=hit.prompt_tokens,
+                completion_tokens=hit.completion_tokens,
+            )
+            return hit.response
+
+    # Cache miss (or cache disabled). Dispatch to provider, then store on the
+    # way out. record_cache_event(hit=False) marks the miss in cost_tracker.
+    if cache_active:
+        record_cache_event(hit=False, model=model_name,
+                           prompt_tokens=None, completion_tokens=None)
+
+    # SDK client only instantiated on cache miss — cache hits skip SDK setup.
+    client = get_llm_client()
+
+    def _finalize(text: str, prompt_tokens: Optional[int],
+                  completion_tokens: Optional[int]) -> str:
+        """Store the fresh response in the cache (if active) and return it."""
+        if cache_active and cache_key is not None:
+            llm_cache.store(
+                cache_key=cache_key,
+                provider=provider,
+                model=model_name,
+                response=text,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+        return text
 
     if provider == "anthropic":
         system_msg = next(
@@ -190,9 +247,10 @@ async def call_llm(
                 completion_tokens=resp.usage.output_tokens,
                 latency_ms=int((time.monotonic() - t0) * 1000),
             )
-            return resp.content[0].text
+            return resp.content[0].text, resp.usage.input_tokens, resp.usage.output_tokens
 
-        return await call_with_backoff(_call)
+        text, pt, ct = await call_with_backoff(_call)
+        return _finalize(text, pt, ct)
 
     elif provider == "azure":
         kwargs = dict(
@@ -209,16 +267,19 @@ async def call_llm(
         async def _call():
             t0 = time.monotonic()
             resp = await client.chat.completions.create(**kwargs)
+            pt = resp.usage.prompt_tokens if resp.usage else None
+            ct = resp.usage.completion_tokens if resp.usage else None
             if resp.usage:
                 record_llm_call(
                     model=model_name,
-                    prompt_tokens=resp.usage.prompt_tokens,
-                    completion_tokens=resp.usage.completion_tokens,
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
                     latency_ms=int((time.monotonic() - t0) * 1000),
                 )
-            return resp.choices[0].message.content
+            return resp.choices[0].message.content, pt, ct
 
-        return await call_with_backoff(_call)
+        text, pt, ct = await call_with_backoff(_call)
+        return _finalize(text, pt, ct)
 
     else:
         # OpenAI, OpenRouter, Ollama, Modal — all use chat.completions.create
@@ -240,13 +301,16 @@ async def call_llm(
         async def _call():
             t0 = time.monotonic()
             resp = await client.chat.completions.create(**kwargs)
+            pt = resp.usage.prompt_tokens if resp.usage else None
+            ct = resp.usage.completion_tokens if resp.usage else None
             if resp.usage:
                 record_llm_call(
                     model=model_name,
-                    prompt_tokens=resp.usage.prompt_tokens,
-                    completion_tokens=resp.usage.completion_tokens,
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
                     latency_ms=int((time.monotonic() - t0) * 1000),
                 )
-            return resp.choices[0].message.content
+            return resp.choices[0].message.content, pt, ct
 
-        return await call_with_backoff(_call)
+        text, pt, ct = await call_with_backoff(_call)
+        return _finalize(text, pt, ct)

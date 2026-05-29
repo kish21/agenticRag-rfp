@@ -203,44 +203,100 @@ Priority order based on observed flakiness:
 ## Phase 3 — LLM response cache
 
 ### Intent
-Make re-runs of the same input free, fast, and bit-exact. Required for: dev iteration speed, customer demo replays, audit/compliance bit-exact reproduction, customer bug reports they can "share a cache key" for.
+Make re-runs of the same input free, fast, and bit-exact. Required for: dev iteration speed, customer demo replays, audit/compliance bit-exact reproduction, customer bug reports they can "share a cache key" for, **and a safe escape hatch when a cached answer turns out to be wrong**.
+
+### Grounding correction — what already exists (added 2026-05-29)
+
+- `call_llm()` already auto-derives `seed` from `sha256(messages)` ([llm.py:162-170](app/providers/llm.py#L162-L170)) — content-based determinism is half-built.
+- Phase 4 already runs vendors in parallel via `asyncio.gather` on per-vendor `Send` — multiple agents may cache-miss the same key and race to INSERT. The plan's INSERT MUST be `ON CONFLICT (cache_key) DO NOTHING`.
+- Phase 2 retry path injects `critic_feedback` into the message list — that's a different prompt, so the cache key naturally differs on retry. No `use_cache=False` is needed for the implemented retry path. Replace `use_cache=False` with a more flexible `cache_bust: str | None` parameter so callers can force a miss explicitly when needed (model upgrade, debugging, etc.).
+- `app/infra/cost_tracker.py` exists but does NOT yet track cache hits/misses/savings — needs extension.
 
 ### Schema
 ```sql
 CREATE TABLE llm_response_cache (
-    cache_key       TEXT PRIMARY KEY,   -- SHA256(provider|model|temperature|seed|system|user_messages|response_format)
-    provider        TEXT NOT NULL,
-    model           TEXT NOT NULL,
-    response        TEXT NOT NULL,
-    prompt_tokens   INT,
+    cache_key         TEXT PRIMARY KEY,   -- SHA256(provider|model|temperature|seed|response_format|system_messages|user_messages|cache_bust)
+    provider          TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    response          TEXT NOT NULL,
+    prompt_tokens     INT,
     completion_tokens INT,
-    created_at      TIMESTAMPTZ DEFAULT now(),
-    hit_count       INT DEFAULT 0
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    last_hit_at       TIMESTAMPTZ,
+    hit_count         INT DEFAULT 0
 );
 CREATE INDEX idx_llm_cache_created ON llm_response_cache(created_at);
+CREATE INDEX idx_llm_cache_model ON llm_response_cache(model);   -- for bulk invalidation by model
 ```
 
+### Tenant blindness (intentional, not a bug)
+
+The cache key is **content-addressed and tenant-blind on purpose**. It does NOT include `org_id`. Reasoning:
+
+- Real-world prompts always include the customer's document context (RFP chunks, vendor proposal text) in the message body, which is unique per tenant. The chance of two tenants producing the same SHA256 of `(provider|model|...messages...)` is vanishingly small.
+- A "collision" would mean two tenants asked literally identical questions about literally identical content — at which point the cached answer IS the same answer they'd both get on a fresh call.
+- Keeping the cache org-blind lets a developer / shared internal tool benefit from the cache without re-keying per tenant.
+
+**Future-Claude: do NOT add `org_id` to the cache key.** If a privacy review ever objects, the correct response is "the cache key is a cryptographic hash of the input the tenant chose to send — it leaks nothing."
+
 ### Wiring
-Wrap `call_llm()` in [app/providers/llm.py](app/providers/llm.py): build cache key → look up → on hit return cached + increment `hit_count`; on miss dispatch → store. Critic retry calls MUST pass `use_cache=False` — otherwise retries get the same broken response.
+Wrap `call_llm()` in [app/providers/llm.py](app/providers/llm.py):
+1. If `LLM_CACHE_ENABLED=false` or `use_cache=False`, skip read + write.
+2. Otherwise compute `cache_key = sha256(provider|model|temperature|seed|response_format|system_msgs|user_msgs|cache_bust)`.
+3. Look up. On hit: `UPDATE SET hit_count = hit_count + 1, last_hit_at = now()` and return cached response. Record cache_hit in `RunCostAccumulator`.
+4. On miss: dispatch to provider → store via `INSERT ... ON CONFLICT (cache_key) DO NOTHING` (parallel-safe). Record cache_miss.
 
 ### Controls
-- `LLM_CACHE_ENABLED=true|false` env var (default `true` in dev, `false` in production-real-LLM-cost test runs).
-- `--no-cache` flag on `tools/smoke_test_graph.py`.
-- Cache hits/misses surfaced via [app/infra/cost_tracker.py](app/infra/cost_tracker.py).
+- **`LLM_CACHE_ENABLED=true|false`** env var (default `true`). One toggle for the whole process.
+- **`call_llm(..., use_cache=False)`** — per-call bypass for callers who explicitly want a fresh sample without changing prompt content. Skips both read and write.
+- **`call_llm(..., cache_bust="some-string")`** — per-call cache-key salt for callers who want a fresh sample AND want it cached under a new key (e.g., "attempt-2", "debug-2026-05-29"). Reads + writes happen, just under a different key.
+- **`--no-cache`** flag on `tools/smoke_test_graph.py` → sets `LLM_CACHE_ENABLED=false` for that run.
+- Cache hits/misses/savings surfaced via [app/infra/cost_tracker.py](app/infra/cost_tracker.py) on every run.
 
 ### Files
-- [app/db/schema.sql](app/db/schema.sql), [app/providers/llm.py](app/providers/llm.py), [app/infra/cost_tracker.py](app/infra/cost_tracker.py), [tools/smoke_test_graph.py](tools/smoke_test_graph.py), [tests/test_llm_cache.py](tests/) (new).
+- [app/db/schema.sql](app/db/schema.sql), [alembic/versions/0007_llm_response_cache.py](alembic/versions/) (NEW), [app/providers/llm.py](app/providers/llm.py), [app/infra/cost_tracker.py](app/infra/cost_tracker.py), [tools/smoke_test_graph.py](tools/smoke_test_graph.py), [tests/test_llm_cache.py](tests/) (new), [app/api/admin_routes.py](app/api/admin_routes.py) (cache invalidation endpoint), [app/api/evaluation_routes.py](app/api/evaluation_routes.py) (bypass-cache rerun endpoint).
+
+### Delivery — 2 PRs
+
+| PR | Scope |
+|---|---|
+| **PR-3A — Schema + wrapper + tests** | `llm_response_cache` table + Alembic 0007, `call_llm()` wrapper with `use_cache` + `cache_bust`, `LLM_CACHE_ENABLED` env, `cost_tracker` cache fields, `tests/test_llm_cache.py` |
+| **PR-3B — Tooling + safety + docs** | `--no-cache` flag on smoke, bypass-cache rerun API, admin bulk-invalidation endpoint, divergence-flag in re-run output, README docs, byte-identity comparison in smoke |
 
 ### Exit / pass criteria — Phase 3
-- [ ] `llm_response_cache` table exists in PostgreSQL; can verify with `\d llm_response_cache`.
-- [ ] `call_llm()` accepts `use_cache: bool = True` parameter; greppable in source.
-- [ ] First smoke run: average per-LLM-call latency ≥ 500ms (real provider calls).
-- [ ] Second smoke run with `LLM_CACHE_ENABLED=true`: total wall-clock < 30 seconds (vs ~5 min uncached); cache hit rate ≥ 95% in cost tracker summary.
-- [ ] `--no-cache` flag on smoke_test_graph.py forces all calls to be misses; verified by checking `hit_count` did NOT increment for any row created in that run.
-- [ ] `tests/test_llm_cache.py` exists with at least 5 cases: `test_hit_returns_cached`, `test_miss_dispatches`, `test_whitespace_sensitivity` (different prompts = different keys), `test_retry_bypasses_cache` (Phase 2 retry must NOT hit cache), `test_seed_in_key` (different seeds = different keys).
-- [ ] Cost tracker reports cache savings in `summary.json` of each smoke run.
-- [ ] Documentation: README has a section "LLM caching" explaining controls and invalidation.
-- [ ] **Byte-identity (deferred from Phase 1):** with `LLM_CACHE_ENABLED=true`, two consecutive smoke runs must produce SHA256-identical `decision_output.json` after normalising run-specific fields (`decision_id`, `run_id`, `setup_id`, `rfp_id`, timestamps). This is the strict reproducibility guarantee that raw LLM seed best-effort cannot deliver.
+
+| # | Criterion | Evidence |
+|---|---|---|
+| **3.1** | `llm_response_cache` table exists with stated columns | `psql \d llm_response_cache` |
+| **3.2** | Alembic migration `0007_llm_response_cache.py` applies cleanly + reverses cleanly | CI step `alembic upgrade head && alembic downgrade -1 && alembic upgrade head` |
+| **3.3** | `call_llm()` accepts `use_cache: bool = True` AND `cache_bust: str \| None = None` | greppable |
+| **3.4** | Cache hit returns cached response without calling provider | `tests/test_llm_cache.py::test_hit_returns_cached` |
+| **3.5** | Cache miss dispatches to provider AND inserts row | `::test_miss_dispatches_and_stores` |
+| **3.6** | Different prompts produce different cache keys (whitespace-sensitive) | `::test_whitespace_sensitivity` |
+| **3.7** | Different seeds produce different cache keys | `::test_seed_in_key` |
+| **3.8** | `cache_bust="X"` forces a miss even when messages are identical | `::test_cache_bust_forces_miss` |
+| **3.9** | Phase 2 retry path (critic_feedback injected) naturally misses cache | `::test_retry_path_misses_cache_via_feedback` |
+| **3.10** | `LLM_CACHE_ENABLED=false` skips both read and write | `::test_env_disable` |
+| **3.11** | Parallel insert race-safe via `ON CONFLICT DO NOTHING` | `::test_parallel_write_no_error` (5 concurrent INSERTs of same key) |
+| **3.12** | `RunCostAccumulator` exposes `cache_hits`, `cache_misses`, `cache_savings_usd` | per-run summary contains these fields; `::test_cost_tracker_cache_fields` |
+| **3.13** | `--no-cache` flag on `tools/smoke_test_graph.py` forces all calls to be misses (`hit_count` never increments on rows created during that run) | smoke artifact contains `cache_hits: 0` |
+| **3.14** | `POST /api/v1/runs/{run_id}/rerun?bypass_cache=true` creates a new `evaluation_runs` row that ignores the cache | `tests/test_rerun_bypass.py::test_bypass_creates_fresh_run` |
+| **3.15** | `DELETE /api/v1/admin/llm-cache?model=X&before=Y` purges entries (admin-only, audit-logged) | `tests/test_admin_cache.py::test_bulk_invalidation` |
+| **3.16** | When a `bypass_cache=true` rerun produces a DIFFERENT `decision_output` than the prior cached run, the new report surfaces a `divergence_flag` field with old vs new headline numbers | `tests/test_rerun_bypass.py::test_divergence_flagged` |
+| **3.17** | **Cost win:** second smoke run on standard fixture with cache hot = wall-clock < 60s (vs ~5 min uncached), ≥95% cache hit rate, $0 LLM spend (verified via `summary.json`) | smoke artifact comparison |
+| **3.18** | **Byte-identity:** with cache hot, two consecutive smoke runs produce SHA256-identical `decision_output.json` after normalising `run_id`, `decision_id`, `setup_id`, `rfp_id`, and any timestamp field. Smoke test grows a `--compare-with-prior <run_dir>` flag that does this comparison automatically. | smoke artifact comparison |
+| **3.19** | README section "LLM caching" explains controls, bypass-rerun, invalidation, divergence semantics | grep README |
+| **3.20** | All prior Phase 1-5 + Phase 9 tests still pass; full smoke `tools/smoke_test_graph.py` reaches `status=complete` with cache hot | CI green |
+
+### Safety guarantees (what the customer is promised)
+
+A cached answer can never trap you. Three escape hatches, all real:
+
+1. **Pipeline auto-correction.** Critic detects bad result → retry path injects feedback into the prompt → cache key changes → fresh LLM call. (Already works today for Explanation; for the other 7 agents the Critic only blocks. Re-run via 3.14 covers them until Phase 2c.)
+2. **Manual bypass rerun (3.14).** "Re-run with fresh LLM" button creates a new run that ignores the cache. If the fresh answer matches the cached one, the model is confident. If it differs (3.16), the report flags the divergence so a human can decide.
+3. **Prompt edits + model upgrades self-invalidate.** Cache key includes the entire prompt text and the model name. Editing a prompt or upgrading from `gpt-4o` to `gpt-4o-2026-01` makes every prior cached entry unreachable — old rows sit harmless until a periodic purge.
+
+For bulk maintenance (3.15) an admin can delete specific cache entries by `model` + `before` cutoff via the admin API.
 
 ---
 
