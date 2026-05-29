@@ -492,6 +492,170 @@ async def confirm_run(
     return {"run_id": run_id, "status": "running"}
 
 
+# ── Phase 3 PR-B — bypass-cache rerun (3.14 + 3.16) ──────────────────
+
+
+@router.post("/{run_id}/rerun")
+async def rerun_evaluation(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    bypass_cache: bool = False,
+    user: TokenData = Depends(get_current_user),
+):
+    """
+    3.14 — Re-execute a completed evaluation_run. The original run row stays
+    as audit record. A new evaluation_runs row is created, points at the
+    same RFP + vendor inputs, and is processed by _run_pipeline.
+
+    bypass_cache=true:
+      - Disables the LLM response cache for THIS rerun only (via a
+        ContextVar that propagates through the background task).
+      - 3.16: when the rerun completes, the divergence between the cached
+        and fresh decision_output is computed and recorded on the new run
+        for the report to surface.
+    """
+    import asyncio
+    import contextvars
+    import uuid as _uuid
+    import sqlalchemy as sa
+
+    from app.db.fact_store import get_engine
+    from app.providers import llm_cache
+
+    original = _db_get_run(run_id, user.org_id)
+    require_run_access(user, original)
+    if original["status"] not in ("complete", "blocked"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot rerun while original status is '{original['status']}'.",
+        )
+
+    new_run_id = str(_uuid.uuid4())
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO evaluation_runs (
+                    run_id, org_id, setup_id, rfp_id, rfp_title, department,
+                    rfp_filename, rfp_bytes, agent_id, status, vendor_ids,
+                    contract_value, currency, approval_tier, vendor_names,
+                    created_by_email, creator_dept_id
+                )
+                SELECT
+                    CAST(:new_id AS uuid), org_id, setup_id, rfp_id, rfp_title,
+                    department, rfp_filename, rfp_bytes, agent_id, 'running',
+                    vendor_ids, contract_value, currency, approval_tier,
+                    vendor_names, :email, creator_dept_id
+                FROM evaluation_runs WHERE run_id = CAST(:orig_id AS uuid)
+                """
+            ),
+            {"new_id": new_run_id, "orig_id": run_id, "email": user.email},
+        )
+
+    audit(
+        org_id=user.org_id, run_id=new_run_id,
+        event_type="run.rerun_started", actor=user.email,
+        detail={
+            "original_run_id": run_id, "bypass_cache": bypass_cache,
+        },
+    )
+
+    async def _rerun_with_bypass():
+        if bypass_cache:
+            llm_cache.disable_for_current_context()
+        await _run_pipeline(new_run_id, user.org_id)
+        if bypass_cache:
+            await _compute_divergence(
+                original_run_id=run_id,
+                new_run_id=new_run_id,
+                org_id=user.org_id,
+            )
+
+    # contextvars.copy_context() preserves the ContextVar across the
+    # BackgroundTask scheduling boundary.
+    ctx = contextvars.copy_context()
+    background_tasks.add_task(lambda: ctx.run(asyncio.create_task, _rerun_with_bypass()))
+
+    return {
+        "new_run_id": new_run_id,
+        "original_run_id": run_id,
+        "bypass_cache": bypass_cache,
+        "status": "running",
+    }
+
+
+async def _compute_divergence(
+    *, original_run_id: str, new_run_id: str, org_id: str,
+) -> None:
+    """3.16 — After a bypass_cache rerun finishes, compare decision_output
+    headline numbers against the cached run. Persists a `divergence_flag`
+    on the new run's decision_output JSON if they differ."""
+    import sqlalchemy as sa
+    from app.db.fact_store import get_engine
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sa.text(
+                """
+                SELECT run_id::text AS rid, decision_output
+                FROM evaluation_runs
+                WHERE run_id IN (CAST(:a AS uuid), CAST(:b AS uuid))
+                """
+            ),
+            {"a": original_run_id, "b": new_run_id},
+        ).fetchall()
+    by_id = {r.rid: r.decision_output for r in rows}
+    a = by_id.get(original_run_id) or {}
+    b = by_id.get(new_run_id) or {}
+
+    def _signature(d: dict) -> dict:
+        return {
+            "winner": (d.get("recommended_vendor") or {}).get("vendor_id"),
+            "shortlist": sorted(
+                (v.get("vendor_id") for v in d.get("shortlisted_vendors") or []),
+            ),
+            "rejected": sorted(
+                (v.get("vendor_id") for v in d.get("rejected_vendors") or []),
+            ),
+        }
+
+    sig_a = _signature(a)
+    sig_b = _signature(b)
+    divergent = sig_a != sig_b
+
+    if divergent and isinstance(b, dict):
+        b_with_flag = dict(b)
+        b_with_flag["divergence_flag"] = {
+            "diverges_from": original_run_id,
+            "cached_signature": sig_a,
+            "fresh_signature":  sig_b,
+            "message": "Re-run with bypass_cache produced a different shortlist "
+                       "than the cached run — model is non-deterministic on "
+                       "this RFP. Review both runs.",
+        }
+        import json as _json
+        engine = get_engine()
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE evaluation_runs
+                    SET decision_output = CAST(:dec AS JSONB)
+                    WHERE run_id = CAST(:rid AS uuid)
+                    """
+                ),
+                {"dec": _json.dumps(b_with_flag), "rid": new_run_id},
+            )
+        audit(
+            org_id=org_id, run_id=new_run_id,
+            event_type="run.divergence_flagged", actor="system",
+            detail={"original_run_id": original_run_id, "fresh_signature": sig_b,
+                    "cached_signature": sig_a},
+        )
+
+
 # ── SSE streams ────────────────────────────────────────────────────────────────
 
 @router.get("/{run_id}/status")

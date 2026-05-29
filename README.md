@@ -197,6 +197,53 @@ EMBEDDING_PROVIDER=azure
 
 ---
 
+## LLM Caching (Phase 3)
+
+Re-runs of the same input are served from a content-addressed cache in PostgreSQL — no provider call, no token cost. Useful for dev iteration, customer demo replays, audit/compliance bit-exact reproduction, and debug.
+
+**Toggle the cache (process-wide):**
+```bash
+# Off
+LLM_CACHE_ENABLED=false python -m uvicorn app.main:app
+# On (default)
+LLM_CACHE_ENABLED=true  python -m uvicorn app.main:app
+```
+
+**Smoke test with cache disabled:**
+```bash
+python tools/smoke_test_graph.py --no-cache --rfp ... --vendor-pdf ...
+```
+
+**Compare two smoke runs for byte-identical decisions:**
+```bash
+python tools/smoke_test_graph.py \
+    --rfp ... --vendor-pdf ... \
+    --compare-with-prior tests/smoke_results/<earlier-run-dir>
+```
+Volatile fields (run_id, decision_id, setup_id, rfp_id, timestamps) are masked before SHA256 comparison so only decision content is checked.
+
+**Per-call controls (in agent code):**
+```python
+# Force a fresh sample without changing the prompt — same cache key gets a new slot
+await call_llm(messages=..., cache_bust="attempt-2")
+# Skip cache entirely (read + write) for this call
+await call_llm(messages=..., use_cache=False)
+```
+
+### Escape hatches when a cached answer is wrong
+
+Three independent paths so a cache can never trap you:
+
+| Situation | What to do |
+|---|---|
+| Pipeline detected the bad result (Critic block) | Already handled — retry path injects critic feedback into the prompt → cache key changes → fresh LLM call |
+| You read the report and disagree | `POST /api/v1/evaluate/{run_id}/rerun?bypass_cache=true` — creates a new run, disables the cache for that run only. If the fresh result differs from the cached one, the new run's `decision_output` gets a `divergence_flag` so the report surfaces the disagreement |
+| Systemic bug — bad prompt or wrong model | Edit the prompt or upgrade the model. Cache key includes the full prompt text + the model name, so all old entries become unreachable automatically. For bulk cleanup of known-bad batches: `DELETE /api/v1/admin/llm-cache?model=X&before=Y` (admin, audit-logged) |
+
+### Tenant blindness (by design)
+
+The cache key is content-addressed and does **not** include `org_id`. Prompts always include the customer's document content, which is unique per tenant — collision across orgs would require literally identical messages, at which point the cached answer IS the same answer they'd both get on a fresh call. This is intentional; do not add `org_id`.
+
 ## Cloud Deployment
 
 Step-by-step CLI deployment guides for all platforms:

@@ -653,8 +653,34 @@ async def main_async(args) -> int:
             "failures":     failures,
             "passed":       not failures,
         }
+        # Phase 3 — cache observability
+        cost_acc = get_run_cost(run_id)
+        if cost_acc is not None:
+            cs = cost_acc.summary()
+            summary["cache"] = {
+                "enabled":   os.getenv("LLM_CACHE_ENABLED", "true").lower() != "false",
+                "hits":      cs["cache_hits"],
+                "misses":    cs["cache_misses"],
+                "hit_rate":  cs["cache_hit_rate"],
+                "savings_usd": cs["cache_savings_usd"],
+                "total_calls": cs["total_calls"],
+                "total_cost_usd": cs["total_cost_usd"],
+            }
         (out_dir / "summary.json").write_text(
             json.dumps(summary, indent=2, default=str), encoding="utf-8")
+
+        # Phase 3 — byte-identity compare against a prior run dir, if requested.
+        if getattr(args, "compare_with_prior", None):
+            ok, msg = _compare_decision_outputs(out_dir, Path(args.compare_with_prior))
+            (out_dir / "compare_with_prior.txt").write_text(msg, encoding="utf-8")
+            if not ok:
+                print(f"  [BYTE-IDENTITY FAIL] {msg}")
+                failures.append(f"byte-identity vs prior: {msg}")
+                summary["passed"] = False
+                (out_dir / "summary.json").write_text(
+                    json.dumps(summary, indent=2, default=str), encoding="utf-8")
+            else:
+                print(f"  [BYTE-IDENTITY PASS] {msg}")
 
         if failures:
             print("  [FAIL] LangGraph end-to-end smoke test failed:")
@@ -685,6 +711,46 @@ async def main_async(args) -> int:
             print(f"\n  Partial artifacts saved to: {out_dir}", file=sys.stderr)
 
 
+# ── Phase 3 — byte-identity comparison helper ────────────────────────
+
+_VOLATILE_KEYS = {
+    "run_id", "decision_id", "setup_id", "rfp_id",
+    "explanation_id", "query_id",
+    "created_at", "completed_at", "started_at", "ts", "timestamp",
+    "decision_timestamp",
+}
+
+
+def _normalize_for_compare(obj):
+    """Recursively masks volatile fields so SHA256 reflects decision content
+    only — not run-specific identifiers or timestamps."""
+    if isinstance(obj, dict):
+        return {
+            k: ("<masked>" if k in _VOLATILE_KEYS else _normalize_for_compare(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_normalize_for_compare(x) for x in obj]
+    return obj
+
+
+def _compare_decision_outputs(this_dir, prior_dir) -> tuple[bool, str]:
+    import hashlib
+    this_path = this_dir / "decision_output.json"
+    prior_path = prior_dir / "decision_output.json"
+    if not prior_path.exists():
+        return False, f"prior decision_output.json not found at {prior_path}"
+    a = json.loads(this_path.read_text(encoding="utf-8"))
+    b = json.loads(prior_path.read_text(encoding="utf-8"))
+    a_norm = json.dumps(_normalize_for_compare(a), sort_keys=True)
+    b_norm = json.dumps(_normalize_for_compare(b), sort_keys=True)
+    a_sha = hashlib.sha256(a_norm.encode("utf-8")).hexdigest()
+    b_sha = hashlib.sha256(b_norm.encode("utf-8")).hexdigest()
+    if a_sha == b_sha:
+        return True, f"SHA256 match (after masking): {a_sha[:16]}..."
+    return False, f"SHA256 mismatch — this={a_sha[:16]}... prior={b_sha[:16]}..."
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--rfp",       required=True, help="Path to the RFP PDF")
@@ -692,7 +758,18 @@ def main() -> None:
                     help="Path to a vendor proposal PDF (repeatable)")
     ap.add_argument("--criteria",  default=None,
                     help="Optional path to a criteria CSV/XLSX")
+    # Phase 3 — cache controls
+    ap.add_argument("--no-cache", action="store_true",
+                    help="Disable the LLM response cache for this run "
+                         "(sets LLM_CACHE_ENABLED=false in the process env).")
+    ap.add_argument("--compare-with-prior", default=None, metavar="PRIOR_RUN_DIR",
+                    help="After the smoke completes, normalize decision_output.json "
+                         "and compare SHA256 against the prior run directory. "
+                         "Fails if they differ (Phase 3 byte-identity check).")
     args = ap.parse_args()
+    if args.no_cache:
+        os.environ["LLM_CACHE_ENABLED"] = "false"
+        print("[phase3] LLM cache DISABLED for this run (--no-cache)")
     sys.exit(asyncio.run(main_async(args)))
 
 
