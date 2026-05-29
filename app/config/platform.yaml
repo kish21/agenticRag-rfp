@@ -7,6 +7,10 @@ ingestion:
   # Phase 5: regex used to validate user-supplied rfp_id and vendor_id values
   # before they are joined into filesystem paths (path-traversal guard).
   safe_id_pattern: "^[A-Za-z0-9._\\-]{1,128}$"
+  # Phase 5 (PR-C): LLM-fallback attribution confidence floor. Files dropped
+  # at the rfp_id root (no vendor folder) are routed to the LLM; below this
+  # confidence the job is flagged for the admin attribution queue.
+  llm_attribution_confidence_floor: 0.85
 
 embedding:
   # Active model is chosen by EMBEDDING_PROVIDER in .env:

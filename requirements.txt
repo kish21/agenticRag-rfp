@@ -69,6 +69,7 @@ weasyprint==63.1
 
 # ── Deployment ────────────────────────────────────────────
 modal>=0.64.0               # floor constraint — always installs latest stable
+watchdog==6.0.0             # Phase 5 — vendor drop folder file watcher
 
 # Dev/test dependencies (pytest, faker, grandalf) live in requirements-dev.txt
 # Install for local development:  pip install -r requirements-dev.txt
