@@ -514,8 +514,6 @@ async def rerun_evaluation(
         and fresh decision_output is computed and recorded on the new run
         for the report to surface.
     """
-    import asyncio
-    import contextvars
     import uuid as _uuid
     import sqlalchemy as sa
 
@@ -562,6 +560,10 @@ async def rerun_evaluation(
     )
 
     async def _rerun_with_bypass():
+        # ContextVar is set INSIDE the new task so it survives the
+        # BackgroundTask scheduling boundary without needing
+        # contextvars.copy_context(). FastAPI awaits this coroutine
+        # directly — no fire-and-forget asyncio.create_task involved.
         if bypass_cache:
             llm_cache.disable_for_current_context()
         await _run_pipeline(new_run_id, user.org_id)
@@ -572,10 +574,7 @@ async def rerun_evaluation(
                 org_id=user.org_id,
             )
 
-    # contextvars.copy_context() preserves the ContextVar across the
-    # BackgroundTask scheduling boundary.
-    ctx = contextvars.copy_context()
-    background_tasks.add_task(lambda: ctx.run(asyncio.create_task, _rerun_with_bypass()))
+    background_tasks.add_task(_rerun_with_bypass)
 
     return {
         "new_run_id": new_run_id,

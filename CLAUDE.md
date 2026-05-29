@@ -91,10 +91,16 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** Phase 5 complete — all 6 PRs (A→E) merged into master on 2026-05-29 via #151/#158/#152/#159/#160/#161/#162/#163.
-**Last verified checkpoint:** Phase 5 final acceptance — `tests/test_phase5_e2e.py` green; `tools/smoke_test_graph.py` reaches `status=complete` against master with the 4 new Phase-5 tables present.
-**Next action:** Phase 3 (LLM response cache) — see `docs/dev/PRODUCTION_READINESS_PLAN.md`. Phase 5's deferred D1 (Modal cron visible in dashboard), D4 (5-vendor real-parallel wall-clock), and E1 (≤60s user-evaluate wall-clock) are tracked in BACKLOG.md P2.0.
+**Current skill:** Phase 3 + Phase 5 complete on 2026-05-29 (Phase 5 via #151-#163; Phase 3 via #165 + #166). Phase 1, 2 (Explanation only), 4, 9 already on master. Remaining: 2c, 6, 7, 8, 10.
+**Last verified checkpoint:** Phase 3 PR-B merged; `tests/test_llm_cache.py` + `test_llm_cache_admin.py` green; `tools/smoke_test_graph.py` reaches `status=complete` against master with all 4 Phase-5 tables + Phase-3 `llm_response_cache` table.
+**Next action:** Phase 7 (PDF report) — see `docs/dev/PRODUCTION_READINESS_PLAN.md`. Plan vs reality verified aligned (8 new `ExplanationOutput` fields all greenfield; Mode C (`auto_to_report`) already gated waiting for Phase 7 to flip it on).
 **Blockers:** none
+
+### Deferred items tracked in BACKLOG.md
+- P2.0 — Phase 5 D1 (Modal cron dashboard), D4 (5-vendor parallel wall-clock), E1 (≤60s user-evaluate wall-clock) — live integration
+- P2.0a — Phase 5 legacy-table FK refactor
+- P2.0b — Phase 3 3.17 live cost-savings benchmark (added 2026-05-29 post-audit)
+- P2.0c — Phase 2c finish critic-as-controller for Extraction + Evaluation (added 2026-05-29)
 
 ### Phase 5 highlights now on master
 - 4 new tables: `rfps`, `invited_vendors`, `ingestion_jobs`, `event_log`
@@ -104,6 +110,14 @@ Before anything else in Skill 04:
 - Pipeline short-circuit on user-triggered Evaluate (`app/pipeline/nodes.py`)
 - Admin endpoints for attribution queue + late-addendum acceptance (`app/api/admin_routes.py`)
 - CI now provisions a postgres service and bootstraps from `schema.sql` + `alembic stamp head` so the 47 new DB-touching tests run on every PR
+
+### Phase 3 highlights now on master
+- New table `llm_response_cache` (Alembic `0007`); tenant-blind by design
+- `call_llm()` wrapped with `use_cache` + `cache_bust`; cache hits never instantiate the provider SDK client
+- `RunCostAccumulator` extended with `cache_hits` / `cache_misses` / `cache_hit_rate` / `cache_savings_usd`
+- Customer-safety endpoints: `POST /api/v1/evaluate/{run_id}/rerun?bypass_cache=true` (with `divergence_flag` if results differ); `DELETE /api/v1/admin/llm-cache` (audit-logged)
+- `tools/smoke_test_graph.py --no-cache` + `--compare-with-prior <dir>` byte-identity check
+- README "LLM Caching (Phase 3)" section documents the 3 escape hatches
 
 ---
 
