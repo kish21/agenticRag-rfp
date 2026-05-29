@@ -128,6 +128,19 @@ Things that make the product usable rather than demoable.
 
 Things that make the system more robust or capable. Interview-worthy "next steps."
 
+### P2.0 — Phase 5 deferred benchmarks (D4 + E1)
+
+Phase 5 (background ingestion) shipped with two exit criteria deferred to live integration:
+
+- **D4** — `tools/smoke_test_graph.py` on a 5-vendor fixture, asserting that `deadline_processor.tick()` finishes the ingestion + extraction sub-graph in **<0.4× the equivalent sequential wall-clock**. Requires live OpenAI + Qdrant + real RFP fixture. Today only the orchestration smoke is unit-tested.
+- **E1** — User-triggered `/api/v1/evaluate/start` AFTER background processing completes in **≤60 seconds** on the 5-vendor fixture (`agent_events.json` shows `ingestion.skipped` + `extraction.skipped` 5×). The short-circuit logic is unit-tested via mock; wall-clock proof requires the same live fixture.
+
+**Fix.** Stand up a recurring integration job (Modal scheduled or GHA nightly with secrets) that runs both benchmarks on the standard fixture and records numbers in `tests/smoke_results/`. **Effort:** 1 day to wire + 1 day fixture curation.
+
+### P2.0a — Phase 5 RFP/legacy-FK refactor
+
+Phase 5 added an `rfps` table but left existing `vendor_documents`, `extracted_facts`, `evaluation_runs`, etc. with plain `rfp_id TEXT` columns (no FK to `rfps`). Intentional scope cap — full FK refactor was deferred to keep PR-A small. **Fix.** Add FKs in a follow-up migration, backfill orphan `rfp_id` strings into the `rfps` table (with `title='<unknown — legacy>'`), then enforce FK. **Effort:** Half a day if no orphans exist; up to 2 days with backfill.
+
 ### P2.1 — Replace TF-IDF sparse with proper BM25
 
 **Fix.** Switch to Qdrant's native BM25 sparse vectors. Re-ingestion required. **Effort:** Half a day including backfill.
