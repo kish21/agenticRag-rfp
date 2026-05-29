@@ -21,7 +21,6 @@ Run:
 """
 from __future__ import annotations
 
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -32,7 +31,11 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-os.environ.setdefault("DROPS_ROOT", str(Path(__file__).parent / "_drops_test"))
+from app.config import settings  # noqa: E402
+
+# Redirect drop folder to a test-scoped directory before the router is imported,
+# so provision_drop_folder() picks it up via settings.platform.ingestion.drops_root.
+settings.platform.ingestion.drops_root = str(Path(__file__).parent / "_drops_test")
 
 from app.api.rfp_routes import router as rfp_router  # noqa: E402
 from app.auth.dependencies import get_current_user  # noqa: E402

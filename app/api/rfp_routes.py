@@ -16,7 +16,6 @@ uploads into a drop folder.
 """
 from __future__ import annotations
 
-import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -28,7 +27,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user
-from app.auth.jwt import TokenData, require_role
+from app.auth.jwt import TokenData
+from app.config import settings
 from app.db.fact_store import (
     create_rfp,
     get_engine,
@@ -40,23 +40,30 @@ from app.db.fact_store import (
 
 router = APIRouter(prefix="/api/v1/rfps", tags=["rfps"])
 
-DROPS_ROOT = Path(os.getenv("DROPS_ROOT", "drops"))
-_SAFE_ID = re.compile(r"^[A-Za-z0-9._\-]{1,128}$")
+
+def _safe_id_pattern() -> re.Pattern:
+    """Compiled regex from platform.ingestion.safe_id_pattern. Re-read each call so
+    tests/runtime can mutate settings via dependency overrides without re-importing."""
+    return re.compile(settings.platform.ingestion.safe_id_pattern)
+
+
+def _drops_root() -> Path:
+    return Path(settings.platform.ingestion.drops_root)
 
 
 def _ensure_safe_id(value: str, label: str) -> None:
-    if not _SAFE_ID.fullmatch(value or ""):
+    if not _safe_id_pattern().fullmatch(value or ""):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid {label}: must match [A-Za-z0-9._-]{{1,128}}",
+            detail=f"Invalid {label}: must match {settings.platform.ingestion.safe_id_pattern}",
         )
 
 
 def provision_drop_folder(rfp_id: str, vendor_id: str) -> Path:
-    """Creates drops/{rfp_id}/{vendor_id}/ on disk. Idempotent."""
+    """Creates {drops_root}/{rfp_id}/{vendor_id}/ on disk. Idempotent."""
     _ensure_safe_id(rfp_id, "rfp_id")
     _ensure_safe_id(vendor_id, "vendor_id")
-    target = DROPS_ROOT / rfp_id / vendor_id
+    target = _drops_root() / rfp_id / vendor_id
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -98,13 +105,9 @@ class SetDeadlineRequest(BaseModel):
 
 
 def _require_rfp_write_role(user: TokenData = Depends(get_current_user)) -> TokenData:
-    """RFP create / invite / deadline endpoints require a procurement-side role."""
-    if user.role not in (
-        "platform_admin",
-        "company_admin",
-        "department_admin",
-        "department_user",
-    ):
+    """RFP create / invite / deadline endpoints require a procurement-side role.
+    Allowed roles are sourced from product.rfp_defaults.write_roles."""
+    if user.role not in set(settings.product.rfp_defaults.write_roles):
         raise HTTPException(status_code=403, detail="Insufficient role for RFP write")
     return user
 
@@ -140,10 +143,16 @@ async def create_rfp_endpoint(
     """Creates an RFP shell. submission_deadline defaults to now + 14 days."""
     rfp_id = body.rfp_id or f"rfp-{uuid.uuid4().hex[:8]}"
     _ensure_safe_id(rfp_id, "rfp_id")
+    defaults = settings.product.rfp_defaults
     deadline = body.submission_deadline or (
-        datetime.now(timezone.utc) + timedelta(days=14)
+        datetime.now(timezone.utc) + timedelta(days=defaults.default_deadline_days)
     )
-    mode = body.autonomy_mode or "auto_to_evaluate"
+    mode = body.autonomy_mode or defaults.default_autonomy_mode
+    if mode not in set(defaults.allowed_autonomy_modes):
+        raise HTTPException(
+            status_code=400,
+            detail=f"autonomy_mode must be one of {defaults.allowed_autonomy_modes}",
+        )
     try:
         create_rfp(
             rfp_id=rfp_id,
