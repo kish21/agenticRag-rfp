@@ -27,6 +27,12 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm ci
 
+      - name: Lint (eslint, errors only)
+        # Phase 3 post-audit (2026-05-29): block PRs that introduce new
+        # React 19 hook errors (set-state-in-effect, impure-fn-in-render,
+        # TDZ). Warnings still allowed; only errors fail the job.
+        run: cd frontend && npx eslint . --max-warnings 100
+
       - name: Build Next.js
         run: cd frontend && npm run build
 

@@ -21,8 +21,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [themeId, setThemeId] = useState<ThemeId>(DEFAULT_THEME);
 
   useEffect(() => {
+    // Mount-only read of persisted theme from localStorage. This is the
+    // canonical client-only initialization pattern: external state
+    // (localStorage) -> React state on first mount. useSyncExternalStore
+    // would require a stable subscribe callback that localStorage does not
+    // provide. Fires exactly once per mount; no cascading-render risk.
     const stored = localStorage.getItem(STORAGE_KEY) as ThemeId | null;
     const id = stored && stored in THEMES ? stored : DEFAULT_THEME;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThemeId(id);
     applyThemeVars(id);
   }, []);

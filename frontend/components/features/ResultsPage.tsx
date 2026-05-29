@@ -33,7 +33,13 @@ function CostBreakdown({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    // Trigger-based fetch on dropdown open. setLoading(true) fires
+    // synchronously before the async fetch so the spinner shows; the
+    // remaining setState calls run inside promise resolution (after the
+    // effect commits) so React 19 strict-mode is satisfied — the
+    // setLoading(true) line is the only one the linter flags.
     if (!open || cost) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     api.get<CostData>(`/api/v1/evaluate/${runId}/cost`)
       .then(setCost)

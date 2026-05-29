@@ -121,6 +121,34 @@ Things that make the product usable rather than demoable.
 
 **Test case.** Use Chemtura/YASH fixture: "What client references did YASH provide?" — should find John Deere, Stanley Works, Monsanto with page numbers.
 
+### P1.12 — Real BM25 sparse retrieval (promoted from P2.1 on 2026-05-29)
+
+**Problem (external reviewer, 2026-05-29).** `app/retrieval/pipeline.py:33-53` builds the "sparse vector" for hybrid retrieval by hashing words with MD5 into 100,000 buckets and storing raw normalised term-frequency. For procurement RFP evaluation this is **wrong in three specific ways:**
+
+1. **MD5 → 100k buckets is a collision attack on procurement vocabulary.** Distinct certification IDs ("ISO 27001" vs "ISO 9001"), insurance terms, and SLA clauses can hash to the same bucket. Exact-clause search degrades to "approximate-clause-with-collisions search" — silently.
+2. **TF without IDF over-weights common boilerplate.** Words like "vendor", "shall", "must" dominate the sparse vector. Rare-but-critical terms like specific certification numbers get washed out.
+3. **No procurement-aware tokenizer.** "ISO 27001" splits into `iso` + `27001` with no preservation of the multi-token entity. Insurance amounts like "£10M" lose the currency symbol. The 3-character minimum drops "5G", "AI", "OK".
+
+**Why it has shipped this long.** Hybrid retrieval combines this sparse layer with a real dense embedding (`text-embedding-3-large`, 3072-dim). The dense side carries most semantic load; the broken sparse layer hurts but doesn't dominate. The smoke test passes because dense retrieval finds the right chunks **most** of the time. The sparse layer's job is to be the safety net on disputed clauses, exact-figure assertions, and certification-ID checks — exactly the cases where dense embeddings have the most slack. So the layer is broken **where it matters most**.
+
+**Fix.** Switch to Qdrant native BM25 sparse vectors (Qdrant 1.10+ supports server-side BM25 with proper tokenization). Three concrete steps:
+
+1. **Update collection schema** in `app/retrieval/qdrant.py` to declare `sparse_vectors_config` with `modifier="bm25"` and a procurement-tuned tokenizer (preserves alphanumeric tokens, currency symbols, and multi-word phrases).
+2. **Replace `get_sparse_embedding()`** in `app/retrieval/pipeline.py` — either delete it (let Qdrant generate the BM25 sparse from raw text server-side) or wire `rank_bm25.BM25Okapi` if we want client-side control. `rank-bm25==0.2.2` is already in `requirements.txt`; we are paying for it but not using it.
+3. **Backfill** — re-ingest existing chunks so Qdrant builds the BM25 index from raw text. Add a one-shot script `tools/reindex_bm25.py`.
+
+**Acceptance test.** Add `tests/test_sparse_retrieval_bm25.py`:
+- Index fixture corpus containing two near-duplicate certifications differing only in numbers ("ISO 27001" vs "ISO 9001")
+- Query for exact "ISO 27001"; assert top-1 result is the correct chunk; assert "ISO 9001" chunk is NOT in top-3
+- Same test for insurance ("£10M public liability" vs "£1M public liability")
+- Same test for SLA clauses
+
+**Alternative (not recommended now).** SPLADE neural sparse — best quality but requires Modal A10G compute. Revisit once a real customer demands it.
+
+**Effort.** Half a day for Qdrant native BM25; ~1 day if we also do the reindex script + the 3 acceptance tests. **Do BEFORE first real customer** — this is the difference between "demo-grade" and "procurement-grade" retrieval.
+
+**Provenance.** External reviewer flagged this on 2026-05-29 after reviewing PRs #165 / #166. Reviewer's exact words: *"For procurement docs, exact clauses, ISO numbers, insurance terms, and SLA phrases matter. I would want real BM25/SPLADE-style sparse retrieval before production."*
+
 ---
 
 
@@ -149,9 +177,9 @@ Phase 3 (LLM response cache) shipped with one exit criterion deferred to live in
 
 Phase 2 plan promised all 9 agents under the Critic-as-controller pattern (retry-with-feedback, 3-way routing: continue / retry / block). Today only **Explanation** has the full pattern. The other 7 agents (Planner, Ingestion, Retrieval-partial, Extraction, Evaluation, Comparator, Decision) still run the critic inline and can only block. **Fix.** Promote Critic-as-controller to dedicated LangGraph nodes for Extraction + Evaluation first (highest leverage per the original Phase 2 plan); Planner / Ingestion / Comparator / Decision remain deferred as "reliable enough in smoke runs." **Effort:** 1 day for Extraction + Evaluation.
 
-### P2.1 — Replace TF-IDF sparse with proper BM25
+### P2.1 — Replace TF-IDF sparse with proper BM25 (PROMOTED TO P1.12 below — 2026-05-29)
 
-**Fix.** Switch to Qdrant's native BM25 sparse vectors. Re-ingestion required. **Effort:** Half a day including backfill.
+Original P2 entry: Switch to Qdrant's native BM25 sparse vectors. Re-ingestion required. **Promoted** to P1.12 after external reviewer flagged this as a procurement-grade correctness risk, not a polish item. See P1.12 for the full reasoning + plan.
 
 ### P2.2 — Retrieval critic LLM cache
 

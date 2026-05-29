@@ -120,10 +120,18 @@ export default function HomePage() {
   // ── Auth + initial load ───────────────────────────────────────────────────
 
   useEffect(() => {
+    // Mount-only auth + initial data load. setState fires synchronously
+    // for user info (read from localStorage); subsequent setState calls
+    // come from resolved promises (fetched data). The set-state-in-effect
+    // lint warning is intentional for client-only "load on mount" pages —
+    // useSyncExternalStore would need a subscribe callback localStorage
+    // does not provide.
     if (!isLoggedIn()) { router.push("/login"); return; }
     const info = getUserInfo();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUserInfo(info);
     if (info?.email) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setChatSessions(_loadSessions(info.email));
     }
     api.get<{ runs?: EvalRun[] } | EvalRun[]>("/api/v1/evaluate/list", {
