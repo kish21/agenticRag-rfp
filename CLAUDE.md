@@ -91,10 +91,19 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** SK09 complete — all skills complete
-**Last verified checkpoint:** SK09-CP06
-**Next action:** Platform is complete. 65/66 checkpoints passed (Q09 regression assertion is above threshold).
+**Current skill:** Phase 5 complete — all 6 PRs (A→E) merged into master on 2026-05-29 via #151/#158/#152/#159/#160/#161/#162/#163.
+**Last verified checkpoint:** Phase 5 final acceptance — `tests/test_phase5_e2e.py` green; `tools/smoke_test_graph.py` reaches `status=complete` against master with the 4 new Phase-5 tables present.
+**Next action:** Phase 3 (LLM response cache) — see `docs/dev/PRODUCTION_READINESS_PLAN.md`. Phase 5's deferred D1 (Modal cron visible in dashboard), D4 (5-vendor real-parallel wall-clock), and E1 (≤60s user-evaluate wall-clock) are tracked in BACKLOG.md P2.0.
 **Blockers:** none
+
+### Phase 5 highlights now on master
+- 4 new tables: `rfps`, `invited_vendors`, `ingestion_jobs`, `event_log`
+- RFP creation API at `/api/v1/rfps/...`; UI at `/procurement/rfps/new`
+- Background watcher (`app/jobs/ingestion_watcher.py`) + LLM-fallback attribution (`app/jobs/llm_attribution.py`)
+- Modal-cron deadline scheduler (`app/jobs/deadline_processor.py`) + ingestion sub-graph (`app/pipeline/ingestion_graph.py`) — registered in `deploy/modal.py::phase5_deadline_tick`, NOT yet deployed (cost decision pending)
+- Pipeline short-circuit on user-triggered Evaluate (`app/pipeline/nodes.py`)
+- Admin endpoints for attribution queue + late-addendum acceptance (`app/api/admin_routes.py`)
+- CI now provisions a postgres service and bootstraps from `schema.sql` + `alembic stamp head` so the 47 new DB-touching tests run on every PR
 
 ---
 
