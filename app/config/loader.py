@@ -47,6 +47,8 @@ class PlatformIngestion(BaseModel):
     chunk_size_tokens: int
     chunk_overlap_tokens: int
     max_chunk_chars_for_rerank: int
+    drops_root: str
+    safe_id_pattern: str
 
 class PlatformRetrieval(BaseModel):
     embedding_model: str
@@ -115,11 +117,20 @@ class ProductAudit(BaseModel):
     require_human_signoff: bool
     citation_required: bool
 
+class ProductRFPDefaults(BaseModel):
+    """Phase 5 RFP lifecycle defaults — see app/api/rfp_routes.py."""
+    default_deadline_days: int = Field(ge=1, le=365)
+    default_autonomy_mode: str
+    allowed_autonomy_modes: list[str]
+    write_roles: list[str]
+
+
 class ProductConfig(BaseModel):
     new_org_defaults: dict      # see OrgSettings model for keys
     presets: dict[str, Preset]
     score_bands: ProductScoreBands
     audit: ProductAudit
+    rfp_defaults: ProductRFPDefaults
 
 
 # ─── Unified Settings (env secrets + YAML tunables) ───────────────────

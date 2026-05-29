@@ -2,6 +2,11 @@ ingestion:
   chunk_size_tokens: 500
   chunk_overlap_tokens: 50
   max_chunk_chars_for_rerank: 512
+  # Phase 5: vendor drop folders. Watcher service + API both read this.
+  drops_root: "drops"
+  # Phase 5: regex used to validate user-supplied rfp_id and vendor_id values
+  # before they are joined into filesystem paths (path-traversal guard).
+  safe_id_pattern: "^[A-Za-z0-9._\\-]{1,128}$"
 
 embedding:
   # Active model is chosen by EMBEDDING_PROVIDER in .env:
