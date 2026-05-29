@@ -728,3 +728,71 @@ RETURNS SETOF evaluation_runs AS $$
         )
       );
 $$ LANGUAGE SQL STABLE;
+
+-- ── Phase 5 — Background ingestion foundation ────────────────────────
+-- See docs/dev/PRODUCTION_READINESS_PLAN.md Phase 5.0.
+
+CREATE TABLE IF NOT EXISTS rfps (
+    rfp_id              TEXT PRIMARY KEY,
+    org_id              UUID NOT NULL,
+    title               TEXT NOT NULL,
+    department          TEXT,
+    created_by_email    TEXT NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    submission_deadline TIMESTAMPTZ,
+    submission_status   TEXT NOT NULL DEFAULT 'open'
+        CHECK (submission_status IN ('open','closed','processing','facts_ready','evaluated')),
+    autonomy_mode       TEXT NOT NULL DEFAULT 'auto_to_evaluate'
+        CHECK (autonomy_mode IN ('manual','auto_to_evaluate','auto_to_report'))
+);
+CREATE INDEX IF NOT EXISTS ix_rfps_org ON rfps(org_id);
+CREATE INDEX IF NOT EXISTS ix_rfps_deadline_open
+    ON rfps(submission_deadline)
+    WHERE submission_status = 'open';
+
+CREATE TABLE IF NOT EXISTS invited_vendors (
+    rfp_id      TEXT NOT NULL REFERENCES rfps(rfp_id) ON DELETE CASCADE,
+    vendor_id   TEXT NOT NULL,
+    vendor_name TEXT,
+    invited_by  TEXT NOT NULL,
+    invited_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (rfp_id, vendor_id)
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_jobs (
+    job_id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id                 UUID NOT NULL,
+    rfp_id                 TEXT NOT NULL,
+    vendor_id              TEXT NOT NULL,
+    source_uri             TEXT,
+    filename               TEXT,
+    content_hash           CHAR(64) NOT NULL,
+    status                 TEXT NOT NULL
+        CHECK (status IN (
+            'received','superseded','queued','processing','facts_ready',
+            'failed','duplicate','needs_attribution','rejected_late'
+        )),
+    attribution_confidence FLOAT,
+    received_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    attempted_at           TIMESTAMPTZ,
+    completed_at           TIMESTAMPTZ,
+    error                  TEXT,
+    doc_id                 UUID REFERENCES vendor_documents(doc_id),
+    superseded_by          UUID REFERENCES ingestion_jobs(job_id),
+    UNIQUE (rfp_id, vendor_id, content_hash)
+);
+CREATE INDEX IF NOT EXISTS ix_ingestion_jobs_rfp_status
+    ON ingestion_jobs(rfp_id, status);
+
+CREATE TABLE IF NOT EXISTS event_log (
+    event_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type   TEXT NOT NULL,
+    org_id       UUID NOT NULL,
+    rfp_id       TEXT NOT NULL,
+    payload      JSONB NOT NULL DEFAULT '{}',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    delivered_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_event_log_pending
+    ON event_log(created_at) WHERE delivered_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_event_log_rfp ON event_log(rfp_id);

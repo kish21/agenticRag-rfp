@@ -351,6 +351,242 @@ def save_vendor_document(
         })
 
 
+# ── Phase 5 — Background ingestion foundation helpers ────────────────
+# See docs/dev/PRODUCTION_READINESS_PLAN.md Phase 5.0.
+
+
+def create_rfp(
+    *,
+    rfp_id: str,
+    org_id: str,
+    title: str,
+    created_by_email: str,
+    department: str | None = None,
+    submission_deadline=None,
+    autonomy_mode: str = "auto_to_evaluate",
+) -> None:
+    """Inserts a new RFP shell. submission_status defaults to 'open'."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO rfps (
+                    rfp_id, org_id, title, department,
+                    created_by_email, submission_deadline, autonomy_mode
+                ) VALUES (
+                    :rfp_id, :org_id, :title, :department,
+                    :created_by_email, :submission_deadline, :autonomy_mode
+                )
+                """
+            ),
+            {
+                "rfp_id": rfp_id,
+                "org_id": org_id,
+                "title": title,
+                "department": department,
+                "created_by_email": created_by_email,
+                "submission_deadline": submission_deadline,
+                "autonomy_mode": autonomy_mode,
+            },
+        )
+
+
+def invite_vendor(
+    *, rfp_id: str, vendor_id: str, invited_by: str, vendor_name: str | None = None
+) -> None:
+    """Adds a vendor to an RFP's invited list. Idempotent on (rfp_id, vendor_id)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO invited_vendors (rfp_id, vendor_id, vendor_name, invited_by)
+                VALUES (:rfp_id, :vendor_id, :vendor_name, :invited_by)
+                ON CONFLICT (rfp_id, vendor_id) DO NOTHING
+                """
+            ),
+            {
+                "rfp_id": rfp_id,
+                "vendor_id": vendor_id,
+                "vendor_name": vendor_name,
+                "invited_by": invited_by,
+            },
+        )
+
+
+def set_deadline(*, rfp_id: str, submission_deadline) -> bool:
+    """
+    Updates submission_deadline. Only allowed while submission_status='open'.
+    Returns True if updated, False if RFP is locked.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        result = conn.execute(
+            sa.text(
+                """
+                UPDATE rfps
+                SET submission_deadline = :deadline
+                WHERE rfp_id = :rfp_id AND submission_status = 'open'
+                """
+            ),
+            {"deadline": submission_deadline, "rfp_id": rfp_id},
+        )
+        return result.rowcount > 0
+
+
+def enqueue_ingestion_job(
+    *,
+    org_id: str,
+    rfp_id: str,
+    vendor_id: str,
+    content_hash: str,
+    filename: str | None = None,
+    source_uri: str | None = None,
+    status: str = "received",
+    attribution_confidence: float | None = None,
+) -> str | None:
+    """
+    Inserts an ingestion_jobs row. Returns job_id, or None on UNIQUE conflict
+    (duplicate content_hash for the same rfp_id+vendor_id).
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            sa.text(
+                """
+                INSERT INTO ingestion_jobs (
+                    org_id, rfp_id, vendor_id, content_hash,
+                    filename, source_uri, status, attribution_confidence
+                ) VALUES (
+                    :org_id, :rfp_id, :vendor_id, :content_hash,
+                    :filename, :source_uri, :status, :confidence
+                )
+                ON CONFLICT (rfp_id, vendor_id, content_hash) DO NOTHING
+                RETURNING job_id
+                """
+            ),
+            {
+                "org_id": org_id,
+                "rfp_id": rfp_id,
+                "vendor_id": vendor_id,
+                "content_hash": content_hash,
+                "filename": filename,
+                "source_uri": source_uri,
+                "status": status,
+                "confidence": attribution_confidence,
+            },
+        ).fetchone()
+        return str(row[0]) if row else None
+
+
+def mark_rfp_facts_ready(*, rfp_id: str) -> None:
+    """Transitions rfps.submission_status to 'facts_ready' once all jobs done."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                UPDATE rfps
+                SET submission_status = 'facts_ready'
+                WHERE rfp_id = :rfp_id AND submission_status = 'processing'
+                """
+            ),
+            {"rfp_id": rfp_id},
+        )
+
+
+def get_rfp_rollup(*, rfp_id: str) -> dict:
+    """
+    Returns a rollup of an RFP's current state for UI / scheduler:
+    {rfp_id, submission_status, autonomy_mode, submission_deadline,
+     vendor_count, job_counts_by_status}.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        rfp = conn.execute(
+            sa.text(
+                """
+                SELECT rfp_id, submission_status, autonomy_mode,
+                       submission_deadline, title, org_id
+                FROM rfps WHERE rfp_id = :rfp_id
+                """
+            ),
+            {"rfp_id": rfp_id},
+        ).fetchone()
+        if not rfp:
+            return {}
+        vendor_count = conn.execute(
+            sa.text("SELECT COUNT(*) FROM invited_vendors WHERE rfp_id = :rfp_id"),
+            {"rfp_id": rfp_id},
+        ).scalar()
+        job_rows = conn.execute(
+            sa.text(
+                """
+                SELECT status, COUNT(*) FROM ingestion_jobs
+                WHERE rfp_id = :rfp_id GROUP BY status
+                """
+            ),
+            {"rfp_id": rfp_id},
+        ).fetchall()
+        return {
+            "rfp_id": rfp.rfp_id,
+            "org_id": str(rfp.org_id),
+            "title": rfp.title,
+            "submission_status": rfp.submission_status,
+            "autonomy_mode": rfp.autonomy_mode,
+            "submission_deadline": rfp.submission_deadline,
+            "vendor_count": vendor_count,
+            "job_counts_by_status": {r.status: r.count for r in job_rows},
+        }
+
+
+def emit_event(
+    *, event_type: str, org_id: str, rfp_id: str, payload: dict | None = None
+) -> str:
+    """Writes an event_log row. Phase 8 delivery dispatcher reads these."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = conn.execute(
+            sa.text(
+                """
+                INSERT INTO event_log (event_type, org_id, rfp_id, payload)
+                VALUES (:event_type, :org_id, :rfp_id, CAST(:payload AS JSONB))
+                RETURNING event_id
+                """
+            ),
+            {
+                "event_type": event_type,
+                "org_id": org_id,
+                "rfp_id": rfp_id,
+                "payload": json.dumps(payload or {}),
+            },
+        ).fetchone()
+        return str(row[0])
+
+
+def facts_already_extracted(*, rfp_id: str, vendor_id: str) -> bool:
+    """
+    Returns True if extracted_facts rows exist for (rfp_id, vendor_id).
+    Used by the pipeline short-circuit in PR-E.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                """
+                SELECT 1
+                FROM extracted_facts ef
+                JOIN vendor_documents vd ON vd.doc_id = ef.doc_id
+                WHERE vd.rfp_id = :rfp_id AND ef.vendor_id = :vendor_id
+                LIMIT 1
+                """
+            ),
+            {"rfp_id": rfp_id, "vendor_id": vendor_id},
+        ).fetchone()
+        return row is not None
+
+
 def get_evaluation_setup(setup_id: str, org_id: str = None) -> EvaluationSetup:
     """
     Reads an EvaluationSetup back from the evaluation_setups table.
