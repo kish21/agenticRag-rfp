@@ -140,6 +140,27 @@ async def ingestion_node(state: PipelineState) -> dict:
     org_id = state["org_id"]
     rfp_id = state["rfp_id"]
     vendor_file_map = state["vendor_file_map"]
+
+    # ── Phase 5 PR-E: short-circuit if Phase-5 background processing already
+    # ingested+extracted facts for every vendor in this run. Checked before
+    # EvaluationSetup is constructed so the work is genuinely skipped.
+    from app.db.fact_store import facts_already_extracted  # local import
+    all_skippable = bool(vendor_file_map) and all(
+        facts_already_extracted(rfp_id=rfp_id, vendor_id=vid)
+        for vid in vendor_file_map.keys()
+    )
+    if all_skippable:
+        for vid in vendor_file_map.keys():
+            _emit(state, agent, "skipped",
+                  f"Facts already extracted for {vid} — skipping ingestion",
+                  log_msg=f"Vendor {vid}: facts from background processing "
+                          "found in PostgreSQL; ingestion skipped.")
+        _emit(state, agent, "done",
+              f"Ingestion skipped — {len(vendor_file_map)} vendors short-circuited",
+              log_msg="Background processing already produced facts for every "
+                      "vendor in this run. Skipping ingestion entirely.")
+        return {}
+
     evaluation_setup = EvaluationSetup(**state["evaluation_setup_dict"])
     try:
         _emit(state, agent, "running",
@@ -336,6 +357,18 @@ async def extraction_per_vendor(state: PipelineState) -> dict:
     vid = state["vendor_id"]
     org_id = state["org_id"]
     rfp_id = state["rfp_id"]
+
+    # ── Phase 5 PR-E: short-circuit per-vendor if facts already in PostgreSQL.
+    # Checked BEFORE EvaluationSetup construction so the work is genuinely
+    # skipped on the user-triggered path after background processing completed.
+    from app.db.fact_store import facts_already_extracted  # local import
+    if facts_already_extracted(rfp_id=rfp_id, vendor_id=vid):
+        _emit(state, agent, "skipped",
+              f"Vendor {vid} — facts already extracted, skipping",
+              log_msg=f"Vendor {vid}: extracted_facts present from background "
+                      "processing; extraction skipped.")
+        return {}
+
     evaluation_setup = EvaluationSetup(**state["evaluation_setup_dict"])
     retrieval_output_objects = state.get("retrieval_output_objects") or {}
 
