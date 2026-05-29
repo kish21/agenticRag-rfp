@@ -59,6 +59,25 @@ jobs:
     name: Backend — pytest
     runs-on: ubuntu-latest
 
+    # Phase 5 (background ingestion) added 47 tests that exercise live
+    # PostgreSQL via app.db.fact_store. Provide a postgres service so they
+    # can connect. Credentials + DB name match the app/config defaults so
+    # the test code does not need any CI-specific overrides.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: platformuser
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: agenticplatform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U platformuser -d agenticplatform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,7 +97,12 @@ jobs:
       - name: Create minimal .env for tests
         run: |
           cat > .env << 'EOF'
-          DATABASE_URL=postgresql://user:pass@localhost/db
+          DATABASE_URL=postgresql://platformuser:ci-password@localhost:5432/agenticplatform
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_DB=agenticplatform
+          POSTGRES_USER=platformuser
+          POSTGRES_PASSWORD=ci-password
           QDRANT_URL=http://localhost:6333
           SECRET_KEY=ci-test-secret-key-not-real
           LLM_PROVIDER=openai
@@ -89,7 +113,22 @@ jobs:
           LANGFUSE_HOST=http://localhost
           EOF
 
+      - name: Apply Alembic migrations
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: agenticplatform
+          POSTGRES_USER: platformuser
+          POSTGRES_PASSWORD: ci-password
+        run: PYTHONPATH=. alembic upgrade head
+
       - name: Run pytest
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: agenticplatform
+          POSTGRES_USER: platformuser
+          POSTGRES_PASSWORD: ci-password
         run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression --ignore=tests/integration
 
   # ── Job 4: Backend contract tests (no services needed — import-only) ─────
