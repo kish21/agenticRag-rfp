@@ -113,14 +113,19 @@ jobs:
           LANGFUSE_HOST=http://localhost
           EOF
 
-      - name: Apply Alembic migrations
+      - name: Bootstrap schema + mark Alembic state
+        # The repo has both app/db/schema.sql (declarative, CREATE TABLE IF
+        # NOT EXISTS) and alembic/versions/*.py (incremental). They have
+        # drifted historically — schema.sql owns the full state today, while
+        # individual migrations only cover deltas added after their cut date.
+        # Dev environments bootstrap via schema.sql, not by replaying all
+        # migrations from 0001. Mirror that here so CI sees the same shape.
         env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          POSTGRES_DB: agenticplatform
-          POSTGRES_USER: platformuser
-          POSTGRES_PASSWORD: ci-password
-        run: PYTHONPATH=. alembic upgrade head
+          PGPASSWORD: ci-password
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -h localhost -U platformuser -d agenticplatform -f app/db/schema.sql
+          PYTHONPATH=. alembic stamp head
 
       - name: Run pytest
         env:
