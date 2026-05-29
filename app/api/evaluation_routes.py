@@ -514,7 +514,6 @@ async def rerun_evaluation(
         and fresh decision_output is computed and recorded on the new run
         for the report to surface.
     """
-    import uuid as _uuid
     import sqlalchemy as sa
 
     from app.db.fact_store import get_engine
@@ -528,10 +527,10 @@ async def rerun_evaluation(
             detail=f"Cannot rerun while original status is '{original['status']}'.",
         )
 
-    new_run_id = str(_uuid.uuid4())
+    new_run_id = str(uuid.uuid4())
     engine = get_engine()
     with engine.begin() as conn:
-        conn.execute(
+        result = conn.execute(
             sa.text(
                 """
                 INSERT INTO evaluation_runs (
@@ -550,6 +549,16 @@ async def rerun_evaluation(
             ),
             {"new_id": new_run_id, "orig_id": run_id, "email": user.email},
         )
+        # Code-review fix #2: SELECT can match 0 rows if the original was
+        # deleted between _db_get_run() and the INSERT (TOCTOU race).
+        # Without this guard the endpoint would return a new_run_id for a
+        # row that never existed, then the BackgroundTask would crash on
+        # its own _db_get_run lookup with a confusing 404.
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Original run was deleted before the rerun could be cloned.",
+            )
 
     audit(
         org_id=user.org_id, run_id=new_run_id,
@@ -589,9 +598,18 @@ async def _compute_divergence(
 ) -> None:
     """3.16 — After a bypass_cache rerun finishes, compare decision_output
     headline numbers against the cached run. Persists a `divergence_flag`
-    on the new run's decision_output JSON if they differ."""
+    on the new run's decision_output JSON if they differ.
+
+    Uses the shared `extract_decision_summary` helper so Phase 7 (PDF
+    report), Phase 8 (delivery channels), and any future decision-diff
+    feature can rely on the same comparison shape. Code-review fix #1
+    (None-safe sort) lives inside that helper.
+    """
+    import json as _json
     import sqlalchemy as sa
+
     from app.db.fact_store import get_engine
+    from app.domain.decision_summary import extract_decision_summary
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -609,50 +627,42 @@ async def _compute_divergence(
     a = by_id.get(original_run_id) or {}
     b = by_id.get(new_run_id) or {}
 
-    def _signature(d: dict) -> dict:
-        return {
-            "winner": (d.get("recommended_vendor") or {}).get("vendor_id"),
-            "shortlist": sorted(
-                (v.get("vendor_id") for v in d.get("shortlisted_vendors") or []),
-            ),
-            "rejected": sorted(
-                (v.get("vendor_id") for v in d.get("rejected_vendors") or []),
-            ),
-        }
+    sig_a = extract_decision_summary(a)
+    sig_b = extract_decision_summary(b)
+    if sig_a == sig_b:
+        return
 
-    sig_a = _signature(a)
-    sig_b = _signature(b)
-    divergent = sig_a != sig_b
+    if not isinstance(b, dict):
+        # New run never wrote a decision_output (e.g., pipeline blocked).
+        # Nothing to attach the flag to; skip silently.
+        return
 
-    if divergent and isinstance(b, dict):
-        b_with_flag = dict(b)
-        b_with_flag["divergence_flag"] = {
-            "diverges_from": original_run_id,
-            "cached_signature": sig_a,
-            "fresh_signature":  sig_b,
-            "message": "Re-run with bypass_cache produced a different shortlist "
-                       "than the cached run — model is non-deterministic on "
-                       "this RFP. Review both runs.",
-        }
-        import json as _json
-        engine = get_engine()
-        with engine.begin() as conn:
-            conn.execute(
-                sa.text(
-                    """
-                    UPDATE evaluation_runs
-                    SET decision_output = CAST(:dec AS JSONB)
-                    WHERE run_id = CAST(:rid AS uuid)
-                    """
-                ),
-                {"dec": _json.dumps(b_with_flag), "rid": new_run_id},
-            )
-        audit(
-            org_id=org_id, run_id=new_run_id,
-            event_type="run.divergence_flagged", actor="system",
-            detail={"original_run_id": original_run_id, "fresh_signature": sig_b,
-                    "cached_signature": sig_a},
+    b_with_flag = dict(b)
+    b_with_flag["divergence_flag"] = {
+        "diverges_from": original_run_id,
+        "cached_signature": sig_a,
+        "fresh_signature":  sig_b,
+        "message": "Re-run with bypass_cache produced a different shortlist "
+                   "than the cached run — model is non-deterministic on "
+                   "this RFP. Review both runs.",
+    }
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                UPDATE evaluation_runs
+                SET decision_output = CAST(:dec AS JSONB)
+                WHERE run_id = CAST(:rid AS uuid)
+                """
+            ),
+            {"dec": _json.dumps(b_with_flag), "rid": new_run_id},
         )
+    audit(
+        org_id=org_id, run_id=new_run_id,
+        event_type="run.divergence_flagged", actor="system",
+        detail={"original_run_id": original_run_id, "fresh_signature": sig_b,
+                "cached_signature": sig_a},
+    )
 
 
 # ── SSE streams ────────────────────────────────────────────────────────────────
