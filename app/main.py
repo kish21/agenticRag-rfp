@@ -11,6 +11,7 @@ from app.api.tenant_routes import router as tenant_router
 from app.api.org_settings_routes import router as org_settings_router
 from app.api.chat_routes import router as chat_router
 from app.api.log_routes import router as log_router
+from app.api.rfp_routes import router as rfp_router
 from app.api.middleware import AuthMiddleware
 
 
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(org_settings_router)
     app.include_router(chat_router)
     app.include_router(log_router)
+    app.include_router(rfp_router)
 
     Info("fastapi_app", "FastAPI application info").info({"app_name": "platform_api"})
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")

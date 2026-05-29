@@ -27,6 +27,9 @@ data/documents/
 data/qdrant/
 data/seed/
 
+# Phase 5 vendor drop folders (per-RFP, per-vendor uploads)
+drops/
+
 # Test results & coverage
 test_results/
 *.xml
