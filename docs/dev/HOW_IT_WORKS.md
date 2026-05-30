@@ -19,6 +19,30 @@ before it moves on.
 
 ---
 
+## Two ways an evaluation starts
+
+There are two ways the documents get in front of the agents. Either way, the
+9-agent pipeline below is identical — only the timing differs.
+
+1. **Upload everything at once (manual mode).** You upload the RFP and all
+   vendor proposals together, set your criteria, and click Evaluate. The system
+   reads and processes everything on the spot. This is the original flow.
+
+2. **Vendors submit over a deadline window (background mode).** You create the
+   RFP, invite vendors, and set a submission deadline. Vendors drop their files
+   in over days or weeks. The system quietly stores each file as it arrives but
+   does no scoring yet. When the deadline passes, it processes every vendor in
+   the background against the same criteria. By the time you click Evaluate, the
+   facts are already extracted — so the result comes back in about 30 seconds
+   instead of several minutes.
+
+Background mode has three settings: stop after extracting facts and wait for you
+to click Evaluate (`auto_to_evaluate`, the default), or — once the PDF report
+feature ships — go all the way to a finished report automatically
+(`auto_to_report`). `manual` keeps the upload-everything-at-once behaviour.
+
+---
+
 ## Step 1 — The Planner Agent
 
 **What it does:**

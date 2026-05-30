@@ -1,6 +1,16 @@
 # Product Documentation Index
 **Enterprise Vendor Governance & Spend Intelligence Platform**
-*Last updated: 2026-05-14*
+*Last updated: 2026-05-30*
+
+> **"Phase" means two different things in this repo — don't conflate them.**
+> The **product-lifecycle phases (1–6) below** are documentation stages
+> (Strategy → Requirements → Architecture → Build → Deployment → Post-Launch).
+> The separate **production-readiness phases (1–10)** in
+> [docs/dev/PRODUCTION_READINESS_PLAN.md](../dev/PRODUCTION_READINESS_PLAN.md) and
+> [docs/dev/PERFORMANCE_AND_QUALITY_METRICS.md](../dev/PERFORMANCE_AND_QUALITY_METRICS.md)
+> are engineering workstreams (determinism, LLM cache, parallelism, background
+> ingestion, …). "Phase 5" in this index is *Deployment & Governance*; "Phase 5"
+> in the readiness plan is *background ingestion*. They are unrelated numbering schemes.
 
 ---
 

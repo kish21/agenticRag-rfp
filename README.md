@@ -161,8 +161,8 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env — set LLM_PROVIDER and API keys
 
-# 4. Run database migrations
-python scripts/migrate.py
+# 4. Run database migrations (Alembic is the source of truth)
+alembic upgrade head
 
 # 5. Start the API
 uvicorn app.main:app --reload --port 8000
@@ -263,21 +263,28 @@ Step-by-step CLI deployment guides for all platforms:
 ```
 agenticRag-rfp/
 ├── app/
-│   ├── agents/          # 9 agents — planner, ingestion, retrieval, extraction,
+│   ├── agents/          # 9 agents (flat) — planner, ingestion, retrieval, extraction,
 │   │                    #   evaluation, comparator, decision, explanation, critic
-│   ├── core/            # Provider abstractions — llm, embedding, reranker,
-│   │                    #   observability, auth, rate_limiter, org_settings
+│   ├── providers/       # Swappable backends — llm, embedding, reranker,
+│   │                    #   observability, compute, llm_cache
+│   ├── auth/            # jwt, rbac, dependencies
+│   ├── infra/           # audit, logger, rate_limiter, circuit_breaker, cost_tracker
+│   ├── retrieval/       # qdrant, pipeline (hybrid search)
+│   ├── domain/          # criteria, rfp, override, org_settings, agent_registry
+│   ├── schemas/         # output_models (Pydantic agent outputs)
+│   ├── pipeline/        # graph, nodes, state, ingestion_graph (LangGraph)
 │   ├── config/          # product.yaml (agent behaviour), platform.yaml (infra)
 │   ├── db/              # schema.sql, fact_store.py (PostgreSQL writes)
 │   ├── api/             # FastAPI routes, admin routes
-│   └── jobs/            # rate_monitor.py, cleanup.py (Modal scheduled)
-├── app_modal.py         # Modal deployment — PDF, embedding, LLM functions
+│   └── jobs/            # cleanup, rate_monitor, ingestion_watcher, deadline_processor
+├── deploy/modal.py      # Modal deployment — PDF, embedding, LLM functions
+├── alembic/             # Database migrations (source of truth — see docs/dev/migrations.md)
 ├── frontend/            # Next.js — CEO dashboard, procurement UI, admin console
 ├── docs/
 │   ├── dev/             # Backlog, platform decisions, production checklist
 │   └── product/         # Full product lifecycle documentation (32 files, 6 phases)
 ├── tests/               # Contract tests, checkpoint runner, regression tests
-├── scripts/             # migrate.py, reset_dev_data.py, debug_run.py
+├── scripts/             # reset_dev_data.py, seed_criteria.py, audit_hardcoded_values.py
 └── docker-compose.yml   # Local dev — Qdrant + PostgreSQL
 ```
 
