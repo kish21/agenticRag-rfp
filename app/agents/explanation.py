@@ -21,6 +21,7 @@ from app.schemas.output_models import (
     DecisionOutput, EvaluationOutput, ExtractionOutput,
 )
 from app.agents.critic import critic_after_explanation
+from app.infra.cost_tracker import mark_agent
 
 
 def verify_grounding(
@@ -60,6 +61,7 @@ async def _generate_vendor_narrative(
     critic verdict. When non-empty, it is prepended to the user message as
     a 'PREVIOUS ATTEMPT FAILED' preamble so the LLM corrects course."""
 
+    mark_agent("explanation_agent")  # cost attribution for this task's LLM calls
     context_facts = _build_fact_context(extraction, currency=currency)
     compliance_summary = _build_compliance_summary(evaluation)
 

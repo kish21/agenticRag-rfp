@@ -10,6 +10,33 @@ Supported providers:
 import json
 from app.config import settings
 
+# Module-level Langfuse client. The 4.x client owns a background worker thread
+# and an HTTP connection pool, so constructing one per log call (hundreds per
+# evaluation) leaked threads/sockets. Build it once, lazily, and reuse it.
+_lf_client = None
+_lf_init_failed = False
+
+
+def _get_langfuse():
+    """Return a shared Langfuse client, or None if it can't be constructed."""
+    global _lf_client, _lf_init_failed
+    if _lf_client is not None:
+        return _lf_client
+    if _lf_init_failed:
+        return None
+    try:
+        from langfuse import Langfuse
+        _lf_client = Langfuse(
+            public_key=settings.langfuse_public_key,
+            secret_key=settings.langfuse_secret_key,
+            host=settings.langfuse_host,
+        )
+        return _lf_client
+    except Exception as e:
+        _lf_init_failed = True
+        print(f"[observability] LangFuse client init failed: {e}")
+        return None
+
 
 def log_evaluation_run(
     run_id: str,
@@ -64,13 +91,10 @@ def _langfuse_log_run(
     latency_ms: int,
     org_id: str,
 ) -> None:
+    lf = _get_langfuse()
+    if lf is None:
+        return
     try:
-        from langfuse import Langfuse
-        lf = Langfuse(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_host,
-        )
         with lf.start_as_current_observation(
             name=f"{agent_name}_run",
             type="CHAIN",
@@ -96,13 +120,10 @@ def _langfuse_log_flag(
     agent: str,
     org_id: str,
 ) -> None:
+    lf = _get_langfuse()
+    if lf is None:
+        return
     try:
-        from langfuse import Langfuse
-        lf = Langfuse(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_host,
-        )
         lf.create_score(
             name=f"critic_flag_{flag_severity}",
             trace_id=run_id,

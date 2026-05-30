@@ -139,6 +139,45 @@ Things that prevent shipping to a paying customer.
 
 ---
 
+### P0.17 — JWT signing secret + dev credentials silently fall back to known constants (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `_check_auth_secrets()` added to `app/main.py` lifespan (after `_check_cors_origins`): in production (real `APP_API_KEY` set) it raises on boot if `JWT_SECRET_KEY`/`DEV_USER_PASSWORD` are unset or equal the default constant, or if `JWT_ALGORITHM=none`. Verified: guard trips with defaults, passes with strong secrets.
+
+
+**Problem.** [app/config/loader.py:217](app/config/loader.py#L217),[331](app/config/loader.py#L331) default `jwt_secret_key` to `"change-me-in-production"`, and [:223](app/config/loader.py#L223) defaults `dev_user_password` to `"devpassword2026"` — with no fail-fast. If `JWT_SECRET_KEY` is unset in any deploy, anyone can forge a token for any `org_id`/`role` (incl. `platform_admin`) and the signature verifies → full cross-tenant + admin compromise. Compounded by `login()` ([app/api/auth_routes.py:160-189](app/api/auth_routes.py#L160-L189)) seeding/authenticating a `company_admin` dev user from those defaults.
+
+**Fix.** Fail closed at startup when not in dev: if env is production (reuse the `app_api_key` production gate in `main.py`) and `JWT_SECRET_KEY` / `DEV_USER_PASSWORD` are unset or equal the default constant → raise on boot. Also pin `jwt.decode(algorithms=["HS256"])` literally (reject `none`/alg-confusion).
+
+**Effort.** Half a day.
+
+---
+
+### P0.18 — Human-override audit record written with `str()` not `json.dumps()` + no RLS org context (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `app/domain/override.py:save_override` now uses shared `get_engine()`, runs `SET LOCAL app.current_org_id` inside `engine.begin()`, and serialises both decision columns with `json.dumps(..., default=str)`. Verified `str()` produced invalid JSON where `json.dumps` round-trips. (The inline INSERT in `evaluation_routes.submit_override` already used `json.dumps` + CAST — unaffected.)
+
+
+**Problem.** [app/domain/override.py:71-72](app/domain/override.py#L71-L72) binds `str(override.original_decision)` / `str(override.new_decision)` into `::jsonb` columns — Python repr (`{'k': 'v'}`, `None`, `True`) is invalid JSON → Postgres rejects/garbles the only legal path to change a decision (**Component Contract #7**). Same function ([:43-51](app/domain/override.py#L43-L51)) builds its own `create_engine` (leaks an engine per call) and never sets `app.current_org_id`, unlike every sibling — so once P0.16 makes RLS real, the override INSERT fails the policy.
+
+**Fix.** Use `json.dumps(...)` for both decision columns; reuse `get_engine()` and set the org GUC like `org_settings.py`/`criteria.py`. Add a round-trip test (write override → read back parsed JSON).
+
+**Effort.** Half a day.
+
+---
+
+### P0.19 — `user_criteria` keyed on email only → cross-tenant read/write (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** Root cause was the DB constraint (migration `0003` put column-level `UNIQUE` on `email`). New migration `alembic/versions/0009_user_criteria_org_unique.py` drops `user_criteria_email_key`, adds `uq_user_criteria_email_org` on `(email, org_id)`. Both `chat_routes` queries now scope by `org_id` (`get_criteria` WHERE; `save_criteria` `ON CONFLICT (email, org_id)`).
+
+
+**Problem.** [app/api/chat_routes.py:167-194](app/api/chat_routes.py#L167-L194) reads `WHERE email = :email` and upserts `ON CONFLICT (email)` on `user_criteria` with **no `org_id`**, while the codebase explicitly allows the same email across orgs ([auth_routes.py:207](app/api/auth_routes.py#L207)). A user in Org B reads and overwrites the success-criteria of a same-email user in Org A. (Distinct from P0.16 — this is an app-layer query missing the tenant filter outright, the exact failure mode P0.16 warns about.)
+
+**Fix.** Add `org_id` to the WHERE and to the conflict key (`ON CONFLICT (email, org_id)`); derive `org_id` from `current_user`. Add cross-org test.
+
+**Effort.** 2 hours.
+
+---
+
 ## 🟡 P1 — Required UX
 
 Things that make the product usable rather than demoable.
@@ -250,6 +289,84 @@ green) — ISO 27001≠ISO 9001, £10M≠£1M, exact SLA clause > paraphrase.
 
 ---
 
+### P1.13 — `re_evaluate` + `override` skip `require_run_access` (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `require_run_access(user, run)` added after `_db_get_run` in both `submit_override` and `re_evaluate` (`app/api/evaluation_routes.py`).
+
+
+**Problem.** [app/api/evaluation_routes.py:880-909](app/api/evaluation_routes.py#L880-L909) (`re_evaluate`) and [:821-825](app/api/evaluation_routes.py#L821-L825) (`override`) org-scope via `_db_get_run(run_id, user.org_id)` but omit `require_run_access(user, run)` — which every sibling (`rerun`, `cancel`, `delete`, `results`) calls. Any same-org user (incl. a `department_user` with no Phase 9 visibility to the run) can re-trigger the paid LLM pipeline (cost/DoS) or override its decision on a run they cannot otherwise see. Concrete BOLA, narrower than the P0.16/P0.12 test-coverage items.
+
+**Fix.** Add `require_run_access(user, run)` after the `_db_get_run` in both handlers; add a regression test.
+
+**Effort.** 1 hour.
+
+---
+
+### P1.14 — `call_with_backoff` retries on bare `Exception` (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** Removed `Exception` from the `retry_if_exception_type` tuple in `app/infra/rate_limiter.py:call_with_backoff` — now retries only RateLimit/Timeout/InternalServer/APIConnection, matching `with_retry`.
+
+
+**Problem.** [app/infra/rate_limiter.py:94](app/infra/rate_limiter.py#L94) includes `Exception` in the tenacity `retry_if_exception_type` tuple, so a deterministic error (ValueError, JSON/parse, 401, even `CancelledError`) is retried 5× with 2-60s backoff (~30s hang) before re-raising. `call_llm()` routes every provider through this, multiplied across per-vendor fan-out. The sibling `with_retry` ([:62](app/infra/rate_limiter.py#L62)) correctly lists only transient types.
+
+**Fix.** Drop `Exception` from the set (keep RateLimit/Timeout/InternalServer/APIConnection); add the non-OpenAI providers' transient equivalents if needed.
+
+**Effort.** 1 hour.
+
+---
+
+### P1.15 — OpenAI/Azure embedding sends the entire chunk list in one request (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `_embed_openai`/`_embed_azure` now sub-batch via `_chunked(texts, 256)` and concatenate in order (`app/providers/embedding.py`). Verified chunking preserves order + full coverage over 600 items.
+
+
+**Problem.** [app/providers/embedding.py:93](app/providers/embedding.py#L93) passes `input=[t[:8000] for t in texts]` for *all* chunks at once (`process_document` → `embed_batch(all_chunks)`). OpenAI caps a single embeddings request at 2048 items / ~300k tokens; a large RFP exceeds 2048 chunks → the whole ingestion 400s. The per-item char clip bounds neither array length nor aggregate tokens.
+
+**Fix.** Sub-batch the request (≤256 items) and concatenate results in order.
+
+**Effort.** Half a day.
+
+---
+
+### P1.16 — SSE stream accepts the JWT as a URL query parameter (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `run_stream_alias` (`GET /{run_id}/stream`) now reads the JWT from the HttpOnly cookie only (`request.cookies[COOKIE_NAME]`); `?token=` removed. Frontend already opens it with `new EventSource(url, {withCredentials: true})` (`frontend/app/page.tsx`), so the cookie is sent automatically — no frontend change needed.
+
+
+**Problem.** [app/api/evaluation_routes.py:680-694](app/api/evaluation_routes.py#L680-L694) decodes `?token=` directly. URL tokens land in access/proxy logs, browser history, and `Referer` — leaking an 8h-default bearer token from a copied report URL.
+
+**Fix.** Issue a short-lived, single-use stream token (or use the cookie path) instead of the raw session JWT in the query string.
+
+**Effort.** Half a day.
+
+---
+
+### P1.17 — Extraction Postgres-save failure is swallowed (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** On `save_extraction_output` failure, `run_extraction_agent` appends a HARD `fact_store_save_failed` critic flag and recomputes the verdict (`_verdict`) → BLOCKED, so `extraction_per_vendor` isolates the vendor into `failed_vendors` instead of evaluating against missing facts. Verified HARD flag → BLOCKED.
+
+
+**Problem.** [app/agents/extraction.py:166-174](app/agents/extraction.py#L166-L174) wraps `save_extraction_output` in `try/except` that only `print()`s and still returns a non-BLOCKED verdict. The Evaluation Agent then reads facts from Postgres (**Contract #6**) and silently scores against zero facts — a DB write failure becomes a silent wrong answer that looks healthy.
+
+**Fix.** On save failure mark the vendor failed (route through `failed_vendors` / a HARD critic flag) rather than `print` + continue.
+
+**Effort.** Half a day.
+
+---
+
+### P1.18 — `PATCH /org/settings` 500s on `user.sub` (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `app/api/org_settings_routes.py:32` now passes `updated_by=user.email` (TokenData has no `sub`). Module imports cleanly.
+
+
+**Problem.** [app/api/org_settings_routes.py:32](app/api/org_settings_routes.py#L32) passes `updated_by=user.sub`, but `TokenData` ([jwt.py:34-38](app/auth/jwt.py#L34-L38)) has no `sub` field (it's `email`) → `AttributeError` → 500 on every PATCH; the `updated_by` audit field is never written. (Same file [:49](app/api/org_settings_routes.py#L49) also sets the legacy `app.org_id` GUC — folds into P0.16's naming-standardisation.)
+
+**Fix.** `user.sub` → `user.email`.
+
+**Effort.** 10 minutes.
+
+---
+
 
 ## 🔵 P2 — Architectural improvements
 
@@ -275,6 +392,8 @@ Phase 3 (LLM response cache) shipped with one exit criterion deferred to live in
 ### P2.0c — Phase 2c finish critic-as-controller
 
 Phase 2 plan promised all 9 agents under the Critic-as-controller pattern (retry-with-feedback, 3-way routing: continue / retry / block). Today only **Explanation** has the full pattern. The other 7 agents (Planner, Ingestion, Retrieval-partial, Extraction, Evaluation, Comparator, Decision) still run the critic inline and can only block. **Fix.** Promote Critic-as-controller to dedicated LangGraph nodes for Extraction + Evaluation first (highest leverage per the original Phase 2 plan); Planner / Ingestion / Comparator / Decision remain deferred as "reliable enough in smoke runs." **Effort:** 1 day for Extraction + Evaluation.
+
+> **Code-review note (2026-05-30):** the wiring is blocked by a concrete gap — `run_with_critic_retry` ([app/pipeline/critic_retry.py:90](app/pipeline/critic_retry.py#L90),[103](app/pipeline/critic_retry.py#L103),[128](app/pipeline/critic_retry.py#L128)) returns a `critic_metrics_accum` key on every branch, but `PipelineState` ([app/pipeline/state.py](app/pipeline/state.py)) declares no `Annotated[dict, _merge_dicts]` field for it. When wired into the parallel per-vendor nodes, each vendor's telemetry has no reducer → last-writer-wins clobbers all but one vendor. Add the reducer field as the first wiring step.
 
 ### P2.1 — Replace TF-IDF sparse with proper BM25 (PROMOTED TO P1.12 below — 2026-05-29)
 
@@ -327,6 +446,69 @@ Sort retrieved chunks by importance; place most important first and last. **Effo
 ### P2.13 — Contextual chunk headers
 
 Prepend each chunk with parent section summary. One extra LLM call per chunk at ingestion. **Effort:** 1 day.
+
+### P2.14 — Blocking sync I/O inside async retrieval (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `run_retrieval_agent` now wraps `get_dense_embedding`, `search_hybrid`/`search_dense`, and `rerank_candidates` in `asyncio.to_thread(...)` so the synchronous embedding/Qdrant/reranker I/O no longer blocks the event loop and the per-vendor fan-out runs concurrently.
+
+
+`run_retrieval_agent` is `async` but calls `search_hybrid`/`search_dense` + `embed_text` directly ([app/agents/retrieval.py:165](app/agents/retrieval.py#L165),[175](app/agents/retrieval.py#L175)) — synchronous Qdrant + embedding network calls, not offloaded (the reranker at :210 correctly uses `run_in_executor`). Under the per-vendor `asyncio.Semaphore` fan-out this blocks the event loop and serializes the "parallel" vendors. **Fix.** Wrap the sync calls in `run_in_executor` (or use async clients). **Effort:** Half a day.
+
+### P2.15 — `cost_tracker` by-agent attribution always "pipeline" (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** Added `mark_agent(name)` to `cost_tracker` (sets the `_current_agent` ContextVar; per-task, so concurrent per-vendor agents don't clobber). Each LLM-calling agent's run_* function calls it at entry (retrieval/extraction/evaluation/comparator/decision/explanation). Planner makes no LLM calls so it's skipped. Verified `summary()["by_agent"]` now splits per agent.
+
+
+`_current_agent` ContextVar is set once to `"pipeline"` and never per-agent, so `summary()["by_agent"]` collapses all spend into one bucket ([app/infra/cost_tracker.py:146](app/infra/cost_tracker.py#L146)) — the documented Phase 3 by-agent breakdown is non-functional (totals are correct). **Fix.** Set the ContextVar per agent/node (inside each node, per the ContextVar-in-task rule). **Effort:** Half a day.
+
+### P2.16 — Langfuse client constructed per log call (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `observability.py` now builds the Langfuse client once via a lazy module-level `_get_langfuse()` singleton (caches the client; remembers init failure to avoid retry storms). Both `_langfuse_log_run` and `_langfuse_log_flag` reuse it instead of constructing a new client (background thread + connection pool) per call.
+
+
+`_langfuse_log_run`/`_langfuse_log_flag` ([app/providers/observability.py:69](app/providers/observability.py#L69),[101](app/providers/observability.py#L101)) instantiate a new `Langfuse()` (background thread + connection pool) on every agent-run/critic-flag and never close it — thread/socket leak under load, plus a synchronous `.flush()` on the async path. **Fix.** Module-level singleton client; offload flush. **Effort:** Half a day.
+
+### P2.17 — `deadline_processor` event emission not idempotent (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `_finalize_completed_rfps` now emits the lifecycle event only for RFPs whose flip-to-`facts_ready` UPDATE returned `rowcount > 0` in this tick. The UPDATE is conditional on `status='processing'` and Postgres row-locks it, so exactly one concurrent tick wins the flip and emits; the loser (and any later tick) sees `rowcount==0` and does not re-emit. Removed the prior `NOT EXISTS` second-pass that had the TOCTOU window.
+
+
+[app/jobs/deadline_processor.py:206-238](app/jobs/deadline_processor.py#L206-L238) commits the status flip, then re-queries `facts_ready` rows lacking an event in a separate connection and emits per-row — two overlapping ticks can both pass the `NOT EXISTS` check and double-emit `rfp.facts_ready` (no unique constraint backs the dedup), contradicting the docstring's concurrency-safety claim. **Fix.** Unique index on `(rfp_id, event_type)` or emit in the same txn as the flip. **Effort:** Half a day.
+
+### P2.18 — `decision._recommendation` trusts hardcoded label order vs config thresholds (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `_recommendation` now iterates the configured thresholds sorted by value descending (`sorted(thresholds.items(), key=lambda kv: kv[1], reverse=True)`) and returns the first band the score meets — so a non-monotonic `recommendation_thresholds` edit in platform.yaml can't silently mislabel a score.
+
+
+[app/agents/decision.py:50-55](app/agents/decision.py#L50-L55) returns the first label in a fixed code order whose threshold the score meets — correct only while config thresholds stay monotonic with that order. A legal `recommendation_thresholds` edit (config is customer-editable, **Contract #5**) silently mislabels the recommendation band. **Fix.** Sort bands by configured threshold value, not code order. **Effort.** 2 hours.
+
+### P2.19 — `comparator` zero-fills missing vendors into per-criterion rankings (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** The per-criterion loop now iterates only `vendor_ids` present in `evaluation_outputs` (`for vid in (v for v in vendor_ids if v in evaluation_outputs)`), so a vendor that failed upstream is no longer given a fabricated 0 score and a real "weakest" rank position while being excluded from `overall_ranking`. Entirely-missing vendors are still warned about; an evaluated vendor lacking one criterion still gets a genuine 0.
+
+
+[app/agents/comparator.py:148-150](app/agents/comparator.py#L148-L150) iterates all `vendor_ids` and assigns a fabricated score of 0 to vendors absent from `evaluation_outputs`, giving a failed vendor a real "weakest" `relative_position` in `criteria_comparisons` while it is (correctly) excluded from `overall_ranking` and HARD-blocked by the critic — inconsistent, misleading report data. **Fix.** Iterate only vendors present in `evaluation_outputs`. **Effort.** 2 hours.
+
+### P2.20 — `CircuitBreaker` defined but never wired; half-open unbounded (code review 2026-05-30) ✅ DONE (hardened) 2026-05-30
+
+**Resolution.** Guarded `last_failure_time is None` in the OPEN branch (no more TypeError on a forced/reset OPEN), and added a `_half_open_in_flight` flag so only one trial call probes recovery while HALF_OPEN (others get a clear RuntimeError). Verified the None path raises RuntimeError, not TypeError. NOTE: still not wired into `call_llm`/provider calls — that wiring remains deferred (the primitive is now safe for when it is wired).
+
+
+[app/infra/circuit_breaker.py](app/infra/circuit_breaker.py) has no callers anywhere in `app/` (grep-confirmed) — a resilience primitive that protects nothing. If wired as-is, `last_failure_time` can be `None` in the OPEN branch (TypeError), and HALF_OPEN lets unlimited concurrent calls through instead of a single probe. **Fix.** Wire into `call_llm`/provider calls; guard the None; gate half-open to one trial. **Effort.** Half a day.
+
+### P2.21 — `rate_monitor` reads in-process counters but runs as a separate Modal cron (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** Added a shared per-minute counter table `rate_limit_stats` (migration `0010`). The rate limiter upserts into it (`_record_rate_metric` / async `_arecord_rate_metric`, offloaded via `asyncio.to_thread`) on each LLM call and on `openai.RateLimitError`, gated by new setting `RATE_METRICS_ENABLED` (default False, so the hot path is untouched until an operator opts in + deploys the cron). `check_rate_limit_health` now SUMs the table over its window instead of calling the non-existent `RateLimiter.get_instance()/get_call_count()/get_error_count()`; returns a `no_data` result if the table/DB is unavailable rather than crashing. (Still unwired into deploy/modal.py — cost decision pending, same as before.)
+
+
+[app/jobs/rate_monitor.py](app/jobs/rate_monitor.py) reads `RateLimiter.get_instance()` in-process; run as a separate Modal scheduled function it sees a fresh limiter with 0 traffic, so `error_pct` is always 0 and the alert can never fire (`_post_slack_alert` is also never called). **Fix.** Persist rate metrics (DB/Redis) and have the monitor read those, or run it in-process. **Effort.** Half a day.
+
+### P2.22 — reranker ColBERT path imports removed `ragatouille`, fails open (code review 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** `_get_colbert_model` now catches the `ragatouille` ImportError and raises a clear `RuntimeError` (configuration error — use bge/cohere or reinstall) instead of being swallowed into a silent no-rerank downgrade. The `rerank()` fallback now logs via the module `logging` logger (warning) instead of `print`, so a reranker failing open to vector-score order is visible to operators.
+
+
+[app/providers/reranker.py:24-31](app/providers/reranker.py#L24-L31),[113-128](app/providers/reranker.py#L113-L128) import `ragatouille`, which CLAUDE.md says was removed from requirements. With `RERANKER_PROVIDER=colbert` the import raises, is swallowed by the broad `except` at [:66](app/providers/reranker.py#L66), and silently downgrades to no-reranking (only a `print`) — configured reranker fails open with no operator signal. **Fix.** Remove the colbert branch or reimplement on CrossEncoder; log via the structured logger, don't `print`. **Effort.** 2 hours.
 
 ---
 

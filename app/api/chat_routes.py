@@ -163,10 +163,13 @@ async def get_criteria(
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_db),
 ):
-    """Return saved success criteria for the current user."""
+    """Return saved success criteria for the current user (scoped to their org)."""
     row = db.execute(
-        sa.text("SELECT criteria FROM user_criteria WHERE email = :email"),
-        {"email": current_user.email},
+        sa.text(
+            "SELECT criteria FROM user_criteria "
+            "WHERE email = :email AND org_id = :org_id"
+        ),
+        {"email": current_user.email, "org_id": current_user.org_id},
     ).fetchone()
     return CriteriaResponse(criteria=row[0] if row else [])
 
@@ -183,7 +186,7 @@ async def save_criteria(
         sa.text("""
             INSERT INTO user_criteria (email, org_id, criteria, updated_at)
             VALUES (:email, :org_id, CAST(:criteria AS jsonb), NOW())
-            ON CONFLICT (email)
+            ON CONFLICT (email, org_id)
             DO UPDATE SET criteria = CAST(:criteria AS jsonb), updated_at = NOW()
         """),
         {

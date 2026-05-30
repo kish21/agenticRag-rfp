@@ -21,6 +21,7 @@ from app.schemas.output_models import (
     EvaluationOutput, ComparatorOutput, ComplianceStatus,
 )
 from app.agents.critic import critic_after_decision
+from app.infra.cost_tracker import mark_agent
 
 
 def route_to_approval_tier(contract_value: float) -> ApprovalRouting:
@@ -48,9 +49,15 @@ def route_to_approval_tier(contract_value: float) -> ApprovalRouting:
 
 
 def _recommendation(score: float) -> str:
+    """Return the highest band the score qualifies for.
+
+    Sorts the configured thresholds by value (descending) rather than trusting a
+    fixed label order, so a customer editing recommendation_thresholds in
+    platform.yaml to non-monotonic values can't silently mislabel a score.
+    """
     thresholds = settings.platform.governance.recommendation_thresholds
-    for label in ("strongly_recommended", "recommended", "acceptable", "marginal"):
-        if score >= thresholds.get(label, 0.0):
+    for label, threshold in sorted(thresholds.items(), key=lambda kv: kv[1], reverse=True):
+        if score >= threshold:
             return label
     return "marginal"
 
@@ -109,6 +116,7 @@ async def run_decision_agent(
     comparator_output:  ComparatorOutput from the Comparator Agent
     contract_value:     used for approval tier routing (GBP)
     """
+    mark_agent("decision_agent")  # cost attribution for this task's LLM calls
     decision_id = str(uuid.uuid4())
 
     rejected_vendors = []

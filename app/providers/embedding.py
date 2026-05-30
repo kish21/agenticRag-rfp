@@ -16,6 +16,17 @@ from app.config import settings
 
 _local_model = None
 
+# OpenAI / Azure embeddings cap a single request at 2048 input items (and ~300k
+# tokens). A large RFP can produce more chunks than that, so the API providers
+# must sub-batch or the whole ingestion fails with a 400. 256 keeps each request
+# well under both the item and token ceilings.
+_API_EMBED_BATCH_SIZE = 256
+
+
+def _chunked(items: list[str], size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
 
 def _get_active_model_name() -> str:
     provider = settings.embedding_provider.lower()
@@ -90,8 +101,11 @@ def _embed_openai(texts: list[str]) -> list[list[float]]:
         kwargs["http_client"] = http_client
     client = OpenAI(**kwargs)
     model = settings.platform.embedding.openai_model
-    response = client.embeddings.create(model=model, input=[t[:8000] for t in texts])
-    return [item.embedding for item in response.data]
+    vectors: list[list[float]] = []
+    for batch in _chunked(texts, _API_EMBED_BATCH_SIZE):
+        response = client.embeddings.create(model=model, input=[t[:8000] for t in batch])
+        vectors.extend(item.embedding for item in response.data)
+    return vectors
 
 
 # ── Azure OpenAI backend ──────────────────────────────────────────────────────
@@ -108,11 +122,12 @@ def _embed_azure(texts: list[str]) -> list[list[float]]:
     if http_client:
         kwargs["http_client"] = http_client
     client = AzureOpenAI(**kwargs)
-    response = client.embeddings.create(
-        model=settings.azure_openai_embedding_deployment,
-        input=[t[:8000] for t in texts],
-    )
-    return [item.embedding for item in response.data]
+    deployment = settings.azure_openai_embedding_deployment
+    vectors: list[list[float]] = []
+    for batch in _chunked(texts, _API_EMBED_BATCH_SIZE):
+        response = client.embeddings.create(model=deployment, input=[t[:8000] for t in batch])
+        vectors.extend(item.embedding for item in response.data)
+    return vectors
 
 
 # ── Local sentence-transformers backend (CPU) ─────────────────────────────────

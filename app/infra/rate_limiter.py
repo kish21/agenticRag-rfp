@@ -50,6 +50,42 @@ class RateLimiter:
 _rate_limiter = RateLimiter()
 
 
+# ── Cross-process rate metrics (read by app/jobs/rate_monitor.py) ─────────────
+# The monitor runs as a separate Modal cron and cannot see this process's
+# in-memory counters, so we persist per-minute counts to Postgres. Best-effort
+# and gated by RATE_METRICS_ENABLED — when off (default), the hot path is
+# untouched. Never raises into the caller.
+
+def _record_rate_metric(*, calls: int = 0, errors: int = 0) -> None:
+    if not getattr(settings, "rate_metrics_enabled", False):
+        return
+    try:
+        import sqlalchemy as sa
+        from app.db.fact_store import get_engine
+        with get_engine().begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO rate_limit_stats (minute_bucket, total_calls, rate_limit_errors)
+                    VALUES (date_trunc('minute', now()), :c, :e)
+                    ON CONFLICT (minute_bucket) DO UPDATE SET
+                        total_calls = rate_limit_stats.total_calls + EXCLUDED.total_calls,
+                        rate_limit_errors = rate_limit_stats.rate_limit_errors + EXCLUDED.rate_limit_errors
+                    """
+                ),
+                {"c": calls, "e": errors},
+            )
+    except Exception:
+        pass  # metrics must never break an LLM call
+
+
+async def _arecord_rate_metric(*, calls: int = 0, errors: int = 0) -> None:
+    """Async wrapper — offloads the sync DB write off the event loop."""
+    if not getattr(settings, "rate_metrics_enabled", False):
+        return
+    await asyncio.to_thread(_record_rate_metric, calls=calls, errors=errors)
+
+
 def with_retry(max_attempts: int = 5):
     """
     Decorator for LLM API calls with exponential backoff.
@@ -71,7 +107,12 @@ def with_retry(max_attempts: int = 5):
         @wraps(func)
         async def wrapper(*args, **kwargs):
             await _rate_limiter.acquire()
-            return await func(*args, **kwargs)
+            await _arecord_rate_metric(calls=1)
+            try:
+                return await func(*args, **kwargs)
+            except openai.RateLimitError:
+                await _arecord_rate_metric(errors=1)
+                raise
         return wrapper
     return decorator
 
@@ -91,12 +132,16 @@ async def call_with_backoff(fn, max_attempts: int = 5):
             openai.APITimeoutError,
             openai.InternalServerError,
             openai.APIConnectionError,
-            Exception,
         )),
         reraise=True
     )
     async def _call():
-        return await fn()
+        await _arecord_rate_metric(calls=1)
+        try:
+            return await fn()
+        except openai.RateLimitError:
+            await _arecord_rate_metric(errors=1)
+            raise
 
     return await _call()
 
@@ -119,6 +164,11 @@ async def call_openai_with_backoff(client, **kwargs):
         reraise=True
     )
     async def _call():
-        return await client.chat.completions.create(**kwargs)
+        await _arecord_rate_metric(calls=1)
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except openai.RateLimitError:
+            await _arecord_rate_metric(errors=1)
+            raise
 
     return await _call()

@@ -161,6 +161,14 @@ def _finalize_completed_rfps() -> tuple[int, int]:
     engine = get_engine()
     finalized = 0
     events = 0
+    # Collect the RFPs THIS tick actually transitioned. We emit only for those,
+    # so two overlapping ticks cannot both emit for the same RFP: the flip
+    # UPDATE is conditional on status='processing', and Postgres row-locks it, so
+    # exactly one concurrent tick gets rowcount==1; the loser sees rowcount==0
+    # and does not emit. A later (sequential) tick also sees status already
+    # 'facts_ready' → rowcount==0 → no re-emit. This replaces the previous
+    # NOT EXISTS check, which had a TOCTOU window between the two passes.
+    winners: list[tuple[str, str, str]] = []  # (rfp_id, org_id, autonomy_mode)
     with engine.begin() as conn:
         candidates = conn.execute(
             sa.text(
@@ -191,49 +199,34 @@ def _finalize_completed_rfps() -> tuple[int, int]:
                 # advance — admin needs to triage.
                 continue
 
-            conn.execute(
+            result = conn.execute(
                 sa.text(
                     "UPDATE rfps SET submission_status = 'facts_ready' "
                     "WHERE rfp_id = :r AND submission_status = 'processing'"
                 ),
                 {"r": r.rfp_id},
             )
-            finalized += 1
-        # Emit events OUTSIDE the candidates loop so the UPDATE commit happens
-        # before downstream readers (event_log already commits per-row).
+            if result.rowcount > 0:
+                finalized += 1
+                winners.append((r.rfp_id, r.org_id, r.autonomy_mode))
 
-    # Second pass for events — separate txn so emit_event's own commit is clean.
-    with engine.connect() as conn:
-        ready = conn.execute(
-            sa.text(
-                """
-                SELECT rfp_id, org_id::text AS org_id, autonomy_mode
-                FROM rfps
-                WHERE submission_status = 'facts_ready'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM event_log e
-                    WHERE e.rfp_id = rfps.rfp_id
-                      AND e.event_type IN ('rfp.facts_ready','rfp.evaluation_failed')
-                  )
-                """
-            )
-        ).fetchall()
-
-    for r in ready:
-        if r.autonomy_mode == "auto_to_report":
+    # Emit events only for the RFPs this tick flipped — outside the flip txn so
+    # emit_event's own commit is clean, but gated on the flip we won above.
+    for rfp_id, org_id, autonomy_mode in winners:
+        if autonomy_mode == "auto_to_report":
             # Phase 7 not yet implemented — emit failure event and stop.
             emit_event(
                 event_type="rfp.evaluation_failed",
-                org_id=r.org_id,
-                rfp_id=r.rfp_id,
+                org_id=org_id,
+                rfp_id=rfp_id,
                 payload={"reason": "Phase 7 PDF not yet implemented"},
             )
         else:
             emit_event(
                 event_type="rfp.facts_ready",
-                org_id=r.org_id,
-                rfp_id=r.rfp_id,
-                payload={"autonomy_mode": r.autonomy_mode},
+                org_id=org_id,
+                rfp_id=rfp_id,
+                payload={"autonomy_mode": autonomy_mode},
             )
         events += 1
     return finalized, events

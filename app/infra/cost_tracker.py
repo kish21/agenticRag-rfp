@@ -160,6 +160,35 @@ def set_run_context(run_id: str, agent: str = "unknown"):
         _current_agent.reset(agent_token)
 
 
+@contextmanager
+def set_current_agent(agent: str):
+    """Set the active agent label for cost attribution for the duration of the block.
+
+    `set_run_context` sets the run once at pipeline scope with agent="pipeline";
+    without re-setting per agent every LLM call is bucketed under "pipeline" and
+    the by-agent cost breakdown is useless. Each agent's run_* function enters
+    this so `record_llm_call` attributes its calls correctly. ContextVars are
+    per-task, so concurrent per-vendor agents do not clobber each other.
+    """
+    token = _current_agent.set(agent)
+    try:
+        yield
+    finally:
+        _current_agent.reset(token)
+
+
+def mark_agent(agent: str) -> None:
+    """Set the active agent label for cost attribution (no reset).
+
+    One-liner for the top of an agent's run_* function. ContextVars are copied
+    per asyncio task, so under the per-vendor fan-out each agent task sets its own
+    label without clobbering siblings; the label simply persists for the rest of
+    that task (which only runs that one agent's work). Prefer this over editing
+    every LLM call site. Use `set_current_agent` when you need a scoped reset.
+    """
+    _current_agent.set(agent)
+
+
 def record_llm_call(
     model: str,
     prompt_tokens: int,

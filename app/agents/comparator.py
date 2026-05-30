@@ -17,6 +17,7 @@ from app.schemas.output_models import (
     VendorCriterionComparison,
 )
 from app.agents.critic import critic_after_comparator
+from app.infra.cost_tracker import mark_agent
 
 
 def _relative_position(rank: int, total: int) -> str:
@@ -117,6 +118,7 @@ async def run_comparator_agent(
     evaluation_setup: EvaluationSetup,
     evaluation_outputs: dict[str, EvaluationOutput],
 ) -> tuple[ComparatorOutput, object]:
+    mark_agent("comparator_agent")  # cost attribution for this task's LLM calls
     comparison_id = str(uuid.uuid4())
     warnings: list[str] = []
 
@@ -140,12 +142,18 @@ async def run_comparator_agent(
         vendor_scores: dict[str, int] = {}
         vendor_evidences: dict[str, list[str]] = {}
 
-        for vid in vendor_ids:
+        # Only compare vendors that actually produced an evaluation output.
+        # Zero-filling vendors that failed upstream would give them a real
+        # "weakest" rank position in the per-criterion comparison while they are
+        # (correctly) excluded from overall_ranking — inconsistent, misleading
+        # report data. Entirely-missing vendors are warned about above.
+        for vid in (v for v in vendor_ids if v in evaluation_outputs):
             cs = score_lookup.get(vid, {}).get(criterion.criterion_id)
             if cs:
                 vendor_scores[vid] = cs.raw_score
                 vendor_evidences[vid] = cs.evidence_used
             else:
+                # Vendor evaluated but lacks this specific criterion — a genuine 0.
                 vendor_scores[vid] = 0
                 vendor_evidences[vid] = []
                 warnings.append(f"No score for vendor {vid} on criterion {criterion.criterion_id}")

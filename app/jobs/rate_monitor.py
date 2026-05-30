@@ -1,5 +1,6 @@
 import datetime
 import httpx
+import sqlalchemy as sa
 
 from app.providers.observability import log_critic_flag
 
@@ -14,16 +15,48 @@ async def check_rate_limit_health(
     Checks if OpenAI rate-limit errors occurred in the last hour.
     Alerts via LangFuse if error rate > 2%.
     Run every 30 minutes via Modal scheduled function.
+
+    Reads from the shared `rate_limit_stats` table (written by the API workers'
+    rate limiter when RATE_METRICS_ENABLED=true), NOT in-process counters — the
+    monitor runs in a different process than the workers, so in-memory state is
+    always empty here.
     """
     now = datetime.datetime.utcnow()
     window_start = now - datetime.timedelta(hours=_LOOKBACK_HOURS)
 
-    # Read rate-limit counters from the in-process rate limiter state
-    from app.infra.rate_limiter import RateLimiter  # lazy import — avoids circular
+    from app.db.fact_store import get_engine  # lazy import — avoids circular
 
-    rl: RateLimiter = RateLimiter.get_instance()
-    total_calls: int = rl.get_call_count(since=window_start)
-    rate_limit_errors: int = rl.get_error_count(since=window_start, status=429)
+    total_calls = 0
+    rate_limit_errors = 0
+    try:
+        with get_engine().connect() as conn:
+            row = conn.execute(
+                sa.text(
+                    """
+                    SELECT COALESCE(SUM(total_calls), 0)        AS total_calls,
+                           COALESCE(SUM(rate_limit_errors), 0)  AS rate_limit_errors
+                    FROM rate_limit_stats
+                    WHERE minute_bucket >= :since
+                    """
+                ),
+                {"since": window_start},
+            ).fetchone()
+            if row is not None:
+                total_calls = int(row.total_calls)
+                rate_limit_errors = int(row.rate_limit_errors)
+    except Exception as e:
+        # No metrics table / DB unavailable — report a no-data result rather than
+        # crashing the cron.
+        return {
+            "window_start": window_start.isoformat(),
+            "window_end": now.isoformat(),
+            "total_calls": 0,
+            "rate_limit_errors": 0,
+            "error_pct": 0.0,
+            "alert_triggered": False,
+            "no_data": True,
+            "error": str(e),
+        }
 
     error_pct = (rate_limit_errors / total_calls * 100) if total_calls > 0 else 0.0
     alert_triggered = error_pct > _ALERT_THRESHOLD_PCT
