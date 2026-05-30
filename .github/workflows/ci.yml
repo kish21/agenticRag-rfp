@@ -109,6 +109,8 @@ jobs:
           POSTGRES_DB=agenticplatform
           POSTGRES_USER=platformuser
           POSTGRES_PASSWORD=ci-password
+          POSTGRES_APP_USER=platform_app
+          POSTGRES_APP_PASSWORD=platform_app_pass2026
           QDRANT_URL=http://localhost:6333
           SECRET_KEY=ci-test-secret-key-not-real
           LLM_PROVIDER=openai
@@ -140,6 +142,11 @@ jobs:
           POSTGRES_DB: agenticplatform
           POSTGRES_USER: platformuser
           POSTGRES_PASSWORD: ci-password
+          # Non-superuser app role (created by schema.sql) that RLS governs.
+          # The tenant-isolation test connects as this role; password must match
+          # the literal in app/db/schema.sql.
+          POSTGRES_APP_USER: platform_app
+          POSTGRES_APP_PASSWORD: platform_app_pass2026
         run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression --ignore=tests/integration
 
   # ── Job 4: Backend contract tests (no services needed — import-only) ─────

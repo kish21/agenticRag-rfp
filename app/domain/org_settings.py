@@ -74,7 +74,7 @@ def get_org_settings(org_id: str) -> OrgSettings:
     cols = ", ".join(_ALL_FIELDS)
     eng = get_engine()
     with eng.connect() as conn:
-        conn.execute(sa.text("SET LOCAL app.org_id = :o"), {"o": org_id})
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :o"), {"o": org_id})
         row = conn.execute(sa.text(
             f"SELECT {cols} FROM org_settings WHERE org_id = :o"
         ), {"o": org_id}).fetchone()
@@ -107,7 +107,7 @@ def upsert_org_settings(org_id: str, updated_by: str, **fields) -> OrgSettings:
 
     eng = get_engine()
     with eng.begin() as conn:
-        conn.execute(sa.text("SET LOCAL app.org_id = :o"), {"o": org_id})
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :o"), {"o": org_id})
         payload = new_state.model_dump(exclude={"org_id"})
         payload["org_id"] = org_id
         payload["updated_by"] = updated_by

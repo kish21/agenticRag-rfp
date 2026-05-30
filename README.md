@@ -26,7 +26,7 @@ This platform replaces the manual, siloed process with a 9-agent AI pipeline tha
 - **9-Agent Pipeline** — Planner → Ingestion → Retrieval → Extraction → Evaluation → Comparator → Decision → Explanation → Critic, each with a typed Pydantic output model
 - **Grounded Extraction** — every extracted fact contains a verbatim quote from the source document; the Critic agent hard-blocks the pipeline if a grounding check fails
 - **Full Audit Trail** — every vendor decision and every human override is recorded in an immutable audit log, retained for 7 years
-- **Multi-Tenant** — org_id isolation enforced at three independent layers: JWT extraction, PostgreSQL Row-Level Security, and Qdrant query filters
+- **Multi-Tenant** — org_id isolation enforced at three independent layers: JWT extraction, PostgreSQL Row-Level Security, and Qdrant query filters. RLS is real, not nominal: the app connects as a dedicated **non-superuser** role under `FORCE ROW LEVEL SECURITY`, and every connection is stamped with the request's org. See [docs/dev/TENANT_ISOLATION.md](docs/dev/TENANT_ISOLATION.md)
 - **Multi-Cloud** — swap LLM, embedding, reranker, and observability providers via a single `.env` change; no code modifications required
 
 ---

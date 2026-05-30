@@ -12,7 +12,7 @@ from app.api.org_settings_routes import router as org_settings_router
 from app.api.chat_routes import router as chat_router
 from app.api.log_routes import router as log_router
 from app.api.rfp_routes import router as rfp_router
-from app.api.middleware import AuthMiddleware
+from app.api.middleware import OrgContextMiddleware
 
 
 def _run_migrations() -> None:
@@ -92,9 +92,10 @@ def _mark_orphaned_runs() -> None:
     """On startup, any run still 'running' was orphaned by a previous crash/restart."""
     try:
         import sqlalchemy as sa
-        from app.db.fact_store import get_engine
+        from app.db.fact_store import get_admin_engine
         from app.infra.audit import audit
-        engine = get_engine()
+        # Cross-org startup sweep — runs before any request/org context exists.
+        engine = get_admin_engine()
         with engine.begin() as conn:
             rows = conn.execute(
                 sa.text("SELECT run_id::text, org_id::text FROM evaluation_runs WHERE status = 'running'")
@@ -127,8 +128,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # AuthMiddleware must be added FIRST — before CORS
-    app.add_middleware(AuthMiddleware)
+    # OrgContextMiddleware must be added FIRST — before CORS — so the tenant
+    # ContextVar is bound before any handler (and its DB connections) runs.
+    app.add_middleware(OrgContextMiddleware)
 
     app.add_middleware(
         CORSMiddleware,

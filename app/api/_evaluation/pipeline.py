@@ -18,6 +18,7 @@ from app.infra.cost_tracker import set_run_context, get_run_cost, clear_run_cost
 from app.schemas.output_models import EvaluationSetup
 from app.domain.org_settings import get_org_settings
 from app.db.fact_store import get_engine
+from app.db.session import org_context
 from app.pipeline.graph import evaluation_graph
 from app.pipeline.state import PipelineState, _merge_critic_metrics
 
@@ -40,6 +41,13 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
     rfp_logger.start_run(run_id=run_id, org_id=org_id, rfp_id="", vendor_count=0)
     cost_ctx = set_run_context(run_id=run_id, agent="pipeline")
     cost_ctx.__enter__()
+
+    # Bind the tenant ContextVar for the whole background run so every DB
+    # connection it opens (the _db_* helpers carry no org_id of their own) is
+    # stamped with app.current_org_id and passes RLS (P0.16). Exited last in
+    # finally, after the cost-update write which also needs the context.
+    _org_cm = org_context(org_id)
+    _org_cm.__enter__()
 
     try:
         # ── 1. Load run data from PostgreSQL ──────────────────────────────────
@@ -249,3 +257,4 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             except Exception:
                 pass
             clear_run_cost(run_id)
+        _org_cm.__exit__(None, None, None)

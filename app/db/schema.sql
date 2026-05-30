@@ -568,7 +568,7 @@ DO $$ BEGIN
     WHERE tablename='org_settings' AND policyname='org_settings_isolation'
   ) THEN
     CREATE POLICY org_settings_isolation ON org_settings
-        USING (org_id = current_setting('app.org_id', true));
+        USING (org_id = current_setting('app.current_org_id', true));
   END IF;
 END $$;
 
@@ -578,7 +578,7 @@ DO $$ BEGIN
     WHERE tablename='org_settings_audit' AND policyname='org_settings_audit_isolation'
   ) THEN
     CREATE POLICY org_settings_audit_isolation ON org_settings_audit
-        USING (org_id = current_setting('app.org_id', true));
+        USING (org_id = current_setting('app.current_org_id', true));
   END IF;
 END $$;
 
@@ -816,3 +816,72 @@ CREATE TABLE IF NOT EXISTS llm_response_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_cache_created ON llm_response_cache(created_at);
 CREATE INDEX IF NOT EXISTS idx_llm_cache_model   ON llm_response_cache(model);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TENANT ISOLATION — make Row-Level Security actually bite (P0.16)
+-- ════════════════════════════════════════════════════════════════════════════
+-- Two things were missing before, which made every RLS policy above inert:
+--   1. audit_log and access_audit_log had RLS ENABLED but NO policy — under a
+--      non-owner role that means deny-all, so they get policies here.
+--   2. The application connected as the table OWNER (a superuser), and Postgres
+--      exempts the owner/superuser from RLS unless FORCE is set. We now (a)
+--      FORCE RLS on every protected table AND (b) introduce a dedicated
+--      NON-superuser, NON-owner login role `platform_app` that the app connects
+--      as at runtime. Either alone is insufficient; together RLS is enforced.
+-- The owner role (platformuser) is still used for DDL/migrations, identity/auth
+-- lookups, and cross-org system jobs — see app/db/session.py.
+
+-- 1 ── policies for the two audit tables that lacked them ────────────────────
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_audit_log') THEN
+        CREATE POLICY rls_audit_log ON audit_log
+            USING (org_id::text = current_setting('app.current_org_id', true));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_access_audit_log') THEN
+        CREATE POLICY rls_access_audit_log ON access_audit_log
+            USING (org_id::text = current_setting('app.current_org_id', true));
+    END IF;
+END $$;
+
+-- 2 ── FORCE RLS so the policy applies even to the table owner ───────────────
+ALTER TABLE evaluation_setups        FORCE ROW LEVEL SECURITY;
+ALTER TABLE evaluation_runs          FORCE ROW LEVEL SECURITY;
+ALTER TABLE vendor_documents         FORCE ROW LEVEL SECURITY;
+ALTER TABLE extracted_certifications FORCE ROW LEVEL SECURITY;
+ALTER TABLE extracted_insurance      FORCE ROW LEVEL SECURITY;
+ALTER TABLE extracted_slas           FORCE ROW LEVEL SECURITY;
+ALTER TABLE extracted_projects       FORCE ROW LEVEL SECURITY;
+ALTER TABLE extracted_pricing        FORCE ROW LEVEL SECURITY;
+ALTER TABLE extracted_facts          FORCE ROW LEVEL SECURITY;
+ALTER TABLE decisions                FORCE ROW LEVEL SECURITY;
+ALTER TABLE audit_overrides          FORCE ROW LEVEL SECURITY;
+ALTER TABLE approvals                FORCE ROW LEVEL SECURITY;
+ALTER TABLE audit_log                FORCE ROW LEVEL SECURITY;
+ALTER TABLE access_audit_log         FORCE ROW LEVEL SECURITY;
+ALTER TABLE users                    FORCE ROW LEVEL SECURITY;
+ALTER TABLE org_criteria_templates   FORCE ROW LEVEL SECURITY;
+ALTER TABLE dept_criteria_templates  FORCE ROW LEVEL SECURITY;
+ALTER TABLE org_settings             FORCE ROW LEVEL SECURITY;
+ALTER TABLE org_settings_audit       FORCE ROW LEVEL SECURITY;
+ALTER TABLE user_departments         FORCE ROW LEVEL SECURITY;
+ALTER TABLE rfp_collaborators        FORCE ROW LEVEL SECURITY;
+ALTER TABLE approval_assignments     FORCE ROW LEVEL SECURITY;
+
+-- 3 ── dedicated non-superuser application role ──────────────────────────────
+-- DEV/CI bootstrap password only. PRODUCTION MUST rotate it and set
+-- POSTGRES_APP_PASSWORD to match:  ALTER ROLE platform_app PASSWORD '<secret>';
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'platform_app') THEN
+        CREATE ROLE platform_app LOGIN PASSWORD 'platform_app_pass2026'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
+END $$;
+
+GRANT USAGE ON SCHEMA public TO platform_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO platform_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO platform_app;
+-- Cover tables/sequences created by future migrations (run as the owner).
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO platform_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO platform_app;

@@ -27,7 +27,9 @@ from typing import Optional
 
 import sqlalchemy as sa
 
-from app.db.fact_store import emit_event, get_engine
+# System cron (cross-org deadline scan + per-org triggers): use the RLS-exempt
+# admin engine. Aliased to get_engine to keep the call sites unchanged.
+from app.db.fact_store import emit_event, get_admin_engine as get_engine
 from app.pipeline.ingestion_graph import IngestionAgents, process_job
 
 logger = logging.getLogger("phase5.deadline_processor")

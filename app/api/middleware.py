@@ -1,65 +1,70 @@
 """
-Request middleware for PostgreSQL RLS activation.
+Per-request tenant-context middleware for PostgreSQL RLS (P0.16).
 
-Every authenticated request sets app.current_org_id in PostgreSQL
-so row-level security policies can enforce tenant isolation.
+Reads org_id from the verified JWT (cookie or Bearer header) and binds it to
+the request's ContextVar so the app-engine connection listener stamps
+``app.current_org_id`` onto every connection the request opens. RLS policies
+(``org_id::text = current_setting('app.current_org_id', true)``) then enforce
+tenant isolation at the database, underneath the application's WHERE filters.
 
-This runs BEFORE any route handler executes.
-The org_id comes from the verified JWT token — never from the request body.
+This is implemented as a PURE ASGI middleware on purpose. Starlette's
+``BaseHTTPMiddleware`` runs the downstream app in a separate anyio task, so a
+ContextVar set in its ``dispatch`` does NOT propagate to the route handler —
+which is exactly the silent no-op this fix replaces. A pure ASGI middleware
+sets the ContextVar in the same context that schedules the endpoint, so it
+propagates to both async and threadpool-run sync handlers.
+
+The org_id always comes from the cryptographically verified token — never from
+the request body or a header the client controls directly.
 """
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
 from jose import JWTError
-from app.auth.jwt import decode_token
-import sqlalchemy as sa
-from app.db.fact_store import get_engine
+from starlette.requests import HTTPConnection
 
-# Routes that do not require auth and do not need RLS
+from app.auth.dependencies import COOKIE_NAME
+from app.auth.jwt import decode_token
+from app.db.session import _current_org_id
+
+# Routes that do not require auth and carry no tenant context.
 PUBLIC_ROUTES = {
     "/health",
     "/api/v1/auth/token",
+    "/api/v1/auth/signup",
     "/docs",
     "/openapi.json",
-    "/redoc"
+    "/redoc",
 }
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware that:
-    1. Extracts org_id from JWT on every authenticated request
-    2. Sets app.current_org_id in PostgreSQL for RLS enforcement
-    3. Attaches token_data to request.state for route handlers
-    """
+def _extract_org_id(scope) -> str | None:
+    """Best-effort org_id from the request's JWT. Returns None when absent or
+    invalid — the handler's own auth dependency will still 401 as appropriate."""
+    conn = HTTPConnection(scope)
+    token = conn.cookies.get(COOKIE_NAME)
+    if not token:
+        auth = conn.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        return None
+    try:
+        return decode_token(token).org_id
+    except JWTError:
+        return None
 
-    async def dispatch(self, request: Request, call_next) -> Response:
-        if request.url.path in PUBLIC_ROUTES:
-            return await call_next(request)
 
-        auth_header = request.headers.get("Authorization", "")
-        token_data = None
+class OrgContextMiddleware:
+    """Pure ASGI middleware: bind the request's tenant to the org ContextVar."""
 
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-            try:
-                token_data = decode_token(token)
-                request.state.user = token_data
-            except JWTError:
-                pass  # Route handler will return 401 via Depends
+    def __init__(self, app):
+        self.app = app
 
-        if token_data:
-            try:
-                engine = get_engine()
-                with engine.connect() as conn:
-                    conn.execute(
-                        sa.text("SET LOCAL app.current_org_id = :org_id"),
-                        {"org_id": token_data.org_id}
-                    )
-                    conn.commit()
-            except Exception as e:
-                # Log but do not block — RLS policies will catch
-                # unauthorised access even without this hint
-                print(f"RLS context setting failed: {e}")
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("path") in PUBLIC_ROUTES:
+            return await self.app(scope, receive, send)
 
-        return await call_next(request)
+        org_id = _extract_org_id(scope)
+        token = _current_org_id.set(org_id)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _current_org_id.reset(token)

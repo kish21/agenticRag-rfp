@@ -46,7 +46,7 @@ async def reset_org_settings(
 
     eng = get_engine()
     with eng.begin() as conn:
-        conn.execute(sa.text("SET LOCAL app.org_id = :o"), {"o": user.org_id})
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :o"), {"o": user.org_id})
         conn.execute(
             sa.text("DELETE FROM org_settings WHERE org_id = :o"),
             {"o": user.org_id},

@@ -24,12 +24,13 @@ async def check_rate_limit_health(
     now = datetime.datetime.utcnow()
     window_start = now - datetime.timedelta(hours=_LOOKBACK_HOURS)
 
-    from app.db.fact_store import get_engine  # lazy import — avoids circular
+    from app.db.fact_store import get_admin_engine  # lazy import — avoids circular
 
     total_calls = 0
     rate_limit_errors = 0
     try:
-        with get_engine().connect() as conn:
+        # System cron with no org context — admin engine (RLS-exempt).
+        with get_admin_engine().connect() as conn:
             row = conn.execute(
                 sa.text(
                     """

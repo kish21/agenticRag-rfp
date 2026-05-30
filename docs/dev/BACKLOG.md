@@ -47,7 +47,7 @@ An external auditor produced 8 work-streams to get from "strong prototype" to "e
 
 | # | Work-stream | Verified status | What's actually left |
 |---|---|---|---|
-| **E1** | Tenant isolation | 🔴 OPEN — see **P0.16** | RLS is inert (no-op middleware + owner-bypass / no FORCE RLS). Auditor missed the FORCE root cause. |
+| **E1** | Tenant isolation | ✅ DONE — see **P0.16** | RLS now enforces: non-superuser `platform_app` role + FORCE RLS + same-connection org context (pure-ASGI middleware). Proven by `tests/test_tenant_isolation_rls.py`; reviewer note `docs/dev/TENANT_ISOLATION.md`. |
 | **E2** | Auth hardening | 🔴 OPEN — real bugs | env-aware `secure` cookie; fix `UNIQUE(email)` vs `ON CONFLICT(email,org_id)`; session revocation; verify invite/reset flows |
 | **E3** | Evidence quality / benchmark | 🟡 OPEN — real gap | grounding built; **no held-out annotated benchmark + measured retrieval/extraction/citation metrics** |
 | **E4** | Buyer-ready reports | 🟢 ~85% DONE (#176/#178) | **only DOCX + an override-history section** remain |
@@ -83,7 +83,11 @@ Position as **evidence-grounded, audit-ready vendor evaluation for regulated pro
 
 Things that prevent shipping to a paying customer.
 
-### P0.16 — Tenant isolation: PostgreSQL RLS is currently INERT (external audit 2026-05-30)
+### P0.16 — Tenant isolation: PostgreSQL RLS is currently INERT (external audit 2026-05-30) ✅ DONE 2026-05-30
+
+**Resolution.** RLS now enforces. (a) New dedicated `platform_app` role — `LOGIN NOSUPERUSER NOBYPASSRLS` — is the runtime app role (`app/db/session.py`, `fact_store.get_engine`); the owner/superuser `platformuser` is used only for DDL, identity/auth (`get_admin_db`), and cross-org system jobs. (b) `FORCE ROW LEVEL SECURITY` on all 22 protected tables + policies added for the two audit tables that lacked them (`audit_log`, `access_audit_log`). (c) The RLS context (`app.current_org_id`) is set on the **same** connection as the query via a pool checkout listener fed by a request/background ContextVar — the throwaway-connection middleware is gone, replaced by pure-ASGI `OrgContextMiddleware`; background pipeline runs inside `org_context()`. (d) `app.org_id` standardised to `app.current_org_id` everywhere (org_settings code + policies). Schema in `schema.sql` + Alembic `0011`; proven by `tests/test_tenant_isolation_rls.py` (10 tests, run as the real `platform_app` role); reviewer summary in `docs/dev/TENANT_ISOLATION.md`. README claim updated. Functional suite routed to the owner role via `tests/conftest.py` (follow-up: run it as the app role). Note: route-ownership guards on re_evaluate/override were already added in #188.
+
+<details><summary>Original finding (preserved)</summary>
 
 **Provenance.** External auditor flagged tenant-isolation issues (7 prompts, see end of this item). Verified against the code 2026-05-30 — the findings are real, and the root cause is **deeper than the audit states**. ⚠️ Note: P0.12 below claims "RLS prevents cross-org leakage" — that claim is **FALSE today** (see below); fix this item first.
 
@@ -126,6 +130,14 @@ Things that prevent shipping to a paying customer.
 7. **Enterprise reviewer summary** — concise technical note: isolation model, org_id from JWT, how `app.current_org_id` is set, how RLS uses it, route-level org/run/vendor ownership checks, what tests prove, what happens on cross-org access, remaining limitations. Tone for a security-conscious buyer / due-diligence reviewer.
 
 </details>
+
+</details>
+
+---
+
+### P1.x — `_db_get_run` selects non-existent `gaps_report` column (found during P0.16, 2026-05-30)
+
+**Problem.** [app/api/_evaluation/db.py](app/api/_evaluation/db.py) `_db_get_run` does `SELECT … currency, gaps_report …` but `gaps_report` exists in **neither** `app/db/schema.sql` nor any Alembic migration → `psycopg2.errors.UndefinedColumn` against a real DB. No current test exercises `_db_get_run`'s full SELECT, so it's latent — but the results/override/re-evaluate routes that call it would 500 in production. **Fix.** Either add the `gaps_report` column (migration + schema.sql) or drop it from the SELECT. Verify the run-results endpoints against a live DB after.
 
 ---
 

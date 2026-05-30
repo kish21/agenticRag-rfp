@@ -213,6 +213,14 @@ class Settings(BaseModel):
     postgres_db: str = "agenticplatform"
     postgres_user: str = "platformuser"
     postgres_password: str = ""
+    # Dedicated NON-SUPERUSER, non-owner application role. RLS only governs a
+    # role that is neither the table owner nor a superuser/BYPASSRLS role, so
+    # runtime queries MUST connect as this role for tenant isolation to bite.
+    # The owner role above (postgres_user) is used only for DDL/migrations,
+    # identity/auth lookups, and cross-org system jobs. See app/db/session.py
+    # and docs/dev/BACKLOG.md P0.16.
+    postgres_app_user: str = "platform_app"
+    postgres_app_password: str = ""
 
     # ── Auth ──────────────────────────────────────────────────────────
     jwt_secret_key: str = "change-me-in-production"
@@ -330,6 +338,8 @@ def load_settings() -> Settings:
         "postgres_db":                _e("POSTGRES_DB", "agenticplatform"),
         "postgres_user":              _e("POSTGRES_USER", "platformuser"),
         "postgres_password":          _e("POSTGRES_PASSWORD"),
+        "postgres_app_user":          _e("POSTGRES_APP_USER", "platform_app"),
+        "postgres_app_password":      _e("POSTGRES_APP_PASSWORD"),
         "jwt_secret_key":             _e("JWT_SECRET_KEY", "change-me-in-production"),
         "jwt_algorithm":              _e("JWT_ALGORITHM", "HS256"),
         "jwt_expiry_minutes":         _ei("JWT_EXPIRY_MINUTES", 480),

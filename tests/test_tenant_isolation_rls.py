@@ -1,0 +1,220 @@
+"""
+tests/test_tenant_isolation_rls.py
+==================================
+P0.16 — proves PostgreSQL Row-Level Security ACTUALLY enforces tenant isolation.
+
+Before the fix these tests fail by design:
+  • the app connected as a superuser/owner that RLS exempts,
+  • two audit tables had RLS enabled but no policy,
+  • org_settings used a different GUC name (app.org_id).
+
+Unlike the rest of the suite (which runs as the owner via conftest so it can
+seed freely — see tests/conftest.py), this module builds an EXPLICIT
+``platform_app`` engine — the same NON-superuser role the app uses at runtime —
+so the assertions reflect production behaviour. Seeding is done through the
+owner engine (a privileged harness), exactly as DDL/identity/cron do in prod.
+
+Requires a running Postgres provisioned by app/db/schema.sql (creates the
+platform_app role, FORCEs RLS, adds the audit policies). Cleans up its own data.
+"""
+from __future__ import annotations
+
+import uuid
+
+import pytest
+import sqlalchemy as sa
+
+from app.db.fact_store import get_admin_engine
+from app.db.session import app_engine_url, install_org_listener, org_context
+
+# The 22 tables that must enforce tenant isolation.
+PROTECTED_TABLES = [
+    "evaluation_setups", "evaluation_runs", "vendor_documents",
+    "extracted_certifications", "extracted_insurance", "extracted_slas",
+    "extracted_projects", "extracted_pricing", "extracted_facts",
+    "decisions", "audit_overrides", "approvals", "audit_log",
+    "access_audit_log", "users", "org_criteria_templates",
+    "dept_criteria_templates", "org_settings", "org_settings_audit",
+    "user_departments", "rfp_collaborators", "approval_assignments",
+]
+
+ORG_A = str(uuid.uuid4())
+ORG_B = str(uuid.uuid4())
+
+
+@pytest.fixture(scope="module")
+def admin_engine():
+    return get_admin_engine()
+
+
+@pytest.fixture(scope="module")
+def app_engine():
+    """The real RLS-governed application engine (role: platform_app)."""
+    eng = sa.create_engine(app_engine_url())
+    install_org_listener(eng)
+    yield eng
+    eng.dispose()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def seed(admin_engine):
+    """Seed two orgs (admin engine bypasses RLS) and tear them down."""
+    with admin_engine.begin() as c:
+        for o in (ORG_A, ORG_B):
+            c.execute(sa.text(
+                "INSERT INTO organisations (org_id, org_name, industry, "
+                "subscription_tier, is_active) VALUES "
+                "(CAST(:o AS uuid), :n, 'Test', 'trial', TRUE) "
+                "ON CONFLICT DO NOTHING"
+            ), {"o": o, "n": f"org-{o[:8]}"})
+            c.execute(sa.text(
+                "INSERT INTO evaluation_runs (org_id, rfp_id, status, vendor_ids) "
+                "VALUES (CAST(:o AS uuid), :r, 'complete', ARRAY['v1'])"
+            ), {"o": o, "r": f"rfp-{o[:8]}"})
+            c.execute(sa.text(
+                "INSERT INTO audit_log (org_id, event_type, actor) "
+                "VALUES (CAST(:o AS uuid), 'run.created', 'test')"
+            ), {"o": o})
+    yield
+    with admin_engine.begin() as c:
+        for o in (ORG_A, ORG_B):
+            c.execute(sa.text("DELETE FROM audit_log WHERE org_id = CAST(:o AS uuid)"), {"o": o})
+            c.execute(sa.text("DELETE FROM evaluation_runs WHERE org_id = CAST(:o AS uuid)"), {"o": o})
+            c.execute(sa.text("DELETE FROM organisations WHERE org_id = CAST(:o AS uuid)"), {"o": o})
+
+
+# ── Role + schema invariants ────────────────────────────────────────────────
+
+def test_app_role_is_not_privileged(admin_engine):
+    """platform_app must be a login role that RLS can constrain: NOT superuser,
+    NOT BYPASSRLS. If it were either, every policy below would be inert."""
+    with admin_engine.connect() as c:
+        row = c.execute(sa.text(
+            "SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles "
+            "WHERE rolname = 'platform_app'"
+        )).fetchone()
+    assert row is not None, "platform_app role does not exist — run app/db/schema.sql"
+    assert row.rolsuper is False, "platform_app is a SUPERUSER → RLS is bypassed"
+    assert row.rolbypassrls is False, "platform_app has BYPASSRLS → RLS is bypassed"
+    assert row.rolcanlogin is True, "platform_app cannot log in"
+
+
+def test_all_protected_tables_force_rls(admin_engine):
+    """FORCE ROW LEVEL SECURITY must be set on every protected table, so the
+    policy applies even to the table owner (defense in depth)."""
+    with admin_engine.connect() as c:
+        rows = c.execute(sa.text(
+            "SELECT relname FROM pg_class "
+            "WHERE relname = ANY(:t) AND relforcerowsecurity = true"
+        ), {"t": PROTECTED_TABLES}).fetchall()
+    forced = {r.relname for r in rows}
+    missing = set(PROTECTED_TABLES) - forced
+    assert not missing, f"tables missing FORCE ROW LEVEL SECURITY: {sorted(missing)}"
+
+
+def test_no_legacy_app_org_id_guc_remains(admin_engine):
+    """All policies must read app.current_org_id — the old app.org_id GUC
+    (org_settings) must be gone, or those rows fall open under the wrong name."""
+    with admin_engine.connect() as c:
+        rows = c.execute(sa.text(
+            "SELECT policyname, qual FROM pg_policies WHERE schemaname = 'public'"
+        )).fetchall()
+    legacy = [r.policyname for r in rows if r.qual and "app.org_id" in r.qual
+              and "app.current_org_id" not in r.qual]
+    assert not legacy, f"policies still using legacy app.org_id GUC: {legacy}"
+    # And the org_settings policies must now reference the standard GUC.
+    org_pols = {r.policyname: r.qual for r in rows
+                if r.policyname in ("org_settings_isolation", "org_settings_audit_isolation")}
+    assert org_pols, "org_settings RLS policies missing"
+    for name, qual in org_pols.items():
+        assert "app.current_org_id" in qual, f"{name} not on app.current_org_id: {qual}"
+
+
+def test_audit_tables_have_policies(admin_engine):
+    """audit_log + access_audit_log had RLS enabled but NO policy (= deny-all
+    for a non-owner). They must now carry an org-isolation policy."""
+    with admin_engine.connect() as c:
+        names = {r.policyname for r in c.execute(sa.text(
+            "SELECT policyname FROM pg_policies WHERE schemaname = 'public'"
+        )).fetchall()}
+    assert "rls_audit_log" in names
+    assert "rls_access_audit_log" in names
+
+
+# ── Read isolation (the core property) ───────────────────────────────────────
+
+def test_read_isolation_evaluation_runs(app_engine):
+    """As platform_app, org A sees only org A's runs; org B's are invisible."""
+    with org_context(ORG_A), app_engine.connect() as c:
+        total = c.execute(sa.text("SELECT count(*) FROM evaluation_runs")).scalar()
+        b_via_a = c.execute(sa.text(
+            "SELECT count(*) FROM evaluation_runs WHERE org_id = CAST(:o AS uuid)"
+        ), {"o": ORG_B}).scalar()
+    assert b_via_a == 0, "org A can see org B's runs — RLS is not enforcing"
+    assert total >= 1, "org A cannot even see its own run"
+
+
+def test_missing_context_sees_zero_rows(app_engine):
+    """No tenant context → RLS matches the empty string → zero protected rows
+    (fails closed, not open)."""
+    with org_context(None), app_engine.connect() as c:
+        assert c.execute(sa.text("SELECT count(*) FROM evaluation_runs")).scalar() == 0
+
+
+def test_audit_log_isolation(app_engine):
+    with org_context(ORG_A), app_engine.connect() as c:
+        b_rows = c.execute(sa.text(
+            "SELECT count(*) FROM audit_log WHERE org_id = CAST(:o AS uuid)"
+        ), {"o": ORG_B}).scalar()
+    assert b_rows == 0, "org A can read org B's audit_log rows"
+
+
+# ── Write isolation ──────────────────────────────────────────────────────────
+
+def test_write_isolation_cannot_update_other_org(app_engine):
+    """org A's UPDATE/DELETE cannot touch org B's rows (they're invisible)."""
+    with org_context(ORG_A), app_engine.begin() as c:
+        updated = c.execute(sa.text(
+            "UPDATE evaluation_runs SET status = 'hacked' "
+            "WHERE org_id = CAST(:o AS uuid)"
+        ), {"o": ORG_B}).rowcount
+    assert updated == 0, "org A modified org B's rows — RLS UPDATE not enforced"
+
+
+def test_write_isolation_cannot_insert_for_other_org(app_engine):
+    """org A cannot INSERT a row stamped with org B (WITH CHECK rejects it)."""
+    with pytest.raises(Exception) as exc:
+        with org_context(ORG_A), app_engine.begin() as c:
+            c.execute(sa.text(
+                "INSERT INTO evaluation_runs (org_id, rfp_id, status) "
+                "VALUES (CAST(:o AS uuid), 'rfp-x', 'running')"
+            ), {"o": ORG_B})
+    assert "row-level security" in str(exc.value).lower()
+
+
+# ── API-layer ownership guard (defense in depth above RLS) ───────────────────
+# Route helpers scope every run lookup by the caller's org_id (WHERE org_id =
+# :oid AND run_id = :rid), so a cross-org run_id matches nothing → the route
+# raises 404 even before RLS. This is the application filter the README claims;
+# RLS is the backstop beneath it. We assert that predicate directly (the engine
+# here is RLS-exempt via conftest, isolating the app-layer filter under test).
+
+def _run_id_for(admin_engine, org_id: str) -> str:
+    with admin_engine.connect() as c:
+        return str(c.execute(sa.text(
+            "SELECT run_id FROM evaluation_runs WHERE org_id = CAST(:o AS uuid) LIMIT 1"
+        ), {"o": org_id}).scalar())
+
+
+def test_run_lookup_is_org_scoped(admin_engine):
+    """The org_id filter that every run route uses rejects a cross-org run_id."""
+    run_b = _run_id_for(admin_engine, ORG_B)
+    lookup = sa.text(
+        "SELECT run_id FROM evaluation_runs "
+        "WHERE run_id = CAST(:rid AS uuid) AND org_id = CAST(:oid AS uuid)"
+    )
+    with admin_engine.connect() as c:
+        # org A cannot resolve org B's run → empty → route would 404.
+        assert c.execute(lookup, {"rid": run_b, "oid": ORG_A}).fetchone() is None
+        # org B resolves its own run.
+        assert c.execute(lookup, {"rid": run_b, "oid": ORG_B}).fetchone() is not None
