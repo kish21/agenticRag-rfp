@@ -15,7 +15,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from app.auth.jwt import decode_token, TokenData
-from app.db.fact_store import get_engine
+from app.db.fact_store import get_engine, get_admin_engine
 
 security = HTTPBearer(auto_error=False)
 
@@ -59,8 +59,23 @@ async def get_current_user(
 
 
 def get_db() -> Generator:
-    """Yields a SQLAlchemy connection; commits on exit, rolls back on error."""
+    """Yields a tenant-scoped (RLS-governed) connection from the app engine.
+
+    The connection is auto-stamped with app.current_org_id from the request's
+    ContextVar (set by OrgContextMiddleware), so RLS confines it to the
+    caller's org. Use for all tenant route handlers."""
     engine = get_engine()
+    with engine.connect() as conn:
+        yield conn
+
+
+def get_admin_db() -> Generator:
+    """Yields an RLS-EXEMPT connection from the owner engine.
+
+    Use ONLY for the identity/auth path, which must resolve which org an email
+    belongs to BEFORE any tenant context exists (and reads the RLS-protected
+    `users` table). Never use for tenant data access."""
+    engine = get_admin_engine()
     with engine.connect() as conn:
         yield conn
 

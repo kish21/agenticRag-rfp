@@ -15,7 +15,7 @@
 [ Business Logic / Agents ] — org_id passed explicitly, never inferred
         │
         ├──► [ Qdrant ] — always filtered by {org_id, vendor_id}
-        └──► [ PostgreSQL ] — RLS policy: SET LOCAL app.org_id per connection
+        └──► [ PostgreSQL ] — RLS (FORCED) as non-superuser role; app.current_org_id per connection
                               audit tables: INSERT-only, no UPDATE/DELETE
 ```
 
@@ -85,11 +85,14 @@ org_id = decode_jwt(token)["org_id"]  # Server-side extraction
 ```sql
 -- Schema: app/db/schema.sql
 ALTER TABLE extracted_certifications ENABLE ROW LEVEL SECURITY;
-CREATE POLICY org_isolation ON extracted_certifications
-  USING (org_id = current_setting('app.org_id'));
+ALTER TABLE extracted_certifications FORCE  ROW LEVEL SECURITY;  -- applies even to the owner
+CREATE POLICY rls_certifications ON extracted_certifications
+  USING (org_id::text = current_setting('app.current_org_id', true));
 
--- Set per connection in fact_store.py:
-conn.execute(text("SET LOCAL app.org_id = :o"), {"o": org_id})
+-- The app connects as the non-superuser role `platform_app` (RLS-governed).
+-- app.current_org_id is stamped per connection from the request/background
+-- ContextVar by a pool checkout listener (app/db/session.py) — set on the same
+-- connection as the query, not a throwaway one. See docs/dev/TENANT_ISOLATION.md
 ```
 
 **Qdrant Filter Enforcement:**

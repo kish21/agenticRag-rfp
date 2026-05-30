@@ -74,8 +74,11 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     created_at       TIMESTAMPTZ DEFAULT now(),
     completed_at     TIMESTAMPTZ,
     created_by_email TEXT,          -- email of the user who started this run (RBAC)
-    creator_dept_id  TEXT           -- dept_id from JWT at creation time (RBAC)
+    creator_dept_id  TEXT,          -- dept_id from JWT at creation time (RBAC)
+    gaps_report      JSONB          -- detect_and_fill_gaps() output; read by the run-results route
 );
+-- Idempotent for already-created DBs (CREATE TABLE IF NOT EXISTS skips columns).
+ALTER TABLE evaluation_runs ADD COLUMN IF NOT EXISTS gaps_report JSONB;
 
 -- ── Access audit log ───────────────────────────────────────────────────
 -- Records who viewed or acted on a run. Append-only, RLS-protected.
@@ -293,51 +296,51 @@ ALTER TABLE approvals                ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_evaluation_setups') THEN
         CREATE POLICY rls_evaluation_setups ON evaluation_setups
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_evaluation_runs') THEN
         CREATE POLICY rls_evaluation_runs ON evaluation_runs
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_vendor_docs') THEN
         CREATE POLICY rls_vendor_docs ON vendor_documents
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_certifications') THEN
         CREATE POLICY rls_certifications ON extracted_certifications
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_insurance') THEN
         CREATE POLICY rls_insurance ON extracted_insurance
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_slas') THEN
         CREATE POLICY rls_slas ON extracted_slas
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_projects') THEN
         CREATE POLICY rls_projects ON extracted_projects
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_pricing') THEN
         CREATE POLICY rls_pricing ON extracted_pricing
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_extracted_facts') THEN
         CREATE POLICY rls_extracted_facts ON extracted_facts
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_decisions') THEN
         CREATE POLICY rls_decisions ON decisions
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_audit_overrides') THEN
         CREATE POLICY rls_audit_overrides ON audit_overrides
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_approvals') THEN
         CREATE POLICY rls_approvals ON approvals
-            USING (org_id::text = current_setting('app.current_org_id', true));
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
 END $$;
 
@@ -420,7 +423,7 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 CREATE POLICY users_org_isolation ON users
-    USING (org_id::text = current_setting('app.current_org_id', true));
+    USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
 
 CREATE TABLE IF NOT EXISTS tenant_modules (
     org_id       UUID NOT NULL REFERENCES organisations(org_id) ON DELETE CASCADE,
@@ -484,8 +487,7 @@ DO $$ BEGIN
   ) THEN
     CREATE POLICY org_criteria_isolation
     ON org_criteria_templates
-    USING (org_id::text =
-      current_setting('app.current_org_id', true));
+    USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
   END IF;
 END $$;
 
@@ -498,8 +500,7 @@ DO $$ BEGIN
   ) THEN
     CREATE POLICY dept_criteria_isolation
     ON dept_criteria_templates
-    USING (org_id::text =
-      current_setting('app.current_org_id', true));
+    USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
   END IF;
 END $$;
 
@@ -568,7 +569,7 @@ DO $$ BEGIN
     WHERE tablename='org_settings' AND policyname='org_settings_isolation'
   ) THEN
     CREATE POLICY org_settings_isolation ON org_settings
-        USING (org_id = current_setting('app.org_id', true));
+        USING (org_id = current_setting('app.current_org_id', true));
   END IF;
 END $$;
 
@@ -578,7 +579,7 @@ DO $$ BEGIN
     WHERE tablename='org_settings_audit' AND policyname='org_settings_audit_isolation'
   ) THEN
     CREATE POLICY org_settings_audit_isolation ON org_settings_audit
-        USING (org_id = current_setting('app.org_id', true));
+        USING (org_id = current_setting('app.current_org_id', true));
   END IF;
 END $$;
 
@@ -672,7 +673,7 @@ DO $$ BEGIN
             USING (EXISTS (
                 SELECT 1 FROM users u
                 WHERE u.user_id = user_departments.user_id
-                  AND u.org_id::text = current_setting('app.current_org_id', true)
+                  AND u.org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
             ));
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_rfp_collaborators') THEN
@@ -680,7 +681,7 @@ DO $$ BEGIN
             USING (EXISTS (
                 SELECT 1 FROM evaluation_runs r
                 WHERE r.run_id = rfp_collaborators.run_id
-                  AND r.org_id::text = current_setting('app.current_org_id', true)
+                  AND r.org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
             ));
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_approval_assignments') THEN
@@ -688,7 +689,7 @@ DO $$ BEGIN
             USING (EXISTS (
                 SELECT 1 FROM evaluation_runs r
                 WHERE r.run_id = approval_assignments.run_id
-                  AND r.org_id::text = current_setting('app.current_org_id', true)
+                  AND r.org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
             ));
     END IF;
 END $$;
@@ -816,3 +817,96 @@ CREATE TABLE IF NOT EXISTS llm_response_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_cache_created ON llm_response_cache(created_at);
 CREATE INDEX IF NOT EXISTS idx_llm_cache_model   ON llm_response_cache(model);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TENANT ISOLATION — make Row-Level Security actually bite (P0.16)
+-- ════════════════════════════════════════════════════════════════════════════
+-- Two things were missing before, which made every RLS policy above inert:
+--   1. audit_log and access_audit_log had RLS ENABLED but NO policy — under a
+--      non-owner role that means deny-all, so they get policies here.
+--   2. The application connected as the table OWNER (a superuser), and Postgres
+--      exempts the owner/superuser from RLS unless FORCE is set. We now (a)
+--      FORCE RLS on every protected table AND (b) introduce a dedicated
+--      NON-superuser, NON-owner login role `platform_app` that the app connects
+--      as at runtime. Either alone is insufficient; together RLS is enforced.
+-- The owner role (platformuser) is still used for DDL/migrations, identity/auth
+-- lookups, and cross-org system jobs — see app/db/session.py.
+
+-- 1 ── policies for the two audit tables that lacked them ────────────────────
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_audit_log') THEN
+        CREATE POLICY rls_audit_log ON audit_log
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_access_audit_log') THEN
+        CREATE POLICY rls_access_audit_log ON access_audit_log
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
+END $$;
+
+-- 2 ── operational tables that hold tenant data — bring under RLS too ───────
+-- These were app-filter-only before. invited_vendors is keyed by rfp_id (no
+-- org_id) so it isolates via a join to its RFP.
+ALTER TABLE rfps            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ingestion_jobs  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_log       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invited_vendors ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_rfps') THEN
+        CREATE POLICY rls_rfps ON rfps
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_ingestion_jobs') THEN
+        CREATE POLICY rls_ingestion_jobs ON ingestion_jobs
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_event_log') THEN
+        CREATE POLICY rls_event_log ON event_log
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_invited_vendors') THEN
+        CREATE POLICY rls_invited_vendors ON invited_vendors
+            USING (EXISTS (SELECT 1 FROM rfps r
+                           WHERE r.rfp_id = invited_vendors.rfp_id
+                             AND r.org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid));
+    END IF;
+END $$;
+
+-- 3 ── FORCE RLS on EVERY table that has RLS enabled ─────────────────────────
+-- Dynamic so there is ONE source of truth (the set of RLS-enabled tables) and
+-- a new protected table is force-secured automatically. FORCE makes the policy
+-- apply even to the table owner — defence in depth behind the non-owner role.
+DO $$
+DECLARE t regclass;
+BEGIN
+    FOR t IN
+        SELECT oid FROM pg_class
+        WHERE relrowsecurity = true AND relnamespace = 'public'::regnamespace
+    LOOP
+        EXECUTE format('ALTER TABLE %s FORCE ROW LEVEL SECURITY', t);
+    END LOOP;
+END $$;
+
+-- 4 ── dedicated non-superuser application role ──────────────────────────────
+-- Created WITHOUT a password literal. The password is set out-of-band from the
+-- POSTGRES_APP_PASSWORD secret — run schema.sql via:
+--     psql -v app_pw="$POSTGRES_APP_PASSWORD" -f app/db/schema.sql
+-- (Alembic migration 0011 reads the same env var.) No credential lives in git.
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'platform_app') THEN
+        CREATE ROLE platform_app LOGIN
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
+END $$;
+-- :'app_pw' is substituted by psql (outside any dollar-quote). If you ran this
+-- file without -v app_pw=…, set the password manually afterwards.
+ALTER ROLE platform_app PASSWORD :'app_pw';
+
+GRANT USAGE ON SCHEMA public TO platform_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO platform_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO platform_app;
+-- Cover tables/sequences created by future migrations (run as the owner).
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO platform_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO platform_app;

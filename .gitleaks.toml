@@ -1,0 +1,32 @@
+# gitleaks configuration — secret scanning for CI.
+# Extends the default ruleset and allowlists a SMALL, explicit set of known
+# dev/CI-only non-secrets. Listing them here is deliberate: it surfaces exactly
+# which literals exist and that they are accepted, while any NEW credential
+# (including a real DB/API key) is still caught and fails the build.
+#
+# None of these grant access to a production system:
+#   - platformpass2026 / ci-password   → local docker-compose / CI throwaway DB
+#   - devpassword2026                  → dev seed user (prod boot is gated; see P0.17)
+#   - change-me-in-production          → default JWT secret (prod boot is gated)
+#   - the fake OpenAI / Langfuse keys  → obvious import-test placeholders
+# The platform_app DB password is NOT here — it is generated at runtime (CI) or
+# injected from POSTGRES_APP_PASSWORD (no literal in the repo).
+
+title = "agenticRag-rfp gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known dev/CI-only non-secrets"
+regexes = [
+  '''platformpass2026''',
+  '''devpassword2026''',
+  '''change-me-in-production''',
+  '''ci-password''',
+  '''ci-test-secret-key-not-real''',
+  '''sk-fake-key-for-import-testing''',
+]
+paths = [
+  '''\.env\.example$''',
+]

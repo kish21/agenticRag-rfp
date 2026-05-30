@@ -6,23 +6,38 @@ import json
 import uuid as _uuid
 import sqlalchemy as sa
 from app.schemas.output_models import EvaluationSetup, ExtractionOutput, IngestionOutput
-from app.config import settings
+from app.db.session import app_engine_url, admin_engine_url, install_org_listener
 
 _engine = None
+_admin_engine = None
 
 
 def get_engine() -> sa.Engine:
+    """The RLS-governed application engine (role: platform_app).
+
+    Every connection it hands out is auto-stamped with app.current_org_id from
+    the request/background ContextVar (see app/db/session.py), so route handlers
+    and DB helpers do not each have to SET it. Use this for ALL tenant-scoped
+    access — it is the engine RLS actually constrains.
+    """
     global _engine
     if _engine is None:
-        url = (
-            f"postgresql://{settings.postgres_user}"
-            f":{settings.postgres_password}"
-            f"@{settings.postgres_host}"
-            f":{settings.postgres_port}"
-            f"/{settings.postgres_db}"
-        )
-        _engine = sa.create_engine(url)
+        _engine = sa.create_engine(app_engine_url())
+        install_org_listener(_engine)
     return _engine
+
+
+def get_admin_engine() -> sa.Engine:
+    """The owner/superuser engine (role: platformuser) — RLS-EXEMPT.
+
+    Use ONLY for paths that legitimately span orgs or precede an org context:
+    DDL/migrations, the startup orphaned-run sweep, identity/auth lookups, and
+    cross-org cron jobs. Never use it to serve a tenant request.
+    """
+    global _admin_engine
+    if _admin_engine is None:
+        _admin_engine = sa.create_engine(admin_engine_url())
+    return _admin_engine
 
 
 def _safe_uuid(value) -> str | None:

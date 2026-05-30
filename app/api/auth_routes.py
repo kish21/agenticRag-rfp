@@ -14,7 +14,7 @@ from app.auth.jwt import (
     verify_password, create_access_token,
     hash_password, Token, TokenData,
 )
-from app.auth.dependencies import get_current_user, get_db, COOKIE_NAME
+from app.auth.dependencies import get_current_user, get_admin_db, COOKIE_NAME
 from app.config import settings
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -88,7 +88,7 @@ def _get_user_by_email(conn, email: str) -> dict | None:
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def signup(req: SignupRequest, response: Response, db=Depends(get_db)):
+async def signup(req: SignupRequest, response: Response, db=Depends(get_admin_db)):
     """
     Create a new organisation and its first owner user in one transaction.
     Returns a JWT for the new owner.
@@ -158,7 +158,7 @@ async def signup(req: SignupRequest, response: Response, db=Depends(get_db)):
 
 
 @router.post("/token", response_model=Token)
-async def login(req: LoginRequest, response: Response, db=Depends(get_db)):
+async def login(req: LoginRequest, response: Response, db=Depends(get_admin_db)):
     """Exchange email + password for a JWT token."""
     user = _get_user_by_email(db, req.email)
 
@@ -251,7 +251,7 @@ async def verify_token(current_user: TokenData = Depends(get_current_user)):
 @router.get("/me", response_model=UserInfo)
 async def get_me(
     current_user: TokenData = Depends(get_current_user),
-    db=Depends(get_db),
+    db=Depends(get_admin_db),
 ):
     """Returns the current user's stored record (not just token claims)."""
     user = _get_user_by_email(db, current_user.email)
@@ -264,7 +264,7 @@ async def get_me(
 async def invite_user(
     req: InviteRequest,
     current_user: TokenData = Depends(get_current_user),
-    db=Depends(get_db),
+    db=Depends(get_admin_db),
 ):
     """
     company_admin or department_admin invites a new team member to their org.

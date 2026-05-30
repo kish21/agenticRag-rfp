@@ -62,6 +62,13 @@ def audit(
     try:
         engine = get_engine()
         with engine.begin() as conn:
+            # Bind RLS context to this row's org so the write passes the
+            # audit_log policy even when called from a background task that
+            # carries no request context (P0.16).
+            conn.execute(
+                sa.text("SELECT set_config('app.current_org_id', :oid, true)"),
+                {"oid": str(org_id)},
+            )
             conn.execute(
                 sa.text("""
                     INSERT INTO audit_log
