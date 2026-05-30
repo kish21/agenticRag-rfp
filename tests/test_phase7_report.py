@@ -157,6 +157,13 @@ def test_html_includes_grounding_quote(ctx):
     assert "Acme holds ISO 27001:2022" in build_report_html(ctx)
 
 
+def test_html_rejection_header_uses_vendor_name(ctx):
+    # Polish fix: the rejection header shows the display name, not the raw id.
+    html = build_report_html(ctx)
+    assert "Rejected: BadCo" in html
+    assert "Rejected: bad<" not in html
+
+
 def test_html_autoescapes_vendor_text():
     run = dict(SAMPLE_RUN)
     run["vendor_names"] = {"acme": "<script>alert(1)</script>", "apex": "Apex", "bad": "BadCo"}
