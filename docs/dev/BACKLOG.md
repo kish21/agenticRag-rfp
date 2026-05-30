@@ -39,6 +39,46 @@
 
 ---
 
+## 🏢 ENTERPRISE-READINESS ROADMAP (external audit 2026-05-30, code-verified)
+
+An external auditor produced 8 work-streams to get from "strong prototype" to "enterprise-purchasable." Each was **verified against the actual code** — the auditor's snapshot predates the 2026-05-30 work, so several items are already done. Status is honest: don't pay to rebuild what exists.
+
+**Priority order (verified):** E1 isolation → E2 auth → E3 benchmark → E4 reports(DOCX only) → E5 approval+notify → E6 ops(load/latency) → E7 integrations → E8 positioning. Note: E8's security/benchmark briefs can't be written honestly until **E1 + E3** are actually done.
+
+| # | Work-stream | Verified status | What's actually left |
+|---|---|---|---|
+| **E1** | Tenant isolation | 🔴 OPEN — see **P0.16** | RLS is inert (no-op middleware + owner-bypass / no FORCE RLS). Auditor missed the FORCE root cause. |
+| **E2** | Auth hardening | 🔴 OPEN — real bugs | env-aware `secure` cookie; fix `UNIQUE(email)` vs `ON CONFLICT(email,org_id)`; session revocation; verify invite/reset flows |
+| **E3** | Evidence quality / benchmark | 🟡 OPEN — real gap | grounding built; **no held-out annotated benchmark + measured retrieval/extraction/citation metrics** |
+| **E4** | Buyer-ready reports | 🟢 ~85% DONE (#176/#178) | **only DOCX + an override-history section** remain |
+| **E5** | Approval workflow | 🟡 PARTIAL | tables + assignments + override exist; missing full approve/reject/request-change actions + notifications (Phase 8) |
+| **E6** | Production operations | 🟡 PARTIAL | circuit breaker + observability + rate limiter exist; missing **load tests + P50/P95/P99 latency+cost report + backup/restore + executed runbook** |
+| **E7** | Enterprise integrations | 🔴 OPEN — future | no SSO/OIDC, no signed webhooks, no SharePoint import (pre-purchase requirements, not launch blockers) |
+| **E8** | Product positioning | ⚪ OPEN — marketing | buyer one-pager / reviewer brief / security brief / benchmark brief / demo script — **depends on E1+E3 being true** |
+
+### E2 — Auth hardening 🔴 OPEN
+**Confirmed real:** `app/api/auth_routes.py:31` hardcodes `secure=False` (httponly/samesite already set) → make env-aware (`secure=True` in prod). **Schema/code mismatch:** `schema.sql:415 UNIQUE(email)` (platform-wide) vs `auth_routes.py:207 ON CONFLICT (email, org_id)` (per-org) → multi-org signup breaks; pick one model and align schema+code (+Alembic). **No session/token revocation table** → can't revoke after departure/breach (add a sessions or token-denylist table; JWT alone can't be revoked). **Verify:** whether any user-invite returns a plaintext/temp password (grep found only *vendor* invites); whether a password-reset flow exists (none found). **Exit:** no endpoint returns plaintext passwords; prod secure cookies; invite = one-time-token acceptance; reset = expiring one-time token; revoked tokens rejected; email-uniqueness consistent; auth happy+abuse tests; reviewer-facing auth summary.
+
+### E3 — Evidence quality / benchmark 🔴 OPEN (real gap)
+Grounding is built (every claim cites a verbatim source; critic blocks ungrounded). **Missing:** a repeatable **held-out benchmark dataset** (table-heavy/scanned/long/short/missing-evidence/conflicting PDFs) with **ground-truth** expected facts, mandatory pass/fail, citations, scores; and **measured** retrieval recall, extraction precision/recall, grounding/citation accuracy, scoring consistency, runtime, cost, failure rate. Add explicit "insufficient evidence" states instead of forced scores. **Exit:** benchmark runs repeatably; metrics auto-produced + committed artifact; low-confidence evidence visible to users. (The "prove it with numbers" demand a technical evaluator always makes — same discipline as the Phase 2c measure-first.)
+
+### E4 — Buyer-ready reports 🟢 ~85% DONE
+Done 2026-05-30: PDF + in-app HTML report (#176) — exec summary, ranking, mandatory pass/fail, weighted scoring, **evidence appendix with source quotes**, audit trail, approval routing; download from results page (#178); org/run access control; 15 tests. **Left:** **DOCX** output (reuse the jinja2 context → python-docx) + an explicit **override-history** section in the report. **Exit:** DOCX download; override history rendered; tests; sample artifact (the Phase 7 preview already serves as one).
+
+### E5 — Approval workflow 🟡 PARTIAL
+Exist: `approvals`, `audit_overrides`, `approval_assignments` tables; `/evaluate/{run}/override` (required justification) + `/admin/approval-assignments`; Phase 9 approver queue + value/dept-based assignment. **Left:** explicit approve/reject/request-change actions + status surfaced on results page & report; **notifications** (wire Phase 8 delivery — email/Teams on `approval_required`); audit every approval action. **Exit:** queue shows runs needing approval; correct approver assigned; approve/reject/request-change; unauthorized can't approve; notifications sent/queued; approval history in the report.
+
+### E6 — Production operations 🟡 PARTIAL
+Exist: `app/infra/circuit_breaker.py`, `app/providers/observability.py` (Prometheus/Grafana/Loki), rate limiter, health endpoint, written runbooks. **Left:** **load tests** (1/5/15/30 vendors) + **P50/P95/P99 latency + cost report**; backup/restore procedure (tested); execute the deployment runbook once; dashboards for per-agent latency/cost/token/failures/queue-depth/retrieval-miss/extraction-fail/override-rate; test circuit-breaker behaviour. **Exit:** runbook executed; metrics emitted; circuit-breaker tested; load-test report; backup/restore documented+tested.
+
+### E7 — Enterprise integrations 🔴 OPEN (future, pre-purchase)
+None built. **SSO/OIDC first** (IT/security gate). Then SharePoint/OneDrive import behind a clean provider interface; email/Teams notifications (Phase 8 seam); **signed** webhooks for `evaluation_complete`/`approval_required` (from `event_log`); audit/report export API; admin integration settings; document future Coupa/Ariba/Ivalua/Zip/DocuSign/CLM. **Exit:** SSO/OIDC design-or-impl; ≥1 doc-import (or stub behind interface); notification path; signed+documented webhooks; admin config; integration-fit doc.
+
+### E8 — Product positioning ⚪ OPEN (marketing, after E1+E3)
+Position as **evidence-grounded, audit-ready vendor evaluation for regulated procurement** — not a generic AI RFP assistant. Deliverables: buyer one-pager, technical-reviewer brief, **security/tenant-isolation brief** (needs E1 done), **benchmark/quality brief** (needs E3 done), sample decision report (Phase 7 PDF), demo script, ICPs (gov/health/finance/pharma/insurance/IT-security), pilot success criteria.
+
+---
+
 ## 🔴 P0 — Blocks production launch
 
 Things that prevent shipping to a paying customer.
