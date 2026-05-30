@@ -98,16 +98,20 @@ Before anything else in Skill 04:
 
 ### NEXT SESSION PLAN (set 2026-05-30 — start here)
 
-**BUILD PHASE 8b — autonomous delivery (Mode C auto-trigger + event dispatcher).** Phase 8a (channels) is on master (#179). This phase wires the "deadline → evaluate → report → deliver" flow. Read `docs/dev/PRODUCTION_READINESS_PLAN.md` "Phase 8".
+**Phase 8 is an INDEPENDENT, EXPANDABLE module — decomposed (decided 2026-05-30).** Delivery/notifications were over-bundled. They're now staged so the module grows without ever touching the pipeline. **Architecture rule:** callers (pipeline/jobs/API) use ONLY `app.delivery.service.deliver_report_for_run(run, recipients)` — they never import smtplib/channels/recipient logic. Everything new lands INSIDE `app/delivery/`.
 
-1. **Schema:** `delivery_subscriptions` + `delivery_attempts` (UNIQUE `(subscription_id, run_id, trigger)` for idempotency) + alembic `0009`.
-2. **Dispatcher** (`app/jobs/delivery_dispatcher.py`): read `event_log` where `delivered_at IS NULL` for `rfp.evaluation_complete` / `rfp.facts_ready`; match subscriptions; build `DeliveryPayload` from the run (use `app/output/report_builder.build_report_context` + `pdf_report` — pdf may be None); dispatch via `app.delivery.get_channel`; record `delivery_attempts` (idempotent); set `event_log.delivered_at`; retry/backoff via `app/infra/rate_limiter.py`.
-3. **Mode C auto-trigger** (`app/jobs/deadline_processor.py`): at `facts_ready` for `autonomy_mode='auto_to_report'`, REMOVE the rejection — create an `evaluation_runs` row (org_id, rfp_id, setup_id snapshot, vendor_ids from `invited_vendors`), `await _run_pipeline(run_id, org_id)`, emit `rfp.evaluation_complete`. Extend `tests/test_deadline_lifecycle.py::test_mode_c_gated` → now-passes-through.
-4. **One-shot:** `POST /api/v1/evaluate/start` accepts `deliver_to=[{channel,target}]` → transient subscription scoped to that run.
+**Already on master (the independent module's public API is DONE):**
+- 8a channels (#179): `app/delivery/` — `email_smtp` + `folder_drop` + registry.
+- Delivery service facade (#181): `payload.py` (run → `DeliveryPayload`) + `service.py` (`deliver_report_for_run`). 16 tests.
+- **Free email NOW:** the SMTP channel works with **Mailtrap** (sandbox, no domain — best for dev) or **Resend** (`smtp.resend.com`, user `resend`, pass = API key; free 3k/mo) via `.env`. No new code. Hostinger later if wanted.
 
-**Two real constraints (decided 2026-05-30):**
-- The Mode C eval-trigger needs **Postgres + the full pipeline + a live LLM** to verify end-to-end — offline-mockable tests + CI only go so far; the true deadline→inbox path proves out live.
-- **Real email needs the customer's SMTP creds** in `.env` (`SMTP_HOST/PORT/USERNAME/PASSWORD/FROM/USE_TLS`, e.g. Hostinger). The channel is config-driven and ready.
+**NEXT — wire it (needs live infra; this is the only part not yet buildable offline):**
+1. **Completion hook** — after a run completes (`app/api/_evaluation/pipeline.py` success path), if delivery is configured, call `deliver_report_for_run(run, [{"channel":"email","email": created_by_email}])`. Works for manual runs immediately (demoable with Mailtrap).
+2. **Mode C autonomous trigger** (`app/jobs/deadline_processor.py`): at `facts_ready` for `auto_to_report`, REMOVE the rejection — create an `evaluation_runs` row (org_id, rfp_id, setup_id snapshot, vendor_ids from `invited_vendors`), `await _run_pipeline(run_id, org_id)`, emit `rfp.evaluation_complete`; the completion hook then delivers. Extend `test_mode_c_gated` → passes-through. **Needs Postgres + live pipeline + LLM to verify end-to-end.**
+
+**LATER (Step 3 — customer-driven, build only when asked; all INSIDE `app/delivery/`):**
+- **8c — delivery engine:** `delivery_subscriptions` + `delivery_attempts` (UNIQUE idempotency) + event-driven `dispatcher.py` (reads `event_log`) + retry/backoff. Build when a customer needs multi-recipient / per-department / on-block delivery.
+- **8d — more channels + notifications:** Teams/Slack/SFTP channels; in-app "report ready" notifications (distinct from delivering the file).
 
 **What we are deliberately NOT doing next session** (each has a reason — re-evaluate later, not now)
 - Phase 2c (Extraction + Evaluation critic-as-controller) — wait for production traffic that surfaces flakiness

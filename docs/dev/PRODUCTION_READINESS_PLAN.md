@@ -852,6 +852,25 @@ Executives and approvers don't want to watch the pipeline. They want fire-and-fo
 
 **Includes the Phase 5 "Mode C" auto-trigger (re-homed here 2026-05-30).** Phase 7 built report *generation*; Phase 8 owns the autonomous flow that *uses* it: at the deadline, for `autonomy_mode='auto_to_report'`, the scheduler creates an evaluation run, drives the pipeline to completion, renders the report, and emits `rfp.evaluation_complete` — then a delivery channel (email/folder/Teams) sends it. This requires adding evaluation-trigger wiring to `app/jobs/deadline_processor.py` (today it only runs ingestion). Until then the existing Mode C gate stands and the report is available on-demand via the report endpoints. Exit criterion: extend `tests/test_deadline_lifecycle.py::test_mode_c_gated` into a now-passes-through case.
 
+### Decomposition + status (2026-05-30)
+
+Delivery is an **independent, expandable module** (`app/delivery/`). Callers use
+ONLY `app.delivery.service.deliver_report_for_run(run, recipients)`; everything
+new is added inside the module. Staged so we don't build a speculative engine:
+
+- **DONE (on master):** channels — `email_smtp` + `folder_drop` + registry (#179);
+  service facade — `payload.py` + `service.py` (#181). Email works today via
+  **Mailtrap** (sandbox) or **Resend** (`smtp.resend.com`, free 3k/mo) through the
+  SMTP channel — config-only, no code.
+- **NEXT:** wire it — completion hook (email the report when a run finishes) +
+  the **Mode C autonomous trigger** below. Needs live infra to verify.
+- **8c (customer-driven):** the engine below — `delivery_subscriptions` /
+  `delivery_attempts` + event-driven dispatcher + retry/backoff. Build when a
+  customer needs multi-recipient / per-department / on-block delivery.
+- **8d (customer-driven):** more channels (Teams/Slack/SFTP) + in-app notifications.
+
+The schema/dispatcher/subscription design below is the **8c** target, not the next step.
+
 ### Approach
 Pluggable channel modules + subscription model + retry with exponential backoff.
 
