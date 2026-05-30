@@ -81,24 +81,32 @@ def _apply_org_context(dbapi_conn, org_id: str | None) -> None:
 
 
 def install_org_listener(engine: sa.Engine) -> None:
-    """Attach pool listeners that bind app.current_org_id to the ContextVar.
+    """Attach a pool checkout listener that binds app.current_org_id to the
+    ContextVar.
 
-    checkout → stamp the active org onto the connection before the caller uses
-    it. checkin → reset to empty so the connection carries no tenant context
-    back into the pool (prevents cross-request leakage)."""
+    On every checkout the active org is stamped onto the connection *before*
+    the caller uses it — so the connection always carries the correct tenant at
+    the point of query, and a connection returned to the pool can never serve
+    another tenant with a stale context (the next checkout overwrites it).
+
+    Perf: we remember the last value set on each physical connection
+    (``conn_record.info``) and only issue the ``set_config`` round-trip when the
+    org actually changes. A single-tenant request running many queries on the
+    same pooled connection therefore pays at most one extra round-trip, not one
+    per query — RLS adds negligible overhead to an evaluation run."""
+
+    @sa.event.listens_for(engine, "connect")
+    def _on_connect(dbapi_conn, conn_record):  # noqa: ANN001
+        # New physical connection carries no session GUC — drop any cached marker
+        # so the next checkout re-applies it (handles pool recycle/invalidate).
+        conn_record.info.pop("app_org", None)
 
     @sa.event.listens_for(engine, "checkout")
     def _on_checkout(dbapi_conn, conn_record, conn_proxy):  # noqa: ANN001
-        _apply_org_context(dbapi_conn, _current_org_id.get())
-
-    @sa.event.listens_for(engine, "checkin")
-    def _on_checkin(dbapi_conn, conn_record):  # noqa: ANN001
-        try:
-            _apply_org_context(dbapi_conn, None)
-        except Exception:
-            # A dead/closed connection on checkin must not raise; the pool
-            # will discard it. Context is re-stamped on the next checkout.
-            pass
+        org = _current_org_id.get() or ""
+        if conn_record.info.get("app_org") != org:
+            _apply_org_context(dbapi_conn, org)
+            conn_record.info["app_org"] = org
 
 
 def _url(user: str, password: str) -> str:

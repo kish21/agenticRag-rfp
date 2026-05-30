@@ -88,6 +88,49 @@ def _check_auth_secrets() -> None:
         )
 
 
+def _check_db_app_role() -> None:
+    """Verify the runtime DB role is one RLS can actually constrain.
+
+    RLS is bypassed by a superuser or a BYPASSRLS role. If the app ever connects
+    as such a role (e.g. POSTGRES_APP_* misconfigured to the owner), tenant
+    isolation silently degrades to application filters only. Fail loud in
+    production; warn in dev. Also requires POSTGRES_APP_PASSWORD to be set in
+    production so the app role is genuinely separate from the owner."""
+    import sqlalchemy as sa
+    from app.db.fact_store import get_engine
+
+    problems: list[str] = []
+    if _is_production() and not settings.postgres_app_password:
+        problems.append(
+            "POSTGRES_APP_PASSWORD is unset — the app would fall back to the owner "
+            "role's credentials, bypassing RLS. Set it (and the platform_app role's "
+            "password) to a secret."
+        )
+    try:
+        with get_engine().connect() as conn:
+            row = conn.execute(sa.text(
+                "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles "
+                "WHERE rolname = current_user"
+            )).fetchone()
+        if row and (row.rolsuper or row.rolbypassrls):
+            problems.append(
+                f"app connects as '{row.current_user}' which is "
+                f"{'SUPERUSER' if row.rolsuper else 'BYPASSRLS'} — RLS is bypassed. "
+                "Point POSTGRES_APP_USER at the non-superuser platform_app role."
+            )
+    except Exception as exc:
+        # Don't block boot on a transient DB hiccup; the role check is a guard,
+        # not a liveness probe.
+        print(f"[startup] Could not verify DB app role: {exc}")
+        return
+
+    if problems:
+        msg = "TENANT-ISOLATION MISCONFIGURATION:\n  - " + "\n  - ".join(problems)
+        if _is_production():
+            raise RuntimeError(msg + "\n(refusing to start in production)")
+        print(f"[startup] WARNING — {msg}")
+
+
 def _mark_orphaned_runs() -> None:
     """On startup, any run still 'running' was orphaned by a previous crash/restart."""
     try:
@@ -117,6 +160,7 @@ async def lifespan(app: FastAPI):
     _check_cors_origins()
     _check_auth_secrets()
     _run_migrations()
+    _check_db_app_role()
     _mark_orphaned_runs()
     yield
 

@@ -31,12 +31,24 @@ Two facts make that true here:
   policy applies even to the table owner — defense in depth if anything ever
   connects as the owner.
 
-Each policy is `USING (org_id::text = current_setting('app.current_org_id', true))`.
+Each policy is `USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)`
+— compared as **uuid, not text**, so the org filter uses the `(org_id, …)`
+btree index instead of a sequential scan (matters at multi-tenant scale; RLS
+adds negligible overhead to an evaluation run). `org_settings` keeps a text
+comparison (its `org_id` is text); the three access-control tables
+(`user_departments`, `rfp_collaborators`, `approval_assignments`) use a join to
+the owning row.
+
 The GUC is set on the **same connection** that runs the query: a SQLAlchemy
 pool `checkout` listener stamps `app.current_org_id` from the request/background
-ContextVar (and resets it on check-in, so a pooled connection never carries one
-tenant's context into another's request). Background pipeline work runs inside
-`org_context(org_id)`; per-row writers (fact store, audit) also set it locally.
+ContextVar. It remembers the last value per pooled connection and only re-issues
+the `set_config` when the org changes (one round-trip per org-change, not per
+query). A connection returned to the pool is always re-stamped on its next
+checkout, so it can never serve another tenant with a stale context. Background
+pipeline work runs inside `org_context(org_id)`; per-row writers (fact store,
+audit) also set it locally. A startup check (`_check_db_app_role`) refuses to
+boot in production if the app connects as a superuser/BYPASSRLS role or
+`POSTGRES_APP_PASSWORD` is unset.
 
 ## What happens on cross-org access
 
@@ -56,15 +68,25 @@ two orgs; zero rows with no context; and the application-layer org-scoping
 predicate. The functional suite runs as the owner (see `tests/conftest.py`) so
 it exercises business logic, not DB plumbing.
 
+## Coverage
+
+Under RLS: the 22 evaluation/fact/decision/audit tables **plus** the operational
+tenant tables `rfps`, `ingestion_jobs`, `event_log`, and `invited_vendors`
+(isolated via a join to its RFP, since it has no `org_id`). `FORCE` is applied
+dynamically to every RLS-enabled table, so a newly-protected table is covered
+automatically (a test asserts no RLS table is left un-FORCEd).
+
+Credentials: the `platform_app` password is **never** in source — it is
+generated at runtime in CI and injected from `POSTGRES_APP_PASSWORD` (via
+`psql -v app_pw=…` for `schema.sql`, and `os.environ` in migration `0011`). A
+gitleaks CI job scans for any hardcoded secret.
+
 ## Known limitations / follow-ups
 
-- A small set of operational tables (`rfps`, `ingestion_jobs`, `invited_vendors`,
-  `event_log`, `organisations`, billing/module shells) are **not** under RLS;
-  they are protected by application-layer org filters only. Adding RLS to them
-  is tracked as a follow-up.
-- The functional test suite runs as the owner role; migrating it to run as
-  `platform_app` under per-test `org_context` (full end-to-end RLS coverage) is
-  a tracked follow-up.
-- The `platform_app` password ships with a dev/CI default in `schema.sql`;
-  **production must rotate it** (`ALTER ROLE platform_app PASSWORD …`) and set
-  `POSTGRES_APP_PASSWORD` to match.
+- `organisations` and the billing/module shell tables are not org-RLS'd (the
+  identity/billing layer; `organisations.org_id` is the tenant's own PK). They
+  are reached via the admin/auth path or app-filtered.
+- The functional test suite runs as the owner role (see `tests/conftest.py`) so
+  it tests business logic; the request path is proven as the real `platform_app`
+  role by `test_request_path_isolation_end_to_end`. Migrating the whole suite to
+  the app role is a tracked follow-up.

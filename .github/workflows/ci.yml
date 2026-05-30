@@ -8,6 +8,21 @@ on:
     branches: [master]
 
 jobs:
+  # ── Job 0: Secret scan ───────────────────────────────────────────────────
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so gitleaks scans all commits
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
   # ── Job 1: Frontend build ────────────────────────────────────────────────
   frontend-build:
     name: Frontend — Next.js build
@@ -100,6 +115,11 @@ jobs:
         # must install BOTH files; production jobs install only requirements.txt.
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Generate platform_app role password
+        # Generated at runtime — no DB credential lives in the repo. Persisted
+        # to the job env so the schema bootstrap and the tests use the same value.
+        run: echo "PG_APP_PW=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+
       - name: Create minimal .env for tests
         run: |
           cat > .env << 'EOF'
@@ -110,7 +130,6 @@ jobs:
           POSTGRES_USER=platformuser
           POSTGRES_PASSWORD=ci-password
           POSTGRES_APP_USER=platform_app
-          POSTGRES_APP_PASSWORD=platform_app_pass2026
           QDRANT_URL=http://localhost:6333
           SECRET_KEY=ci-test-secret-key-not-real
           LLM_PROVIDER=openai
@@ -120,6 +139,7 @@ jobs:
           LANGFUSE_SECRET_KEY=fake
           LANGFUSE_HOST=http://localhost
           EOF
+          echo "POSTGRES_APP_PASSWORD=$PG_APP_PW" >> .env
 
       - name: Bootstrap schema + mark Alembic state
         # The repo has both app/db/schema.sql (declarative, CREATE TABLE IF
@@ -128,11 +148,13 @@ jobs:
         # individual migrations only cover deltas added after their cut date.
         # Dev environments bootstrap via schema.sql, not by replaying all
         # migrations from 0001. Mirror that here so CI sees the same shape.
+        # -v app_pw=... supplies the platform_app password (no literal in SQL).
         env:
           PGPASSWORD: ci-password
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql -h localhost -U platformuser -d agenticplatform -f app/db/schema.sql
+          psql -h localhost -U platformuser -d agenticplatform \
+            -v app_pw="$PG_APP_PW" -f app/db/schema.sql
           PYTHONPATH=. alembic stamp head
 
       - name: Run pytest
@@ -143,10 +165,9 @@ jobs:
           POSTGRES_USER: platformuser
           POSTGRES_PASSWORD: ci-password
           # Non-superuser app role (created by schema.sql) that RLS governs.
-          # The tenant-isolation test connects as this role; password must match
-          # the literal in app/db/schema.sql.
+          # The tenant-isolation test connects as this role.
           POSTGRES_APP_USER: platform_app
-          POSTGRES_APP_PASSWORD: platform_app_pass2026
+          POSTGRES_APP_PASSWORD: ${{ env.PG_APP_PW }}
         run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression --ignore=tests/integration
 
   # ── Job 4: Backend contract tests (no services needed — import-only) ─────

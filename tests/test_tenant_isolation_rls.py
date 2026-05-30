@@ -24,19 +24,9 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
+from app.auth.dependencies import COOKIE_NAME
 from app.db.fact_store import get_admin_engine
 from app.db.session import app_engine_url, install_org_listener, org_context
-
-# The 22 tables that must enforce tenant isolation.
-PROTECTED_TABLES = [
-    "evaluation_setups", "evaluation_runs", "vendor_documents",
-    "extracted_certifications", "extracted_insurance", "extracted_slas",
-    "extracted_projects", "extracted_pricing", "extracted_facts",
-    "decisions", "audit_overrides", "approvals", "audit_log",
-    "access_audit_log", "users", "org_criteria_templates",
-    "dept_criteria_templates", "org_settings", "org_settings_audit",
-    "user_departments", "rfp_collaborators", "approval_assignments",
-]
 
 ORG_A = str(uuid.uuid4())
 ORG_B = str(uuid.uuid4())
@@ -99,17 +89,33 @@ def test_app_role_is_not_privileged(admin_engine):
     assert row.rolcanlogin is True, "platform_app cannot log in"
 
 
-def test_all_protected_tables_force_rls(admin_engine):
-    """FORCE ROW LEVEL SECURITY must be set on every protected table, so the
-    policy applies even to the table owner (defense in depth)."""
+def test_every_rls_table_is_forced(admin_engine):
+    """Single source of truth: EVERY table with RLS enabled must also be FORCEd,
+    so the policy applies to the owner too. No hardcoded table list — this
+    derives the set from the catalog, so a newly-protected table is covered
+    automatically (and this test fails if someone enables RLS without FORCE)."""
     with admin_engine.connect() as c:
-        rows = c.execute(sa.text(
+        not_forced = [r.relname for r in c.execute(sa.text(
             "SELECT relname FROM pg_class "
-            "WHERE relname = ANY(:t) AND relforcerowsecurity = true"
-        ), {"t": PROTECTED_TABLES}).fetchall()
-    forced = {r.relname for r in rows}
-    missing = set(PROTECTED_TABLES) - forced
-    assert not missing, f"tables missing FORCE ROW LEVEL SECURITY: {sorted(missing)}"
+            "WHERE relnamespace = 'public'::regnamespace "
+            "AND relrowsecurity = true AND relforcerowsecurity = false"
+        ))]
+    assert not not_forced, f"RLS-enabled but not FORCEd: {sorted(not_forced)}"
+
+
+def test_hot_path_policies_are_index_friendly(admin_engine):
+    """The evaluation hot-path tables must compare org_id as uuid (not ::text),
+    so the org filter can use the (org_id, …) btree index at scale rather than
+    a sequential scan."""
+    hot = ("extracted_facts", "extracted_certifications", "evaluation_runs")
+    with admin_engine.connect() as c:
+        rows = {r.tablename: r.qual for r in c.execute(sa.text(
+            "SELECT tablename, qual FROM pg_policies WHERE tablename = ANY(:t)"
+        ), {"t": list(hot)})}
+    for t in hot:
+        assert t in rows, f"no policy on {t}"
+        assert "::text =" not in rows[t], f"{t} policy still casts org_id to text: {rows[t]}"
+        assert "::uuid" in rows[t], f"{t} policy not uuid-compared: {rows[t]}"
 
 
 def test_no_legacy_app_org_id_guc_remains(admin_engine):
@@ -218,3 +224,65 @@ def test_run_lookup_is_org_scoped(admin_engine):
         assert c.execute(lookup, {"rid": run_b, "oid": ORG_A}).fetchone() is None
         # org B resolves its own run.
         assert c.execute(lookup, {"rid": run_b, "oid": ORG_B}).fetchone() is not None
+
+
+# ── End-to-end request path: JWT → middleware → listener → RLS ───────────────
+
+def test_request_path_isolation_end_to_end(monkeypatch):
+    """Drive a real request through OrgContextMiddleware as the platform_app
+    role and confirm the chain (cookie JWT → ContextVar → connection listener →
+    RLS) confines the query to the caller's org — and that no token = no rows.
+
+    This is the one test that exercises the production request path as the app
+    role (the rest of the suite runs as the owner via conftest)."""
+    import app.db.fact_store as fs
+    from app.db import session as dbsession
+
+    # Restore the REAL app-role engine for this test (conftest routes get_engine
+    # to the owner). monkeypatch + cache reset are undone after the test.
+    monkeypatch.setattr(fs, "app_engine_url", dbsession.app_engine_url)
+    fs._engine = None
+    try:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from app.api.middleware import OrgContextMiddleware
+        from app.auth.jwt import create_access_token
+
+        app = FastAPI()
+        app.add_middleware(OrgContextMiddleware)
+
+        @app.get("/_t/run_count")
+        def _run_count():
+            with fs.get_engine().connect() as c:
+                return {"n": c.execute(sa.text("SELECT count(*) FROM evaluation_runs")).scalar()}
+
+        client = TestClient(app)
+        tok = create_access_token(email="a@x.test", org_id=ORG_A,
+                                  role="company_admin", dept_id=None)
+
+        client.cookies.set(COOKIE_NAME, tok.access_token)
+        assert client.get("/_t/run_count").json()["n"] == 1   # only org A's run
+
+        client.cookies.clear()
+        assert client.get("/_t/run_count").json()["n"] == 0   # no token → no rows
+    finally:
+        fs._engine = None  # next test rebuilds via conftest's owner routing
+
+
+def test_operational_table_rfps_isolated(admin_engine, app_engine):
+    """rfps (brought under RLS in this change) isolates by org too."""
+    with admin_engine.begin() as c:
+        c.execute(sa.text(
+            "INSERT INTO rfps (rfp_id, org_id, title, created_by_email) "
+            "VALUES (:r, CAST(:o AS uuid), 'B rfp', 'b@x.test')"
+        ), {"r": f"rfpiso-{ORG_B[:8]}", "o": ORG_B})
+    try:
+        with org_context(ORG_A), app_engine.connect() as c:
+            seen = c.execute(sa.text(
+                "SELECT count(*) FROM rfps WHERE org_id = CAST(:o AS uuid)"
+            ), {"o": ORG_B}).scalar()
+        assert seen == 0, "org A can see org B's rfps — RLS not enforcing on rfps"
+    finally:
+        with admin_engine.begin() as c:
+            c.execute(sa.text("DELETE FROM rfps WHERE rfp_id = :r"),
+                      {"r": f"rfpiso-{ORG_B[:8]}"})
