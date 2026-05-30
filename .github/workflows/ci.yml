@@ -165,10 +165,12 @@ jobs:
           POSTGRES_USER: platformuser
           POSTGRES_PASSWORD: ci-password
           # Non-superuser app role (created by schema.sql) that RLS governs.
-          # The tenant-isolation test connects as this role.
+          # The tenant-isolation test connects as this role. The password is
+          # read from the $PG_APP_PW shell var (set via $GITHUB_ENV in an
+          # earlier step) on the run line — avoids a ${{ env }} expression the
+          # workflow linter can't statically resolve.
           POSTGRES_APP_USER: platform_app
-          POSTGRES_APP_PASSWORD: ${{ env.PG_APP_PW }}
-        run: PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression --ignore=tests/integration
+        run: POSTGRES_APP_PASSWORD="$PG_APP_PW" PYTHONPATH=. pytest tests/ -v --tb=short --ignore=tests/regression --ignore=tests/integration
 
   # ── Job 4: Backend contract tests (no services needed — import-only) ─────
   backend-contracts:
