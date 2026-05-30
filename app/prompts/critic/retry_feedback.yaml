@@ -1,0 +1,14 @@
+name: critic-retry-feedback
+description: >
+  Phase 2c — corrective preamble injected into a per-vendor generation agent
+  (Extraction / Evaluation) on a HARD critic verdict, so the agent self-corrects
+  on the next attempt. The Critic-as-controller fills {flags} with the failing
+  HARD flags (one per line, "- <description> -> <recommendation>"). Prepended to
+  the agent's normal prompt by run_with_critic_retry. Lives in the registry so
+  the wording is tunable without a code change, like every other prompt.
+version: "1"
+template: |
+  YOUR PREVIOUS ATTEMPT FAILED THE AUTOMATED QUALITY CHECK. Correct the following issues and produce the output again:
+  {flags}
+input_variables:
+  - flags

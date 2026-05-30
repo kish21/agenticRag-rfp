@@ -91,9 +91,9 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** Phase 3 + Phase 5 done 2026-05-29. 2026-05-30 (13 PRs): docs refresh (#172), real BM25/P1.12 (#173), Phase 7 plan align (#174), **Phase 7 customer report (#176)** + polish (#177) + **frontend report buttons (#178)**, **Phase 8a delivery channels (#179)** + **delivery service facade (#181)** + decomposition (#182), **Phase 2c exit-criteria contract (#183)** + **self-correcting retry engine (#184)**. Phase 1, 2 (Explanation only), 4, 7, 9 on master; Phase 8 module foundation on master. **Phase 2c IN PROGRESS** (engine done, wiring pending). Remaining: **2c wiring**, 6, 8b wiring, 10.
-**Last verified checkpoint:** #184 merged. `app/pipeline/critic_retry.py` (`run_with_critic_retry`) + `tests/test_critic_retry.py` (5 green): the shared in-branch self-correcting Critic controller for per-vendor generation agents — retry-with-feedback (max 2), per-vendor isolation, HARD-block guard on exhaust, telemetry, never-raises. NOT yet wired to any agent.
-**Next action:** see **NEXT SESSION PLAN** — finish **Phase 2c wiring**.
+**Current skill:** Phase 3 + Phase 5 done 2026-05-29. 2026-05-30 (13 PRs): docs refresh (#172), real BM25/P1.12 (#173), Phase 7 plan align (#174), **Phase 7 customer report (#176)** + polish (#177) + **frontend report buttons (#178)**, **Phase 8a delivery channels (#179)** + **delivery service facade (#181)** + decomposition (#182), **Phase 2c exit-criteria contract (#183)** + **self-correcting retry engine (#184)**. Phase 1, 2, 4, 7, 9 on master; Phase 8 module foundation on master. **Phase 2c COMPLETE** (engine #184 + wiring on branch `feat/phase2c-critic-controller-wiring`, not yet merged). Remaining: 6, 8b wiring, 10.
+**Last verified checkpoint:** Phase 2c wiring done (branch `feat/phase2c-critic-controller-wiring`, pre-PR). Extraction + Evaluation now route through `run_with_critic_retry`; `critic_feedback` preamble added to both agents; `PipelineState.critic_metrics_accum` (deep reducer `_merge_critic_metrics`); telemetry → `summary.json` + run event log. Tests green: `tests/test_critic_controller_wiring.py` (10) + `tests/test_critic_retry.py` (5); contracts 14/14; drift OK. BACKLOG P2.0c + metrics-doc Phase-2 claim updated.
+**Next action:** run `/phase-done-rfp` (Checks A topology + C per-vendor guards), then open PR for the branch. Then P0.16 (RLS) is the top enterprise-readiness item.
 **Blockers:** none
 
 ### NEXT SESSION PLAN (set 2026-05-30 — START HERE: finish Phase 2c)

@@ -32,6 +32,21 @@ def _concat_lists(left: list, right: list) -> list:
     return (left or []) + (right or [])
 
 
+def _merge_critic_metrics(left: dict, right: dict) -> dict:
+    """One-level-deep merge for critic telemetry shaped {vendor_id: {agent: {...}}}.
+
+    A shallow merge would clobber: extraction writes {vid: {"extraction": {...}}}
+    in one stage and evaluation writes {vid: {"evaluation": {...}}} in a LATER
+    stage for the SAME vendor_id — a top-level update() would drop the extraction
+    bucket. Merging the inner per-agent dict keeps both. Within a single stage's
+    parallel fan-out the vendor_ids are distinct, so there is no collision there.
+    """
+    out = {vid: dict(agents) for vid, agents in (left or {}).items()}
+    for vid, agents in (right or {}).items():
+        out.setdefault(vid, {}).update(agents or {})
+    return out
+
+
 class PipelineState(TypedDict):
     # ── Fixed inputs (set once by _run_pipeline, never mutated by nodes) ─────
     run_id: str
@@ -101,6 +116,13 @@ class PipelineState(TypedDict):
     # graph.py. Explicit boolean is more robust than inferring retry-intent
     # from the absence of explanation_output.
     explanation_retry_requested: bool
+
+    # ── Phase 2c — Critic-as-controller telemetry (per-vendor, parallel-safe) ─
+    # run_with_critic_retry returns {vendor_id: {agent: {blocks, retries,
+    # retry_success, exhausted}}} on every branch. The deep reducer keeps both
+    # the extraction and evaluation buckets for the same vendor (written in
+    # different graph stages). Aggregated into summary.json at run end.
+    critic_metrics_accum: Annotated[dict, _merge_critic_metrics]
 
     # ── Control flow ─────────────────────────────────────────────────────────
     blocked: bool

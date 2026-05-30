@@ -32,6 +32,19 @@ from app.db.fact_store import get_vendor_facts
 from app.infra.cost_tracker import mark_agent
 
 
+def _feedback_block(critic_feedback: str) -> str:
+    """Phase 2c — render a prior attempt's critic feedback as a 'PREVIOUS ATTEMPT
+    FAILED' preamble so the LLM corrects course (mirrors the Extraction/Explanation
+    agents). Empty string on the first attempt is a no-op."""
+    if not critic_feedback:
+        return ""
+    return (
+        f"========================================\n"
+        f"{critic_feedback}\n"
+        f"========================================\n\n"
+    )
+
+
 async def _llm_verify_threshold(
     chunk_text: str,
     check_name: str,
@@ -209,6 +222,7 @@ async def _evaluate_mandatory_check(
     org_settings=None,
     retried_fact_types: list[str] | None = None,
     run_id: str = "",
+    critic_feedback: str = "",
 ) -> ComplianceDecision:
     facts_text = (
         json.dumps(relevant_facts, indent=2, default=str)
@@ -220,6 +234,7 @@ async def _evaluate_mandatory_check(
         {
             "role": "user",
             "content": (
+                f"{_feedback_block(critic_feedback)}"
                 f"Requirement: {check.name}\n"
                 f"Description: {check.description}\n"
                 f"What passes: {check.what_passes}\n"
@@ -302,6 +317,7 @@ async def _score_criterion(
     criterion: ScoringCriterion,
     relevant_facts: list[dict],
     vendor_id: str,
+    critic_feedback: str = "",
 ) -> CriterionScore:
     has_facts = bool(relevant_facts)
     facts_text = (
@@ -314,6 +330,7 @@ async def _score_criterion(
         {
             "role": "user",
             "content": (
+                f"{_feedback_block(critic_feedback)}"
                 f"Criterion: {criterion.name}\n\n"
                 f"Rubric:\n"
                 f"9-10: {criterion.rubric_9_10}\n"
@@ -361,7 +378,12 @@ async def run_evaluation_agent(
     evaluation_setup: EvaluationSetup,
     extraction_output: Optional[ExtractionOutput] = None,
     run_id: str = "",
+    critic_feedback: str = "",
 ) -> tuple[EvaluationOutput, object]:
+    """Phase 2c: optionally accepts `critic_feedback` from a previous attempt's
+    critic verdict. When non-empty it is prepended (via `_feedback_block`) to the
+    mandatory-check and criterion-scoring prompts so the LLM corrects course.
+    Empty string on the first attempt is a no-op."""
     mark_agent("evaluation_agent")  # cost attribution for this task's LLM calls
     evaluation_id = str(uuid.uuid4())
     warnings: list[str] = []
@@ -387,6 +409,7 @@ async def run_evaluation_agent(
                 org_settings=org_settings,
                 retried_fact_types=_retried_fact_types,
                 run_id=run_id,
+                critic_feedback=critic_feedback,
             )
             compliance_decisions.append(decision)
         except Exception as e:
@@ -406,7 +429,8 @@ async def run_evaluation_agent(
                 "scored with empty context, LLM will apply 0-2 rubric band"
             )
         try:
-            score = await _score_criterion(criterion, relevant, vendor_id)
+            score = await _score_criterion(criterion, relevant, vendor_id,
+                                           critic_feedback=critic_feedback)
             criterion_scores.append(score)
         except Exception as e:
             warnings.append(f"Criterion {criterion.criterion_id} failed: {e}")

@@ -365,6 +365,8 @@ async def drive_graph_verbose(graph, initial_state: dict, out_dir: Path) -> tupl
         "diff_keys": [...], "blocked": False, "diff": <safe_dump>
     }
     """
+    from app.pipeline.state import _merge_critic_metrics
+
     section("DRIVING LANGGRAPH — verbose per-node trace")
     print("  Streaming evaluation_graph.astream(initial_state)…\n")
 
@@ -396,8 +398,15 @@ async def drive_graph_verbose(graph, initial_state: dict, out_dir: Path) -> tupl
         print(f"           state-in keys ({len(pre_filled)}): "
               f"{', '.join(pre_filled) if pre_filled else '(empty)'}")
 
-        # Merge the diff
+        # Merge the diff (shallow). In astream "updates" mode each diff is a
+        # node's RAW return, NOT the reducer-applied channel — so critic
+        # telemetry (a deep-merge reducer field) must be accumulated explicitly
+        # or a later stage's emission overwrites the earlier one.
+        _prev_critic = final_state.get("critic_metrics_accum") or {}
         final_state = {**final_state, **diff}
+        if "critic_metrics_accum" in diff:
+            final_state["critic_metrics_accum"] = _merge_critic_metrics(
+                _prev_critic, diff["critic_metrics_accum"])
         blocked = bool(final_state.get("blocked"))
         next_route = "END" if blocked else (
             EXPECTED_NODES[EXPECTED_NODES.index(node_name) + 1]
@@ -471,6 +480,27 @@ def _verify_graph_executed(run: dict, node_trace: list[dict]) -> list[str]:
     if not run["completed_at"]:
         failures.append("completed_at is null")
     return failures
+
+
+def _summarise_critic_metrics(accum: dict) -> dict:
+    """Roll up the per-vendor critic-controller telemetry (Phase 2c).
+
+    `accum` is {vendor_id: {agent: {blocks, retries, retry_success, exhausted}}}.
+    Returns per-agent totals plus a flat per-vendor view, so a smoke run shows
+    how often the self-correcting retry fired, recovered, or exhausted.
+    """
+    per_agent: dict[str, dict] = {}
+    for _vid, agents in (accum or {}).items():
+        for agent, m in (agents or {}).items():
+            a = per_agent.setdefault(
+                agent, {"vendors": 0, "blocks": 0, "retries": 0,
+                        "retry_success": 0, "exhausted": 0})
+            a["vendors"] += 1
+            a["blocks"] += int(m.get("blocks", 0))
+            a["retries"] += int(m.get("retries", 0))
+            a["retry_success"] += 1 if m.get("retry_success") else 0
+            a["exhausted"] += 1 if m.get("exhausted") else 0
+    return {"by_agent": per_agent, "by_vendor": accum or {}}
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -666,6 +696,13 @@ async def main_async(args) -> int:
                 "total_calls": cs["total_calls"],
                 "total_cost_usd": cs["total_cost_usd"],
             }
+        # Phase 2c — Critic-as-controller telemetry. final_state carries the
+        # per-vendor {agent: {blocks, retries, retry_success, exhausted}} map
+        # merged across the parallel branches. Roll it up so a smoke run shows
+        # how often the self-correcting retry fired and recovered.
+        summary["critic"] = _summarise_critic_metrics(
+            final_state.get("critic_metrics_accum") or {})
+
         (out_dir / "summary.json").write_text(
             json.dumps(summary, indent=2, default=str), encoding="utf-8")
 
