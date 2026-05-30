@@ -50,7 +50,7 @@ Critic runs after every agent — cannot be skipped. HARD flag blocks the pipeli
 |---|---|---|
 | Chunking | LlamaIndex HierarchicalNodeParser + SentenceWindowNodeParser | 3 levels: summary/detail/leaf |
 | Dense embeddings | **Configurable** (see Embedding Provider below) | Default: OpenAI 3072-dim |
-| Sparse embeddings | BM25 TF-IDF approximation | 100K hash bins, in-process |
+| Sparse embeddings | Real BM25 (fastembed `Qdrant/bm25`) | Qdrant `modifier=IDF` applies corpus IDF server-side (P1.12) |
 | Hybrid fusion | Reciprocal Rank Fusion (RRF) in Qdrant | k=60 |
 | Reranking | **BGE cross-encoder** `BAAI/bge-reranker-v2-m3` | Local, no API cost |
 | HyDE | LLM generates hypothetical doc, embeds that | Enabled for all tiers |

@@ -30,26 +30,48 @@ def get_dense_embedding(text: str) -> list[float]:
     return embed_text(text)
 
 
-def get_sparse_embedding(text: str) -> tuple[list[int], list[float]]:
+_bm25_model = None
+
+
+def _get_bm25_model():
+    """Lazy singleton for the fastembed BM25 sparse model.
+
+    Loaded on first use (not at import) so importing this module never triggers
+    the model download. The Qdrant/bm25 model is a lightweight tokenizer +
+    stemmer + stopword list (no neural net), cached after first fetch.
     """
-    BM25-style sparse embedding for keyword search.
-    Returns (indices, values) for Qdrant sparse vector storage.
-    Uses TF-IDF approximation — replace with SPLADE model for production if needed.
+    global _bm25_model
+    if _bm25_model is None:
+        from fastembed import SparseTextEmbedding
+        _bm25_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+    return _bm25_model
+
+
+def get_sparse_document_embedding(text: str) -> tuple[list[int], list[float]]:
+    """Real BM25 sparse vector for a *document* chunk (index-time).
+
+    Uses fastembed's Qdrant/bm25 model: proper tokenization (punctuation,
+    currency, alphanumerics like "ISO 27001"/"£10M" preserved), stemming,
+    stopword removal, and length-normalised term frequencies. The IDF term is
+    applied server-side by Qdrant's sparse `modifier=IDF` — so this returns the
+    TF side only. Returns (indices, values) for Qdrant sparse vector storage.
+
+    Note BM25 is asymmetric: documents and queries are embedded differently —
+    use get_sparse_query_embedding() for queries.
     """
-    words = re.sub(r'[^\w\s]', ' ', text.lower()).split()
-    word_freq: dict[int, float] = {}
+    emb = next(iter(_get_bm25_model().embed([text])))
+    return emb.indices.tolist(), emb.values.tolist()
 
-    for word in words:
-        if len(word) < 3:
-            continue
-        idx = int(hashlib.md5(word.encode()).hexdigest()[:8], 16) % 100000
-        word_freq[idx] = word_freq.get(idx, 0) + 1.0
 
-    if word_freq:
-        max_val = max(word_freq.values())
-        word_freq = {k: v / max_val for k, v in word_freq.items()}
+def get_sparse_query_embedding(text: str) -> tuple[list[int], list[float]]:
+    """Real BM25 sparse vector for a *query* (search-time).
 
-    return list(word_freq.keys()), list(word_freq.values())
+    Query-side BM25 weighting (no length normalisation); pairs with the
+    document embedding above and Qdrant's `modifier=IDF`. Returns
+    (indices, values); may be empty if the query is only stopwords.
+    """
+    emb = next(iter(_get_bm25_model().query_embed([text])))
+    return emb.indices.tolist(), emb.values.tolist()
 
 
 def classify_section(
@@ -200,7 +222,7 @@ def process_document(
         }
         priority = priority_map.get(section_type, 3)
 
-        sparse_indices, sparse_values = get_sparse_embedding(text)
+        sparse_indices, sparse_values = get_sparse_document_embedding(text)
 
         chunks.append({
             "chunk_id": chunk_id,

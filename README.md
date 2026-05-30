@@ -42,7 +42,7 @@ This platform replaces the manual, siloed process with a 9-agent AI pipeline tha
 | | Human override with immutable audit trail | ✅ Built |
 | | Rate limiter with exponential backoff | ✅ Built |
 | | Per-org settings (org_settings) with 60s TTL cache | ✅ Built |
-| **Storage** | Qdrant hybrid search — dense + sparse BM25 + Reciprocal Rank Fusion | ✅ Built |
+| **Storage** | Qdrant hybrid search — dense + real BM25 sparse (fastembed + Qdrant `modifier=IDF`) + Reciprocal Rank Fusion | ✅ Built |
 | | PostgreSQL structured facts + Row-Level Security | ✅ Built |
 | | Full lineage: decision → fact → source chunk (source_chunk_id) | ✅ Built |
 | **Frontend** | CEO spend dashboard — active RFPs, committed spend, duplicate alerts, pricing anomalies | 🚧 Partial |
@@ -125,6 +125,13 @@ Full product lifecycle documentation — 32 documents across 6 phases:
           └─────────────────────────────────────────┘
 ```
 
+> **Simplified view.** Retrieval, Extraction, and Evaluation actually run
+> **per-vendor in parallel** (LangGraph `Send` fan-out) with a sync barrier at
+> Comparator, and the Critic is an explicit retry-capable node after Explanation
+> while running inline after the other agents. See
+> [docs/dev/PERFORMANCE_AND_QUALITY_METRICS.md](docs/dev/PERFORMANCE_AND_QUALITY_METRICS.md)
+> for the real topology.
+
 ---
 
 ## Tech Stack
@@ -133,7 +140,7 @@ Full product lifecycle documentation — 32 documents across 6 phases:
 |---|---|
 | **Orchestration** | LangGraph 1.1.10 |
 | **Document parsing** | LlamaIndex 0.14.21 (HierarchicalNodeParser + SentenceWindowNodeParser) |
-| **Vector store** | Qdrant 1.17 — dense + sparse (BM25), Reciprocal Rank Fusion |
+| **Vector store** | Qdrant 1.17 — dense + sparse BM25 (fastembed `Qdrant/bm25` + server-side IDF), Reciprocal Rank Fusion |
 | **Reranker** | BAAI/bge-reranker-v2-m3 (local CrossEncoder) — swappable to Cohere |
 | **Retrieval** | HyDE + query rewriting + hybrid search |
 | **Structured storage** | PostgreSQL 15 + SQLAlchemy 2.0 + Row-Level Security |

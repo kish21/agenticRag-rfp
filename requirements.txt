@@ -30,8 +30,11 @@ cohere==5.21.1              # use cohere.ClientV2() not cohere.Client()
 sentence-transformers==4.1.0  # CrossEncoder API updated in 4.x
 # ColBERT reranking: from sentence_transformers import CrossEncoder
 
-# ── BM25 keyword search ───────────────────────────────────
-rank-bm25==0.2.2
+# ── BM25 keyword search (sparse retrieval) ───────────────
+# fastembed produces real BM25 sparse vectors (Qdrant/bm25 model: proper
+# tokenizer + length-normalised TF). Paired with Qdrant sparse modifier=IDF,
+# this is full BM25 server-side. Replaces the old MD5-hash TF approximation.
+fastembed==0.8.0
 
 # ── Authentication ────────────────────────────────────────
 python-jose[cryptography]==3.3.0

@@ -2,7 +2,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance, VectorParams, SparseVectorParams,
     PointStruct, Filter, FieldCondition, MatchValue,
-    SparseIndexParams
+    SparseIndexParams, Modifier
 )
 from app.config import settings
 import uuid
@@ -34,17 +34,22 @@ def rfp_collection_name(org_id: str, rfp_id: str) -> str:
     return f"{prefix}_{org_id}_rfp_{rfp_id}".replace("-", "_").lower()
 
 
-def create_collection(name: str, vector_size: int | None = None):
+def create_collection(name: str, vector_size: int | None = None, client: QdrantClient | None = None):
     """
     Creates a Qdrant collection with both dense and sparse vectors.
     Dense: for semantic similarity search (OpenAI embeddings)
-    Sparse: for BM25 keyword search
+    Sparse: real BM25 keyword search — sparse vectors carry length-normalised
+            term frequencies (from fastembed Qdrant/bm25) and `modifier=IDF`
+            makes Qdrant apply the corpus IDF server-side, completing BM25.
+
+    `client` is injectable so tests can pass an in-memory QdrantClient.
     """
     from app.providers.embedding import get_embedding_dimensions
     if vector_size is None:
         vector_size = get_embedding_dimensions()
 
-    client = get_qdrant_client()
+    if client is None:
+        client = get_qdrant_client()
 
     existing = [c.name for c in client.get_collections().collections]
     if name in existing:
@@ -60,7 +65,8 @@ def create_collection(name: str, vector_size: int | None = None):
         },
         sparse_vectors_config={
             "sparse": SparseVectorParams(
-                index=SparseIndexParams(on_disk=False)
+                index=SparseIndexParams(on_disk=False),
+                modifier=Modifier.IDF,
             )
         }
     )
@@ -167,14 +173,14 @@ def search_hybrid(
     """
     from qdrant_client import models as qm
     from app.providers.embedding import embed_text
-    from app.retrieval.pipeline import get_sparse_embedding
+    from app.retrieval.pipeline import get_sparse_query_embedding
     from app.config import settings
 
     cfg = settings.platform.retrieval
     client = get_qdrant_client()
 
     dense_vec = dense_vector if dense_vector is not None else embed_text(query_text)
-    sparse_indices, sparse_values = get_sparse_embedding(query_text)
+    sparse_indices, sparse_values = get_sparse_query_embedding(query_text)
 
     must_conditions = [
         FieldCondition(key="org_id", match=MatchValue(value=org_id)),
@@ -196,16 +202,22 @@ def search_hybrid(
             limit=limit * 2,
             filter=qfilter,
         ),
-        qm.Prefetch(
-            query=qm.SparseVector(
-                indices=sparse_indices,
-                values=sparse_values,
-            ),
-            using=cfg.sparse_vector_name,
-            limit=limit * 2,
-            filter=qfilter,
-        ),
     ]
+    # A query of only stopwords yields an empty sparse vector — skip the sparse
+    # prefetch entirely rather than sending an empty SparseVector (which would
+    # contribute nothing and, on some Qdrant versions, error).
+    if sparse_indices:
+        prefetch.append(
+            qm.Prefetch(
+                query=qm.SparseVector(
+                    indices=sparse_indices,
+                    values=sparse_values,
+                ),
+                using=cfg.sparse_vector_name,
+                limit=limit * 2,
+                filter=qfilter,
+            )
+        )
 
     result = client.query_points(
         collection_name=collection,
