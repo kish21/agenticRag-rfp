@@ -238,7 +238,11 @@ export default function ResultsPage() {
             )}
 
             {/* Actions */}
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{
+              display: "flex", gap: 12, flexWrap: "wrap",
+              flexDirection: bp === "mobile" ? "column" : "row",
+              alignItems: bp === "mobile" ? "stretch" : "center",
+            }}>
               <Link
                 href="/"
                 style={{
@@ -271,6 +275,37 @@ export default function ResultsPage() {
               >
                 Compare vendors
               </Link>
+
+              {/* Report deliverable — accent left-border marks this group apart
+                  from the navigation buttons. Cookie-authenticated navigation
+                  (meridian_session) means a plain anchor reaches the protected
+                  endpoint; no token juggling needed. */}
+              <a
+                className="report-action"
+                href={`/api/v1/evaluate/${runId}/report.html`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontFamily: FONT }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" /><path d="M9 13h6" /><path d="M9 17h6" />
+                </svg>
+                View report
+              </a>
+              <a
+                className="report-action"
+                href={`/api/v1/evaluate/${runId}/report.pdf`}
+                style={{ fontFamily: FONT }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <path d="M7 10l5 5 5-5" /><path d="M12 15V3" />
+                </svg>
+                Download PDF
+              </a>
             </div>
           </>
         )}
@@ -279,6 +314,37 @@ export default function ResultsPage() {
       <style>{`
         @keyframes spin {
           to { transform: rotate(360deg); }
+        }
+        .report-action {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 9px 18px;
+          background-color: transparent;
+          border-top: 1px solid var(--color-border);
+          border-bottom: 1px solid var(--color-border);
+          border-right: 1px solid var(--color-border);
+          border-left: 2px solid var(--color-accent);
+          border-radius: var(--radius);
+          font-weight: 600;
+          font-size: 13px;
+          color: var(--color-text-secondary);
+          text-decoration: none;
+          cursor: pointer;
+          transition: transform var(--transition), opacity var(--transition);
+        }
+        .report-action:hover {
+          background-color: var(--color-surface-hover);
+          color: var(--color-text-primary);
+          transform: translateY(-1px);
+        }
+        .report-action:focus-visible {
+          outline: 2px solid var(--color-accent);
+          outline-offset: 2px;
+        }
+        .report-action:active {
+          transform: translateY(0);
         }
       `}</style>
     </div>
