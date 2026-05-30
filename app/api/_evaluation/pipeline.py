@@ -27,6 +27,7 @@ from .db import (
     _db_update_status,
     _db_append_event,
     _db_save_decision,
+    _db_save_explanation,
 )
 
 
@@ -147,6 +148,20 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         dec_out = final_state.get("decision_output")
         if dec_out:
             _db_save_decision(run_id, dec_out.model_dump(mode="json"))
+
+        # Phase 7: persist the Explanation output (narratives) so the customer
+        # PDF report can render them. Best-effort — never block run completion.
+        exp_out = final_state.get("explanation_output")
+        if exp_out is not None:
+            try:
+                _db_save_explanation(
+                    run_id,
+                    exp_out.model_dump(mode="json") if hasattr(exp_out, "model_dump") else exp_out,
+                )
+            except Exception as exc:  # noqa: BLE001
+                rfp_logger.dev(DevLevel.WARN, "Pipeline",
+                               f"explanation_output persist failed (non-fatal): {exc}",
+                               run_id=run_id, org_id=org_id)
 
         n_short = len(getattr(dec_out, "shortlisted_vendors", []) or [])
         n_rej   = len(getattr(dec_out, "rejected_vendors",    []) or [])

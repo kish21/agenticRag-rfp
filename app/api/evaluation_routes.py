@@ -27,7 +27,7 @@ from datetime import datetime
 
 import sqlalchemy as sa
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user
@@ -691,6 +691,47 @@ async def run_stream_alias(run_id: str, token: str = ""):
         _event_stream(run_id, user.org_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── GET /{runId}/report.html | report.pdf  (Phase 7) ───────────────────────────
+
+def _run_report_or_404(run_id: str, user: TokenData, action: str) -> dict:
+    """Shared loader: org-scoped fetch + access check + 'run complete' gate."""
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+    log_access(run_id, user.org_id, user.email, action)
+    if not run.get("decision_output"):
+        raise HTTPException(
+            status_code=409,
+            detail="Report not available — this run has not completed.",
+        )
+    return run
+
+
+@router.get("/{run_id}/report.html", response_class=HTMLResponse)
+async def get_report_html(run_id: str, user: TokenData = Depends(get_current_user)):
+    """In-app report view: the customer logs in and reads the report as HTML."""
+    from app.output.pdf_report import build_report_html_for_run
+    run = _run_report_or_404(run_id, user, "view_report_html")
+    return HTMLResponse(content=build_report_html_for_run(run))
+
+
+@router.get("/{run_id}/report.pdf")
+async def get_report_pdf(run_id: str, user: TokenData = Depends(get_current_user)):
+    """Download the report as a PDF (same template as the HTML view)."""
+    from app.output.pdf_report import render_report_pdf_for_run
+    run = _run_report_or_404(run_id, user, "download_report_pdf")
+    try:
+        pdf = render_report_pdf_for_run(run)
+    except RuntimeError as exc:
+        # weasyprint / native libs unavailable in this deployment.
+        raise HTTPException(status_code=503, detail=str(exc))
+    filename = f"evaluation-report-{run_id[:8]}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

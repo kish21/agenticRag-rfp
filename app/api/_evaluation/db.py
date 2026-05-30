@@ -16,7 +16,7 @@ def _db_get_run(run_id: str, org_id: str) -> dict:
                 SELECT run_id::text, org_id::text, setup_id, rfp_id,
                        rfp_title, department, rfp_filename,
                        status, vendor_ids, contract_value,
-                       agent_events, agent_log, decision_output,
+                       agent_events, agent_log, decision_output, explanation_output,
                        created_at, completed_at,
                        vendor_names, created_by_email, creator_dept_id,
                        currency, gaps_report
@@ -89,6 +89,23 @@ def _db_save_decision(run_id: str, decision: dict) -> None:
                 WHERE run_id = CAST(:rid AS uuid)
             """),
             {"dec": dec_json, "rid": run_id},
+        )
+
+
+def _db_save_explanation(run_id: str, explanation: dict) -> None:
+    """Persist the Explanation agent output (narratives + Phase 7 report fields).
+    Separate from _db_save_decision so it can run even if the report fields are
+    populated later. Null bytes stripped (PostgreSQL rejects them in jsonb)."""
+    engine = get_engine()
+    exp_json = json.dumps(explanation).replace("\\u0000", "")
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text("""
+                UPDATE evaluation_runs
+                SET explanation_output = CAST(:exp AS jsonb)
+                WHERE run_id = CAST(:rid AS uuid)
+            """),
+            {"exp": exp_json, "rid": run_id},
         )
 
 

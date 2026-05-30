@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ ctx.rfp_title }} — Evaluation Report</title>
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm 20mm 16mm;
+    @bottom-center {
+      content: "Confidential — Procurement Evaluation Report";
+      font-size: 8px; color: #94a3b8;
+    }
+    @bottom-right { content: counter(page) " / " counter(pages); font-size: 8px; color: #94a3b8; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    color: #1e293b; font-size: 10.5px; line-height: 1.55; margin: 0;
+  }
+  h1, h2, h3 { color: #1a2744; margin: 0 0 6px; }
+  .section { page-break-before: always; padding-top: 4px; }
+  .section:first-of-type { page-break-before: avoid; }
+  .section-title {
+    font-size: 15px; font-weight: 800; letter-spacing: -0.02em;
+    border-bottom: 2px solid #1a2744; padding-bottom: 4px; margin-bottom: 10px;
+  }
+  .muted { color: #64748b; }
+  .mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
+  th { background: #1a2744; color: #fff; text-align: left; padding: 5px 7px; font-size: 9px; }
+  td { padding: 5px 7px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 8.5px; font-weight: 700; }
+  .pass { background: #dcfce7; color: #166534; }
+  .fail { background: #fee2e2; color: #991b1b; }
+  .evidence {
+    background: #f1f5f9; border-left: 3px solid #2563eb;
+    padding: 5px 9px; margin: 4px 0; font-size: 9.5px; color: #334155;
+  }
+  .claim { margin: 6px 0; }
+  .claim .q { color: #475569; font-style: italic; }
+  /* Cover */
+  .cover { page-break-after: always; text-align: center; padding-top: 70mm; }
+  .cover h1 { font-size: 30px; letter-spacing: -0.03em; margin-bottom: 8px; }
+  .cover .sub { font-size: 14px; color: #64748b; margin: 3px 0; }
+  .cover .meta { margin-top: 24px; font-size: 10px; color: #475569; }
+  .cover .conf {
+    display: inline-block; margin-top: 18px; padding: 6px 16px; border-radius: 8px;
+    background: #eff6ff; color: #1d4ed8; font-weight: 700; font-size: 11px;
+  }
+  .podium td.rank { font-weight: 800; color: #1a2744; }
+  .delta { color: #16a34a; font-weight: 700; }
+  .winner-box {
+    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+    padding: 12px 14px; font-size: 12px; font-weight: 600; color: #1e3a8a;
+  }
+  .review-flag {
+    background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+    padding: 6px 10px; border-radius: 6px; font-size: 9.5px; margin: 6px 0;
+  }
+  ul { margin: 4px 0 8px; padding-left: 18px; }
+  li { margin: 2px 0; }
+</style>
+</head>
+<body>
+
+<!-- 1. COVER -->
+<div class="cover">
+  <div class="sub">{{ ctx.org_name }}</div>
+  <h1>{{ ctx.rfp_title }}</h1>
+  <div class="sub">Procurement Evaluation Report</div>
+  <div class="conf">Decision confidence: {{ "%.0f"|format(ctx.report_confidence * 100) }}%</div>
+  <div class="meta">
+    Decision ID: <span class="mono">{{ ctx.decision_id }}</span><br>
+    RFP: <span class="mono">{{ ctx.rfp_id }}</span><br>
+    Decision date: {{ ctx.decision_date }}<br>
+    Generated: {{ ctx.generated_at }}
+  </div>
+  {% if ctx.requires_human_review %}
+  <div class="review-flag" style="margin-top:20px;display:inline-block;">⚠ This evaluation requires human review before approval.</div>
+  {% endif %}
+</div>
+
+<!-- 2. EXECUTIVE SUMMARY -->
+<div class="section">
+  <div class="section-title">1. Executive Summary</div>
+  <p>{{ ctx.executive_summary }}</p>
+</div>
+
+<!-- 3. WINNER DECLARATION -->
+<div class="section">
+  <div class="section-title">2. Recommendation</div>
+  <div class="winner-box">{{ ctx.winner_declaration }}</div>
+</div>
+
+<!-- 4. PODIUM -->
+<div class="section">
+  <div class="section-title">3. Ranked Shortlist</div>
+  {% if ctx.podium %}
+  <table class="podium">
+    <tr><th>Rank</th><th>Vendor</th><th>Score</th><th>Gap to next</th><th>Tipping factor</th></tr>
+    {% for p in ctx.podium %}
+    <tr>
+      <td class="rank">#{{ p.rank }}</td>
+      <td>{{ p.vendor_name }}</td>
+      <td>{{ "%.1f"|format(p.total_score) }}</td>
+      <td>{% if p.score_delta_vs_next %}<span class="delta">+{{ "%.1f"|format(p.score_delta_vs_next) }}</span>{% else %}—{% endif %}</td>
+      <td class="muted">{{ p.tipping_factor }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No vendors were shortlisted.</p>{% endif %}
+</div>
+
+<!-- 5. CRITERION SCORECARD MATRIX -->
+<div class="section">
+  <div class="section-title">4. Per-Criterion Scorecard</div>
+  {% if ctx.criterion_scorecards %}
+  <table>
+    <tr>
+      <th>Criterion</th>
+      {% for p in ctx.podium %}<th>{{ p.vendor_name }}</th>{% endfor %}
+    </tr>
+    {% for card in ctx.criterion_scorecards %}
+    <tr>
+      <td>{{ card.criterion_name }}</td>
+      {% for p in ctx.podium %}
+      <td>{{ "%.0f"|format(card.per_vendor_scores.get(p.vendor_id, 0)) }}/10</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No scored criteria available.</p>{% endif %}
+</div>
+
+<!-- 6. PAIRWISE COMPARISONS -->
+<div class="section">
+  <div class="section-title">5. Head-to-Head Comparison</div>
+  {% if ctx.pairwise_comparisons %}
+  {% for pw in ctx.pairwise_comparisons %}
+    <p>{{ pw.narrative }}</p>
+    {% for c in pw.key_evidence %}
+    <div class="claim">
+      <div>{{ c.claim_text }}</div>
+      <div class="evidence q">“{{ c.grounding_quote }}”</div>
+    </div>
+    {% endfor %}
+  {% endfor %}
+  {% else %}<p class="muted">A head-to-head requires at least two shortlisted vendors.</p>{% endif %}
+</div>
+
+<!-- 7. MANDATORY CHECK TABLE -->
+<div class="section">
+  <div class="section-title">6. Mandatory Compliance Checks</div>
+  {% if ctx.mandatory_check_table %}
+  <table>
+    <tr><th>Vendor</th><th>Check</th><th>Result</th></tr>
+    {% for row in ctx.mandatory_check_table %}
+    <tr>
+      <td>{{ row.vendor_name }}</td>
+      <td>{{ row.check }}</td>
+      <td><span class="pill {{ 'pass' if row.result == 'PASS' else 'fail' }}">{{ row.result }}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No mandatory checks recorded.</p>{% endif %}
+</div>
+
+<!-- 8. REJECTION RATIONALE -->
+<div class="section">
+  <div class="section-title">7. Rejection Rationale</div>
+  {% if ctx.rejection_reasons %}
+  {% for vid, claims in ctx.rejection_reasons.items() %}
+    <h3 style="color:#991b1b;">Rejected: {{ vid }}</h3>
+    {% for c in claims %}
+    <div class="claim">
+      <div>{{ c.claim_text }}</div>
+      {% if c.grounding_quote %}<div class="evidence q">“{{ c.grounding_quote }}”</div>{% endif %}
+    </div>
+    {% endfor %}
+  {% endfor %}
+  {% else %}<p class="muted">No vendors were rejected.</p>{% endif %}
+</div>
+
+<!-- 9. APPROVAL ROUTING -->
+<div class="section">
+  <div class="section-title">8. Approval Routing</div>
+  {% if ctx.approval %}
+  <table>
+    <tr><th>Approval tier</th><td>{{ ctx.approval.get('approval_tier', '—') }}</td></tr>
+    <tr><th>Approver role</th><td>{{ ctx.approval.get('approver_role', '—') }}</td></tr>
+    <tr><th>Contract value</th><td>{{ ctx.approval.get('contract_value', '—') }}</td></tr>
+    <tr><th>SLA (hours)</th><td>{{ ctx.approval.get('sla_hours', '—') }}</td></tr>
+    {% if ctx.approval.get('escalation_reason') %}<tr><th>Escalation</th><td>{{ ctx.approval.get('escalation_reason') }}</td></tr>{% endif %}
+  </table>
+  {% else %}<p class="muted">No approval routing recorded.</p>{% endif %}
+</div>
+
+<!-- 10. METHODOLOGY -->
+<div class="section">
+  <div class="section-title">9. Methodology</div>
+  <p>{{ ctx.methodology_note }}</p>
+  <p class="muted">Grounding completeness on this run: {{ "%.0f"|format(ctx.grounding_completeness * 100) }}%.</p>
+</div>
+
+<!-- 11. RISKS & OPEN QUESTIONS -->
+<div class="section">
+  <div class="section-title">10. Risks &amp; Open Questions</div>
+  {% if ctx.risks_and_open_questions %}
+  <ul>{% for r in ctx.risks_and_open_questions %}<li>{{ r }}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">No outstanding risks were flagged.</p>{% endif %}
+</div>
+
+<!-- 12. AUDIT TRAIL APPENDIX -->
+<div class="section">
+  <div class="section-title">11. Audit Trail</div>
+  <p class="muted">{{ ctx.audit_trail|length }} pipeline event(s), in order.</p>
+  <table>
+    <tr><th>#</th><th>Agent</th><th>Action</th><th>Timestamp</th></tr>
+    {% for e in ctx.audit_trail %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ e.agent }}</td>
+      <td>{{ e.action }}</td>
+      <td class="mono">{{ e.timestamp }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+</body>
+</html>
