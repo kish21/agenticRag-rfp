@@ -91,40 +91,22 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** Phase 3 + Phase 5 complete on 2026-05-29 (Phase 5 via #151-#163; Phase 3 via #165 + #166). Phase 1, 2 (Explanation only), 4, 9 already on master. Remaining: 2c, 6, 7, 8, 10.
-**Last verified checkpoint:** Phase 3 PR-B merged; `tests/test_llm_cache.py` + `test_llm_cache_admin.py` green; `tools/smoke_test_graph.py` reaches `status=complete` against master with all 4 Phase-5 tables + Phase-3 `llm_response_cache` table.
-**Next action:** see **TOMORROW'S PLAN** block below — agreed in the 2026-05-29 session close-out.
+**Current skill:** Phase 3 + Phase 5 complete on 2026-05-29. On 2026-05-30: docs refresh (#172), real BM25 sparse retrieval / BACKLOG P1.12 (#173), Phase 7 plan-vs-reality alignment (#174). Phase 1, 2 (Explanation only), 4, 9 already on master. Remaining: 2c, 6, 7, 8, 10.
+**Last verified checkpoint:** #173 merged — `tests/test_sparse_retrieval_bm25.py` (3 tests) green in CI; sparse retrieval is now real BM25 (fastembed `Qdrant/bm25` + Qdrant `modifier=IDF`), `get_sparse_embedding()` split into document/query embeddings, `rank-bm25` dropped, `tools/reindex_bm25.py` added.
+**Next action:** see **NEXT SESSION PLAN** block below — Phase 7 (customer-grade PDF report) is now unblocked; spec + exit criteria aligned in #174.
 **Blockers:** none
 
-### TOMORROW'S PLAN (agreed 2026-05-29 — start here next session)
+### NEXT SESSION PLAN (set 2026-05-30 — start here)
 
-Three blocks, in order. No urgency, no deadline pressure.
+**BUILD PHASE 7 — customer-grade PDF report.** Spec + exit criteria are aligned and on master (#174). Read `docs/dev/PRODUCTION_READINESS_PLAN.md` "Phase 7" first — especially the **"Plan-vs-reality alignment"** block and the revised exit criteria. The three things the build MUST get right (already exit criteria):
 
-**MORNING (~2 hrs) — docs warm-up**
-1. Run `/doc-audit` on this repo (~30 min). Verifies the new skill (built today) actually works AND surfaces how stale the docs are. We expect `HOW_IT_WORKS.md` is months stale and there's plan-vs-reality drift in several files.
-2. If audit says `REFRESH` (likely): run `/doc-audit --fix` (~60 min). Opens one chore PR with the highest-severity doc edits.
+1. **Reuse `report_confidence`** for the cover-page "decision confidence" — do NOT add a duplicate `decision_confidence` field (`ExplanationOutput` already has `report_confidence` + `grounding_completeness`).
+2. **Flip Phase 5 Mode C on** — remove the `auto_to_report` rejection in `app/jobs/deadline_processor.py`; run it end-to-end to a PDF; extend `tests/test_deadline_lifecycle.py::test_mode_c_gated`.
+3. **Render `audit_trail` / `mandatory_check_table` / `rejection_reasons` from existing sources** (`event_log`, `agent_events`, `DecisionOutput`) — don't recompute.
 
-**MID-DAY (~3-4 hrs) — BM25 retrieval fix (BACKLOG P1.12)**
+Suggested order: extend schema → `report_template.html` (12 sections) → `pdf_report.py render_pdf()` → `GET /api/v1/runs/{run_id}/report.pdf` → Mode C flip → `tests/test_pdf_report.py` (golden snapshot, timestamps masked) → `/phase-done-rfp`. Recommended Claude Code features (per `/phase-done-rfp`): `/frontend-design` → `/anti-ai-ui` for the HTML/CSS template.
 
-This is the external reviewer's main concern from 2026-05-29. `app/retrieval/pipeline.py:33-53` builds the "sparse vector" by MD5-hashing words into 100k buckets + raw TF (not real BM25). For procurement RFP evaluation this collides exact-clauses ("ISO 27001" vs "ISO 9001"), washes out rare terms under boilerplate, and drops short tokens. Plan:
-
-1. `/code-review --depth high` on `app/retrieval/pipeline.py` and any existing retrieval-quality test (~20 min).
-2. Alignment review: confirm Qdrant 1.10+ native BM25 is the right path (`rank-bm25==0.2.2` already in requirements.txt as fallback). 30 min.
-3. Implement in a single PR (~2-3 hrs):
-   - Update `app/retrieval/qdrant.py`: `sparse_vectors_config` with `modifier="bm25"` + procurement-aware tokenizer (preserves alphanumeric, currency, multi-word).
-   - Replace `get_sparse_embedding()` — let Qdrant build the BM25 sparse server-side from raw text.
-   - Add `tools/reindex_bm25.py` to rebuild existing chunks.
-   - 3 acceptance tests in `tests/test_sparse_retrieval_bm25.py`:
-     * exact "ISO 27001" query must NOT return "ISO 9001" chunk in top-3
-     * exact "£10M public liability" must NOT return "£1M public liability"
-     * SLA-clause exact text ranks above near-paraphrases
-4. `/phase-done-rfp` before push (~15 min).
-
-**END OF DAY (~1 hr) — open the door to Phase 7**
-
-5. Phase 7 plan vs reality alignment review (~45 min). Same pattern as Phase 3 + Phase 5. Read `docs/dev/PRODUCTION_READINESS_PLAN.md` Phase 7 section, compare to current `ExplanationOutput`, revise plan doc if needed. NO code — plant the flag for day-after-tomorrow.
-
-**What we are deliberately NOT doing tomorrow** (each has a reason — re-evaluate later, not now)
+**What we are deliberately NOT doing next session** (each has a reason — re-evaluate later, not now)
 - Phase 2c (Extraction + Evaluation critic-as-controller) — wait for production traffic that surfaces flakiness
 - Phase 6 (incremental re-eval for addenda) — wait for customer who actually sends addenda
 - Phase 8 (delivery channels) — depends on Phase 7
