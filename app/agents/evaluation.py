@@ -29,6 +29,7 @@ from app.schemas.output_models import (
 )
 from app.agents.critic import critic_after_evaluation
 from app.db.fact_store import get_vendor_facts
+from app.infra.cost_tracker import mark_agent
 
 
 async def _llm_verify_threshold(
@@ -361,6 +362,7 @@ async def run_evaluation_agent(
     extraction_output: Optional[ExtractionOutput] = None,
     run_id: str = "",
 ) -> tuple[EvaluationOutput, object]:
+    mark_agent("evaluation_agent")  # cost attribution for this task's LLM calls
     evaluation_id = str(uuid.uuid4())
     warnings: list[str] = []
 

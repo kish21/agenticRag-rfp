@@ -29,7 +29,7 @@ async def update_org_settings(
 ):
     """Update one or more org settings fields. Preset fields are applied atomically."""
     try:
-        return upsert_org_settings(user.org_id, updated_by=user.sub, **body.fields)
+        return upsert_org_settings(user.org_id, updated_by=user.email, **body.fields)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

@@ -38,19 +38,22 @@ def save_override(override: AuditOverride):
     """
     Writes override to audit_overrides table.
     This is the ONLY permitted way to change an evaluation decision.
-    Gets the database engine from settings automatically.
+
+    Uses the shared engine and sets the RLS org context (app.current_org_id) on
+    the same transaction so the write passes the audit_overrides tenant policy.
+    Decision payloads are stored as real JSON via json.dumps — NOT Python repr
+    (str() produces single-quoted pseudo-JSON that a jsonb column rejects).
     """
-    from sqlalchemy import create_engine, text
-    from app.config import settings
+    import json
+    from sqlalchemy import text
+    from app.db.fact_store import get_engine
 
-    db_url = (
-        f"postgresql://{settings.postgres_user}:"
-        f"{settings.postgres_password}@{settings.postgres_host}:"
-        f"{settings.postgres_port}/{settings.postgres_db}"
-    )
-    engine = create_engine(db_url)
+    engine = get_engine()
 
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        # RLS: callers may run outside a request context (background tasks), so
+        # set the session var the audit_overrides policy checks before writing.
+        conn.execute(text("SET LOCAL app.current_org_id = :oid"), {"oid": str(override.org_id)})
         conn.execute(
             text("""
                 INSERT INTO audit_overrides (
@@ -68,10 +71,9 @@ def save_override(override: AuditOverride):
                 "org_id": override.org_id,
                 "run_id": override.run_id,
                 "overridden_by": override.overridden_by,
-                "original_decision": str(override.original_decision),
-                "new_decision": str(override.new_decision),
+                "original_decision": json.dumps(override.original_decision, default=str),
+                "new_decision": json.dumps(override.new_decision, default=str),
                 "reason": override.reason,
                 "timestamp": override.timestamp,
             }
         )
-        conn.commit()

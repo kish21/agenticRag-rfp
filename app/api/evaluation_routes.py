@@ -10,7 +10,7 @@ Endpoints:
   PUT  /api/v1/evaluate/{runId}/setup     — edit criteria before pipeline starts
   POST /api/v1/evaluate/{runId}/confirm   — start the pipeline
   GET  /api/v1/evaluate/{runId}/status    — SSE agent status stream
-  GET  /api/v1/evaluate/{runId}/stream    — SSE alias with ?token= query param
+  GET  /api/v1/evaluate/{runId}/stream    — SSE alias (cookie auth, no query token)
   GET  /api/v1/evaluate/{runId}/results   — results page: decision output
   GET  /api/v1/evaluate/{runId}/decision  — override page: vendor decision
   POST /api/v1/evaluate/{runId}/override  — submit human override
@@ -26,11 +26,11 @@ import uuid
 from datetime import datetime
 
 import sqlalchemy as sa
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, COOKIE_NAME
 from app.auth.jwt import TokenData, decode_token
 from app.infra.audit import audit
 from app.auth.rbac import require_run_access, require_admin_role, log_access
@@ -678,14 +678,22 @@ async def run_status_stream(run_id: str, user: TokenData = Depends(get_current_u
 
 
 @router.get("/{run_id}/stream")
-async def run_stream_alias(run_id: str, token: str = ""):
-    """SSE alias accepting ?token= query param (EventSource cannot set headers)."""
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token")
+async def run_stream_alias(run_id: str, request: Request):
+    """SSE alias for run progress. Auth is cookie-only.
+
+    The browser opens this with `new EventSource(url, {withCredentials: true})`,
+    which sends the HttpOnly session cookie automatically. We deliberately do NOT
+    accept the JWT as a `?token=` query param: query strings leak into access
+    logs, proxy logs, browser history and Referer headers, and the session token
+    is long-lived (default 8h).
+    """
+    cookie_token = request.cookies.get(COOKIE_NAME)
+    if not cookie_token:
+        raise HTTPException(status_code=401, detail="Missing authentication cookie")
     try:
-        user = decode_token(token)
+        user = decode_token(cookie_token)
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
     _db_get_run(run_id, user.org_id)
     return StreamingResponse(
         _event_stream(run_id, user.org_id),
@@ -822,6 +830,7 @@ class OverrideRequest(BaseModel):
 async def submit_override(run_id: str, body: OverrideRequest,
                            user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
     require_admin_role(user)
     decision = run.get("decision_output") or {}
 
@@ -885,6 +894,7 @@ async def re_evaluate(
 ):
     """Re-run the pipeline for a completed/failed run (e.g. all scores were 0)."""
     run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
     if run["status"] in ("running",):
         raise HTTPException(status_code=409, detail="Pipeline is still running")
 

@@ -22,6 +22,7 @@ from app.providers.reranker import rerank as rerank_candidates
 from app.agents.critic import critic_after_retrieval
 from app.config import settings
 from app.infra.audit import log_retrieval
+from app.infra.cost_tracker import mark_agent
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,7 @@ async def run_retrieval_agent(
     run_id: str | None = None,
     criterion_id: str | None = None,
 ) -> tuple[RetrievalOutput, object]:
+    mark_agent("retrieval_agent")  # cost attribution for this task's LLM calls
     query_id = str(uuid.uuid4())
     hyde_used = False
     use_hybrid_search = False
@@ -142,27 +144,33 @@ async def run_retrieval_agent(
         n_final = org_settings.rerank_top_n
         use_hybrid_search = org_settings.use_hybrid_search
 
-    # Step 1: Query intelligence — track retrieval_text for sparse embedding
+    # Step 1: Query intelligence — track retrieval_text for sparse embedding.
+    # get_dense_embedding does blocking network/CPU work, so offload it to a
+    # thread to avoid stalling the event loop (and serialising the per-vendor
+    # fan-out) the way a direct sync call would.
     if use_hyde:
         hyp_doc = await _generate_hyde_document(query, "vendor_response")
-        retrieval_vector = get_dense_embedding(hyp_doc)
+        retrieval_vector = await asyncio.to_thread(get_dense_embedding, hyp_doc)
         retrieval_text = hyp_doc          # HyDE doc used for both dense + sparse
         rewritten_query = f"[HyDE] {hyp_doc[:100]}"
         hyde_used = True
     elif use_rewriting:
         rewritten = await _rewrite_query(query)
-        retrieval_vector = get_dense_embedding(rewritten)
+        retrieval_vector = await asyncio.to_thread(get_dense_embedding, rewritten)
         retrieval_text = rewritten
         rewritten_query = rewritten
     else:
-        retrieval_vector = get_dense_embedding(query)
+        retrieval_vector = await asyncio.to_thread(get_dense_embedding, query)
         retrieval_text = query
         rewritten_query = query
 
-    # Step 2: Retrieval — hybrid (dense+sparse RRF) or dense-only
+    # Step 2: Retrieval — hybrid (dense+sparse RRF) or dense-only. The Qdrant
+    # client calls are synchronous network I/O — offload to a thread for the
+    # same reason as the embedding above.
     coll = collection_name(org_id, vendor_id)
     if use_hybrid_search:
-        raw_results = search_hybrid(
+        raw_results = await asyncio.to_thread(
+            search_hybrid,
             collection=coll,
             query_text=query,           # always original query for sparse/BM25
             org_id=org_id,
@@ -172,7 +180,8 @@ async def run_retrieval_agent(
             section_type_filter=section_type_filter,
         )
     else:
-        raw_results = search_dense(
+        raw_results = await asyncio.to_thread(
+            search_dense,
             collection=coll,
             query_vector=retrieval_vector,
             org_id=org_id,
@@ -206,13 +215,10 @@ async def run_retrieval_agent(
         {"text": r["text"], "score": r["score"], "payload": r["payload"]}
         for r in raw_results
     ]
-    import asyncio
-    reranked = await asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: rerank_candidates(
-            query, candidates, top_n=n_final,
-            provider=org_settings.reranker_provider if org_settings else None,
-        )
+    reranked = await asyncio.to_thread(
+        rerank_candidates,
+        query, candidates, top_n=n_final,
+        provider=org_settings.reranker_provider if org_settings else None,
     )
 
     # Step 4: Lost-in-middle reorder (best first, second-best last)

@@ -4,7 +4,11 @@ Mirrors llm_provider.py pattern exactly.
 Switch reranker by changing RERANKER_PROVIDER in .env.
 No agent code changes required.
 """
+import logging
+
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 _bge_model = None
 _colbert_model = None
@@ -24,7 +28,18 @@ def _get_bge_model():
 def _get_colbert_model():
     global _colbert_model
     if _colbert_model is None:
-        from ragatouille import RAGPretrainedModel
+        try:
+            from ragatouille import RAGPretrainedModel
+        except ImportError as e:
+            # ragatouille was removed from requirements (unmaintained). Selecting
+            # RERANKER_PROVIDER=colbert is therefore a configuration error — fail
+            # loudly here rather than silently downgrading to no-rerank, which
+            # would degrade retrieval quality with no operator signal.
+            raise RuntimeError(
+                "RERANKER_PROVIDER=colbert requires the 'ragatouille' package, "
+                "which is not installed (removed from requirements as unmaintained). "
+                "Use RERANKER_PROVIDER=bge or =cohere, or reinstall ragatouille."
+            ) from e
         _colbert_model = RAGPretrainedModel.from_pretrained(
             settings.platform.retrieval.reranker_models["colbert"]
         )
@@ -61,10 +76,15 @@ def rerank(
         elif provider == "none":
             return _rerank_none(candidates, top_n)
         else:
-            print(f"Unknown reranker provider: {provider}. Using none.")
+            logger.warning("Unknown reranker provider %r — falling back to no-rerank.", provider)
             return _rerank_none(candidates, top_n)
     except Exception as e:
-        print(f"Reranker {provider} failed: {e}. Falling back to vector score.")
+        # Surface via the structured logger (not print) so a misconfigured or
+        # broken reranker fail-open to vector-score order is visible to operators.
+        logger.warning(
+            "Reranker %r failed (%s) — falling back to vector-score order.",
+            provider, e,
+        )
         return _rerank_none(candidates, top_n)
 
 

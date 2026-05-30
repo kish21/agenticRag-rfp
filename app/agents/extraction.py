@@ -14,6 +14,7 @@ import uuid
 
 from app.config import settings
 from app.providers.llm import call_llm
+from app.infra.cost_tracker import mark_agent
 from app.prompts.registry import get_prompt
 from app.schemas.output_models import (
     CriticVerdict,
@@ -46,6 +47,7 @@ async def run_extraction_agent(
     evaluation_setup: EvaluationSetup,
     run_id: str = "",
 ) -> tuple[ExtractionOutput, object]:
+    mark_agent("extraction_agent")  # cost attribution for this task's LLM calls
     extraction_id = str(uuid.uuid4())
 
     # Step 1: Build source context — exclude boilerplate (legal disclaimers, T&Cs)
@@ -169,8 +171,28 @@ async def run_extraction_agent(
         try:
             save_extraction_output(output, doc_id)
         except Exception as e:
-            # Print here because Pydantic copies warnings list at model construction
-            # time, so appending after won't update output.warnings.
+            # A save failure means the Evaluation Agent (which reads facts from
+            # PostgreSQL, not from this output object) would score against missing
+            # facts and silently produce a wrong-but-healthy-looking result.
+            # Escalate to a HARD critic block so the per-vendor guard in
+            # extraction_per_vendor isolates this vendor into failed_vendors
+            # instead of proceeding to evaluation.
             print(f"[ERROR extraction] PostgreSQL save failed vendor={vendor_id}: {e}")
+            from app.agents.critic import _make_flag, _verdict
+            from app.schemas.output_models import CriticSeverity
+            fail_flag = _make_flag(
+                CriticSeverity.HARD,
+                "extraction_agent",
+                "fact_store_save_failed",
+                f"Extracted facts could not be persisted to PostgreSQL: {e}",
+                f"vendor_id={vendor_id}, doc_id={doc_id}",
+                "Do not evaluate — facts were not saved. "
+                "Investigate the DB write and re-run extraction.",
+            )
+            new_flags = list(critic.flags) + [fail_flag]
+            object.__setattr__(critic, "flags", new_flags)
+            object.__setattr__(critic, "hard_flag_count", critic.hard_flag_count + 1)
+            object.__setattr__(critic, "overall_verdict", _verdict(new_flags))
+            object.__setattr__(critic, "requires_human_review", True)
 
     return output, critic

@@ -238,6 +238,7 @@ class Settings(BaseModel):
     max_retry_limit: int = 5             # legacy shim — prefer platform.infrastructure.max_retries
     hard_flag_blocks_pipeline: bool = True
     rate_limit_requests_per_minute: int = 50
+    rate_metrics_enabled: bool = False   # persist per-minute rate stats for the cross-process monitor
     skip_embeddings: bool = False
     ssl_verify: bool = True
 
@@ -344,6 +345,7 @@ def load_settings() -> Settings:
         "max_retry_limit":            _ei("MAX_RETRY_LIMIT", 5),
         "hard_flag_blocks_pipeline":  _eb("HARD_FLAG_BLOCKS_PIPELINE", True),
         "rate_limit_requests_per_minute": _ei("RATE_LIMIT_REQUESTS_PER_MINUTE", 50),
+        "rate_metrics_enabled":       _eb("RATE_METRICS_ENABLED", False),
         "skip_embeddings":            _eb("SKIP_EMBEDDINGS", False),
         "ssl_verify":                 _eb("SSL_VERIFY", True),
     }

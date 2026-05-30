@@ -29,22 +29,63 @@ def _run_migrations() -> None:
 
 
 def _check_cors_origins() -> None:
-    """Refuse to start in production with wildcard CORS origins."""
-    is_production = bool(settings.app_api_key and settings.app_api_key != "changeme-internal-api-key")
+    """Refuse to start with wildcard CORS origins when an API key is set."""
+    has_api_key = bool(settings.app_api_key and settings.app_api_key != "changeme-internal-api-key")
     has_wildcard = "*" in settings.allowed_origins
-    if is_production and has_wildcard:
+    if has_api_key and has_wildcard:
         raise RuntimeError(
             "CORS misconfiguration: ALLOWED_ORIGINS='*' is not permitted in production. "
             "Set ALLOWED_ORIGINS to your frontend domain(s) in .env, e.g.:\n"
             "  ALLOWED_ORIGINS=https://app.meridianai.com"
         )
-    if is_production:
-        localhost_only = all("localhost" in o or "127.0.0.1" in o for o in settings.allowed_origins)
-        if localhost_only:
-            print(
-                "[WARNING] CORS: ALLOWED_ORIGINS only contains localhost — "
-                "frontend requests from production domain will be blocked."
-            )
+
+
+def _is_production() -> bool:
+    """A deployment is 'production' only when it has a real APP_API_KEY AND its
+    CORS origins are not localhost-only. A localhost-only origin list means the
+    app is being run for local development even if an APP_API_KEY happens to be
+    set, so we must not block startup on dev-default secrets in that case. A real
+    production deploy serves a real frontend domain, so the auth-secret guard
+    still fires there.
+    """
+    has_api_key = bool(settings.app_api_key and settings.app_api_key != "changeme-internal-api-key")
+    if not has_api_key:
+        return False
+    origins = settings.allowed_origins or []
+    localhost_only = bool(origins) and all(
+        "localhost" in o or "127.0.0.1" in o for o in origins
+    )
+    return not localhost_only
+
+
+def _check_auth_secrets() -> None:
+    """Refuse to start in production with default/unset auth secrets.
+
+    In production a default JWT secret lets anyone forge a token for any
+    org/role, and a default dev password is a known-credential admin login.
+    """
+    if not _is_production():
+        return
+
+    problems = []
+    if not settings.jwt_secret_key or settings.jwt_secret_key == "change-me-in-production":
+        problems.append(
+            "JWT_SECRET_KEY is unset or still the default — anyone could forge tokens "
+            "for any org_id/role. Set a strong random secret in .env."
+        )
+    if not settings.dev_user_password or settings.dev_user_password == "devpassword2026":
+        problems.append(
+            "DEV_USER_PASSWORD is unset or still the default — a known-credential "
+            "admin login exists. Set DEV_USER_PASSWORD in .env (or disable the dev user)."
+        )
+    if settings.jwt_algorithm.lower() == "none":
+        problems.append("JWT_ALGORITHM='none' disables signature verification.")
+
+    if problems:
+        raise RuntimeError(
+            "AUTH MISCONFIGURATION — refusing to start in production:\n  - "
+            + "\n  - ".join(problems)
+        )
 
 
 def _mark_orphaned_runs() -> None:
@@ -73,6 +114,7 @@ def _mark_orphaned_runs() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _check_cors_origins()
+    _check_auth_secrets()
     _run_migrations()
     _mark_orphaned_runs()
     yield
