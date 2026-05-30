@@ -91,33 +91,28 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** Phase 3 + Phase 5 done 2026-05-29. On 2026-05-30 (8 PRs): docs refresh (#172), real BM25/P1.12 (#173), Phase 7 plan alignment (#174), session state (#175), **Phase 7 customer report (#176)**, report polish (#177), **frontend View/Download report buttons (#178)**, **Phase 8a delivery channel foundation (#179)**. Phase 1, 2 (Explanation only), 4, 7, 9 on master. Remaining: 2c, 6, 8b, 10.
-**Last verified checkpoint:** #179 merged. Phase 7 report core live (`app/output/report_builder.py` + `report_template.html` + `pdf_report.py`; `GET /api/v1/evaluate/{run_id}/report.html|.pdf`; explanation_output persisted via alembic 0008). Phase 8a delivery channels live (`app/delivery/` — email_smtp + folder_drop + registry; 10 tests green). `tests/test_phase7_report.py` (15) + `tests/test_delivery.py` (10) green in CI.
-**Next action:** see **NEXT SESSION PLAN** below — **Phase 8b** (Mode C auto-trigger + event dispatcher).
+**Current skill:** Phase 3 + Phase 5 done 2026-05-29. 2026-05-30 (13 PRs): docs refresh (#172), real BM25/P1.12 (#173), Phase 7 plan align (#174), **Phase 7 customer report (#176)** + polish (#177) + **frontend report buttons (#178)**, **Phase 8a delivery channels (#179)** + **delivery service facade (#181)** + decomposition (#182), **Phase 2c exit-criteria contract (#183)** + **self-correcting retry engine (#184)**. Phase 1, 2 (Explanation only), 4, 7, 9 on master; Phase 8 module foundation on master. **Phase 2c IN PROGRESS** (engine done, wiring pending). Remaining: **2c wiring**, 6, 8b wiring, 10.
+**Last verified checkpoint:** #184 merged. `app/pipeline/critic_retry.py` (`run_with_critic_retry`) + `tests/test_critic_retry.py` (5 green): the shared in-branch self-correcting Critic controller for per-vendor generation agents — retry-with-feedback (max 2), per-vendor isolation, HARD-block guard on exhaust, telemetry, never-raises. NOT yet wired to any agent.
+**Next action:** see **NEXT SESSION PLAN** — finish **Phase 2c wiring**.
 **Blockers:** none
 
-### NEXT SESSION PLAN (set 2026-05-30 — start here)
+### NEXT SESSION PLAN (set 2026-05-30 — START HERE: finish Phase 2c)
 
-**Phase 8 is an INDEPENDENT, EXPANDABLE module — decomposed (decided 2026-05-30).** Delivery/notifications were over-bundled. They're now staged so the module grows without ever touching the pipeline. **Architecture rule:** callers (pipeline/jobs/API) use ONLY `app.delivery.service.deliver_report_for_run(run, recipients)` — they never import smtplib/channels/recipient logic. Everything new lands INSIDE `app/delivery/`.
+**Goal:** make the Critic a first-class **self-correcting** controller at every LLM-**generation** step — Extraction, Evaluation, Explanation. Explanation done; the **engine is built (#184)**; only the **wiring** remains. Contract = the Phase 2c exit criteria in `docs/dev/PRODUCTION_READINESS_PLAN.md` (3 angles: technical / product / customer). Honest finding from 12 smoke runs: Extraction **0/12** and Evaluation **0/12** blocks (all blocks were Explanation) → this is **production-robustness for messy input**, shipped WITH telemetry, framed honestly.
 
-**Already on master (the independent module's public API is DONE):**
-- 8a channels (#179): `app/delivery/` — `email_smtp` + `folder_drop` + registry.
-- Delivery service facade (#181): `payload.py` (run → `DeliveryPayload`) + `service.py` (`deliver_report_for_run`). 16 tests.
-- **Free email NOW:** the SMTP channel works with **Mailtrap** (sandbox, no domain — best for dev) or **Resend** (`smtp.resend.com`, user `resend`, pass = API key; free 3k/mo) via `.env`. No new code. Hostinger later if wanted.
+**Wiring steps (all offline-testable):**
+1. Add `critic_feedback: str = ""` to `run_extraction_agent` ([app/agents/extraction.py](app/agents/extraction.py)) + `run_evaluation_agent` ([app/agents/evaluation.py](app/agents/evaluation.py)); inject a "PREVIOUS ATTEMPT FAILED…" preamble into their prompts (mirror [app/agents/explanation.py](app/agents/explanation.py) `_generate_vendor_narrative`).
+2. Add `critic_metrics_accum: Annotated[dict, _merge_dicts]` to `PipelineState` ([app/pipeline/state.py](app/pipeline/state.py)).
+3. Route `extraction_per_vendor` + `evaluation_per_vendor` ([app/pipeline/nodes.py](app/pipeline/nodes.py)) through `app.pipeline.critic_retry.run_with_critic_retry(...)` with stage-specific `build_feedback`; remove the current inline-only handling (Extraction has NO block-guard today; Evaluation HARD-blocks at nodes.py:489). Aggregate telemetry into `summary.json`.
+4. Tests vs #183 criteria → `/phase-done-rfp` (Checks A topology + C per-vendor guards) → update `PERFORMANCE_AND_QUALITY_METRICS.md` claim (Critic-as-controller at the 3 generation steps; assisted/deterministic steps validation-only, by design) → PR.
 
-**NEXT — wire it (needs live infra; this is the only part not yet buildable offline):**
-1. **Completion hook** — after a run completes (`app/api/_evaluation/pipeline.py` success path), if delivery is configured, call `deliver_report_for_run(run, [{"channel":"email","email": created_by_email}])`. Works for manual runs immediately (demoable with Mailtrap).
-2. **Mode C autonomous trigger** (`app/jobs/deadline_processor.py`): at `facts_ready` for `auto_to_report`, REMOVE the rejection — create an `evaluation_runs` row (org_id, rfp_id, setup_id snapshot, vendor_ids from `invited_vendors`), `await _run_pipeline(run_id, org_id)`, emit `rfp.evaluation_complete`; the completion hook then delivers. Extend `test_mode_c_gated` → passes-through. **Needs Postgres + live pipeline + LLM to verify end-to-end.**
+**Also pending (separate, lower priority):**
+- **Phase 8b wiring** — delivery completion hook + Mode C auto-trigger. Engine/channels done (#179/#181); needs live infra + Mailtrap/Resend SMTP creds. Email works today via the SMTP channel + `.env` (Mailtrap sandbox or Resend free 3k/mo). 8c (subscription/dispatcher engine) + 8d (Teams/Slack + in-app notifications) are customer-driven.
 
-**LATER (Step 3 — customer-driven, build only when asked; all INSIDE `app/delivery/`):**
-- **8c — delivery engine:** `delivery_subscriptions` + `delivery_attempts` (UNIQUE idempotency) + event-driven `dispatcher.py` (reads `event_log`) + retry/backoff. Build when a customer needs multi-recipient / per-department / on-block delivery.
-- **8d — more channels + notifications:** Teams/Slack/SFTP channels; in-app "report ready" notifications (distinct from delivering the file).
-
-**What we are deliberately NOT doing next session** (each has a reason — re-evaluate later, not now)
-- Phase 2c (Extraction + Evaluation critic-as-controller) — wait for production traffic that surfaces flakiness
-- Phase 6 (incremental re-eval for addenda) — wait for customer who actually sends addenda
-- Phase 10 (architecture doc) — `/doc-create --doc-type architecture --audience cto` can cover this in a future doc session
-- Modal cron deploy — costs $5-15/month for zero customer benefit until first real `auto_to_evaluate` customer
+**Deliberately NOT doing (each has a reason)**
+- Phase 6 (incremental re-eval for addenda) — wait for a customer who actually sends addenda
+- Phase 10 (architecture doc) — `/doc-create --doc-type architecture --audience cto` in a future doc session
+- Modal cron deploy — $5-15/month for zero benefit until a real `auto_to_evaluate` customer
 
 ### Deferred items tracked in BACKLOG.md
 - P2.0 — Phase 5 D1 (Modal cron dashboard), D4 (5-vendor parallel wall-clock), E1 (≤60s user-evaluate wall-clock) — live integration
