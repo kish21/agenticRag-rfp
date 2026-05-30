@@ -198,6 +198,30 @@ Priority order based on observed flakiness:
 - [ ] LangGraph `recursion_limit=50` set; verified by a test that simulates a graph attempting >50 transitions and fails fast.
 - [ ] Smoke test on standard fixture passes without retries needed (grounding_completeness ≥ 0.95 on attempt 1).
 
+### Exit / pass criteria — Phase 2c (Extraction + Evaluation self-correction, set 2026-05-30)
+
+**Scope refined (2026-05-30):** the Critic becomes a first-class **self-correcting** controller at every step where the LLM *generates* content that could be ungrounded — **Extraction, Evaluation, Explanation** (Explanation already done). LLM-*assisted* steps (Retrieval query-shaping, Comparator, Decision-fallback) and deterministic steps keep **validation / HARD-block** — their output is anchored to grounded data, so there is nothing to "regenerate better." Because Extraction/Evaluation run as per-vendor parallel branches, the controller is implemented **in-branch** (retry inside each vendor's branch via a shared helper), NOT as graph-level critic nodes — this preserves Phase 4 fan-out + isolation while still being a true self-correcting controller.
+
+**Measure-first finding (12 smoke runs, 2026-05-30):** Extraction blocked **0/12**, Evaluation **0/12**; all 3 recorded blocks were Explanation (already self-correcting). So this work is **production-robustness for messy real-world input**, not a fix for observed flakiness on clean fixtures — and it ships WITH telemetry to measure the real rate. Stated honestly so a reviewer can trust the claim.
+
+**🔧 Technical evaluator**
+- [ ] T1 — Extraction + Evaluation: a HARD critic verdict retries that agent *for that vendor* with the critic's feedback, max 2 retries (3 attempts). Test: force a block → succeeds on attempt 2.
+- [ ] T2 — Per-vendor isolation: forcing vendor A to retry twice does not affect vendor B's budget/outcome. Test.
+- [ ] T3 — HARD-block guard preserved: retries exhausted → vendor appended to `failed_vendors` with stage + reason (Check C). Test.
+- [ ] T4 — One shared retry helper used by Extraction + Evaluation (same shape as Explanation) — not 3 divergent versions. Greppable.
+- [ ] T5 — Graph topology unchanged (Phase 4 fan-out intact); all existing tests pass; `/phase-done-rfp` Checks A + C green.
+
+**📦 Product**
+- [ ] P1 — The system self-corrects (not just rejects) at all 3 generation steps — demonstrated by the attempt-2 test.
+- [ ] P2 — **Telemetry:** each run records, per agent, `blocks / retries / retry_successes` in `summary.json`. (The criterion that makes the feature measurable + defensible.)
+- [ ] P3 — No regression on the common path: retry fires only on a block → clean (0%-block) runs unaffected in speed/cost. Measured.
+- [ ] P4 — Honest limitation documented: clean-fixture retry rate = 0%; capability is for messy production input; live rate instrumented (P2).
+
+**🏛️ Customer**
+- [ ] C1 — AI fabricates a fact/score → caught AND corrected before the customer sees it; if uncorrectable after retries, the vendor is flagged "could not be evaluated (failed grounding)" with the reason. Never a silently wrong score.
+- [ ] C2 — Audit trail records the self-correction ("Extraction for Vendor X auto-corrected after grounding check, attempt 2").
+- [ ] C3 — Grounding guarantee unchanged or stronger: every fact/score/claim the customer sees is grounded.
+
 ---
 
 ## Phase 3 — LLM response cache
