@@ -40,8 +40,12 @@ from app.api._evaluation.db import (
     _db_update_status,
 )
 
+from app.config import settings
+from app.prompts.registry import get_prompt
+
 from .state import PipelineState
 from .concurrency import vendor_slot
+from .critic_retry import run_with_critic_retry
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -72,13 +76,33 @@ def _emit(
         except Exception:
             pass
     event_type = (
-        "agent.started"   if status == "running"  else
-        "agent.completed" if status == "done"      else
-        "agent.blocked"   if status == "blocked"   else None
+        "agent.started"        if status == "running"   else
+        "agent.completed"      if status == "done"       else
+        "agent.blocked"        if status == "blocked"    else
+        # Phase 2c — the Critic-as-controller emits these. Recording them in the
+        # formal audit() table (not only the event_log timeline) is exit
+        # criterion C2: the self-correction is part of the auditable trail a
+        # customer/reviewer can rely on ("never a silently wrong score").
+        "agent.self_corrected" if status == "recovered"  else
+        "agent.retry"          if status == "retry"      else None
     )
     if event_type:
         audit(org_id=org_id, run_id=run_id, event_type=event_type,
               actor="system", agent=agent, detail={"message": message})
+
+
+def _critic_feedback(critic, _output) -> str:
+    """Phase 2c — turn a HARD critic verdict into corrective guidance for the
+    next generation attempt. Builds the per-flag bullet list (description +
+    recommendation) and fills the registry-managed `critic/retry_feedback`
+    preamble so the wording is tunable without a code change. Soft flags are not
+    included — they don't trigger a retry."""
+    flag_lines = []
+    for f in getattr(critic, "flags", []) or []:
+        if getattr(getattr(f, "severity", None), "value", "") == "hard":
+            rec = f" → {f.recommendation}" if getattr(f, "recommendation", "") else ""
+            flag_lines.append(f"- {f.description}{rec}")
+    return get_prompt("critic/retry_feedback", flags="\n".join(flag_lines))
 
 
 def _hard_block_if(critic, context: str) -> None:
@@ -383,38 +407,42 @@ async def extraction_per_vendor(state: PipelineState) -> dict:
         }
 
     ret_out = retrieval_output_objects[vid]
-    try:
+
+    # Phase 2c — the Critic is a self-correcting controller here: on a HARD
+    # verdict it feeds the extraction agent specific feedback and retries (max 2)
+    # before isolating the vendor into failed_vendors. The engine never raises
+    # (a crashed attempt also becomes a failed vendor), so the outer try/except
+    # is no longer needed. Telemetry returns via critic_metrics_accum.
+    async def _attempt(feedback: str):
         async with vendor_slot():
-            ext_out, critic_ext = await run_extraction_agent(
+            return await run_extraction_agent(
                 retrieval_output=ret_out, vendor_id=vid, org_id=org_id,
                 doc_id=f"{rfp_id}-{vid}", setup_id=state["setup_id"],
-                evaluation_setup=evaluation_setup, run_id=state["run_id"])
-            rfp_logger.dev(DevLevel.INFO, agent,
-                           f"Vendor {vid}: {len(ext_out.slas)} SLAs, "
-                           f"{len(ext_out.pricing)} pricing, "
-                           f"{len(ext_out.extracted_facts)} facts",
-                           data={"vendor_id": vid,
-                                 "slas": len(ext_out.slas),
-                                 "pricing": len(ext_out.pricing),
-                                 "facts": len(ext_out.extracted_facts),
-                                 "completeness": round(ext_out.extraction_completeness, 2),
-                                 "hallucination_risk": round(ext_out.hallucination_risk, 2),
-                                 "critic": critic_ext.overall_verdict},
-                           run_id=state["run_id"], org_id=org_id)
-            return {"extraction_output_objects": {vid: ext_out}}
-    except Exception as exc:
-        rfp_logger.dev(DevLevel.ERROR, agent,
-                       f"Vendor {vid} extraction failed: {exc}",
-                       data={"vendor_id": vid, "error": str(exc),
-                             "traceback": traceback.format_exc()},
+                evaluation_setup=evaluation_setup, run_id=state["run_id"],
+                critic_feedback=feedback)
+
+    def _on_success(ext_out) -> dict:
+        rfp_logger.dev(DevLevel.INFO, agent,
+                       f"Vendor {vid}: {len(ext_out.slas)} SLAs, "
+                       f"{len(ext_out.pricing)} pricing, "
+                       f"{len(ext_out.extracted_facts)} facts",
+                       data={"vendor_id": vid,
+                             "slas": len(ext_out.slas),
+                             "pricing": len(ext_out.pricing),
+                             "facts": len(ext_out.extracted_facts),
+                             "completeness": round(ext_out.extraction_completeness, 2),
+                             "hallucination_risk": round(ext_out.hallucination_risk, 2)},
                        run_id=state["run_id"], org_id=org_id)
-        return {
-            "failed_vendors": [{
-                "vendor_id": vid, "stage": "extraction",
-                "error": str(exc),
-                "ts": datetime.now(timezone.utc).isoformat(),
-            }],
-        }
+        return {"extraction_output_objects": {vid: ext_out}}
+
+    return await run_with_critic_retry(
+        agent=agent, vendor_id=vid,
+        attempt_fn=_attempt,
+        build_feedback=_critic_feedback,
+        on_success=_on_success,
+        max_retries=settings.platform.infrastructure.generation_critic_max_retries,
+        emit=lambda status, msg: _emit(state, agent, status, msg, log_msg=msg),
+    )
 
 
 async def extraction_done(state: PipelineState) -> dict:
@@ -458,8 +486,13 @@ async def evaluation_start(state: PipelineState) -> dict:
 
 
 async def evaluation_per_vendor(state: PipelineState) -> dict:
-    """One-vendor evaluation. Per-vendor critic flags are logged but do NOT
-    block the pipeline in Phase 4. (Phase 2 will hook retry-with-feedback here.)"""
+    """One-vendor evaluation under Critic-as-controller (Phase 2c).
+
+    On a HARD verdict the Critic feeds the evaluation agent specific feedback and
+    retries (max 2) before isolating the vendor into failed_vendors — replacing
+    the prior Phase-4 single-shot HARD-block guard. Per-vendor isolation is
+    preserved (one vendor's retries never touch another's). Telemetry returns via
+    critic_metrics_accum. The engine never raises, so no outer try/except."""
     agent = "evaluation"
     vid = state["vendor_id"]
     org_id = state["org_id"]
@@ -475,55 +508,25 @@ async def evaluation_per_vendor(state: PipelineState) -> dict:
             }],
         }
 
-    try:
+    async def _attempt(feedback: str):
         async with vendor_slot():
-            ev_out, ev_critic = await run_evaluation_agent(
+            return await run_evaluation_agent(
                 vendor_id=vid, org_id=org_id, run_id=state["run_id"],
                 evaluation_setup=evaluation_setup,
-                extraction_output=extraction_output_objects.get(vid))
+                extraction_output=extraction_output_objects.get(vid),
+                critic_feedback=feedback)
 
-            # HARD-block guard restored after Phase 4 regression review.
-            # Pre-Phase-4: HARD critic on evaluation aborted the whole run.
-            # Phase 4 isolation: HARD critic on ONE vendor's evaluation marks
-            # that vendor failed (others continue). Soft/warning logged.
-            if ev_critic.overall_verdict == CriticVerdict.BLOCKED:
-                hard_descs = "; ".join(f.description for f in ev_critic.flags
-                                       if f.severity.value == "hard")[:240]
-                rfp_logger.dev(DevLevel.ERROR, agent,
-                               f"Vendor {vid} evaluation HARD-blocked by critic: {hard_descs}",
-                               data={"vendor_id": vid,
-                                     "verdict": ev_critic.overall_verdict.value,
-                                     "flags": [f.check_name for f in ev_critic.flags]},
-                               run_id=state["run_id"], org_id=org_id)
-                return {
-                    "failed_vendors": [{
-                        "vendor_id": vid, "stage": "evaluation",
-                        "error": f"critic_hard_block: {hard_descs}",
-                        "ts": datetime.now(timezone.utc).isoformat(),
-                    }],
-                }
-            if ev_critic.overall_verdict.value != "approved":
-                rfp_logger.dev(DevLevel.INFO, agent,
-                               f"Vendor {vid} critic: {ev_critic.overall_verdict.value} "
-                               f"— {len(ev_critic.flags)} flag(s)",
-                               data={"vendor_id": vid,
-                                     "verdict": ev_critic.overall_verdict.value,
-                                     "flags": [f.check_name for f in ev_critic.flags]},
-                               run_id=state["run_id"], org_id=org_id)
-            return {"evaluation_output_objects": {vid: ev_out}}
-    except Exception as exc:
-        rfp_logger.dev(DevLevel.ERROR, agent,
-                       f"Vendor {vid} evaluation failed: {exc}",
-                       data={"vendor_id": vid, "error": str(exc),
-                             "traceback": traceback.format_exc()},
-                       run_id=state["run_id"], org_id=org_id)
-        return {
-            "failed_vendors": [{
-                "vendor_id": vid, "stage": "evaluation",
-                "error": str(exc),
-                "ts": datetime.now(timezone.utc).isoformat(),
-            }],
-        }
+    def _on_success(ev_out) -> dict:
+        return {"evaluation_output_objects": {vid: ev_out}}
+
+    return await run_with_critic_retry(
+        agent=agent, vendor_id=vid,
+        attempt_fn=_attempt,
+        build_feedback=_critic_feedback,
+        on_success=_on_success,
+        max_retries=settings.platform.infrastructure.generation_critic_max_retries,
+        emit=lambda status, msg: _emit(state, agent, status, msg, log_msg=msg),
+    )
 
 
 async def evaluation_done(state: PipelineState) -> dict:

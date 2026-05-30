@@ -46,7 +46,12 @@ async def run_extraction_agent(
     setup_id: str,
     evaluation_setup: EvaluationSetup,
     run_id: str = "",
+    critic_feedback: str = "",
 ) -> tuple[ExtractionOutput, object]:
+    """Phase 2c: optionally accepts `critic_feedback` from a previous attempt's
+    critic verdict. When non-empty it is prepended to the user message as a
+    'PREVIOUS ATTEMPT FAILED' preamble so the LLM corrects course (mirrors the
+    Explanation agent). Empty string on the first attempt is a no-op."""
     mark_agent("extraction_agent")  # cost attribution for this task's LLM calls
     extraction_id = str(uuid.uuid4())
 
@@ -93,10 +98,19 @@ async def run_extraction_agent(
     schema_desc = _schema_description(extraction_targets)
     system_prompt = get_prompt("extraction/extract_facts", schema=schema_desc)
 
+    # Phase 2c — prepend critic feedback from a prior attempt so the LLM corrects
+    # course. Empty string on the first attempt (no-op).
+    feedback_block = (
+        f"========================================\n"
+        f"{critic_feedback}\n"
+        f"========================================\n\n"
+        if critic_feedback else ""
+    )
+
     raw_text = await call_llm(
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Extract from the following vendor document chunks:\n\n{context}"},
+            {"role": "user", "content": f"{feedback_block}Extract from the following vendor document chunks:\n\n{context}"},
         ],
         temperature=0.0,
         response_format={"type": "json_object"},

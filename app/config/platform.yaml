@@ -51,6 +51,10 @@ infrastructure:
   retrieval_critic_confidence_floor: 0.6
   extraction_critic_max_retries: 1
   extraction_critic_confidence_floor: 0.7
+  # Phase 2c — self-correcting Critic-as-controller retry budget for the
+  # per-vendor LLM-generation steps (Extraction, Evaluation). 2 retries = 3
+  # attempts, matching Explanation. Config-driven like the other critic budgets.
+  generation_critic_max_retries: 2
   task_duration_estimate_seconds: 30
 
 retrieval_critic_prompt: |

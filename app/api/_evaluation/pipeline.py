@@ -19,7 +19,7 @@ from app.schemas.output_models import EvaluationSetup
 from app.domain.org_settings import get_org_settings
 from app.db.fact_store import get_engine
 from app.pipeline.graph import evaluation_graph
-from app.pipeline.state import PipelineState
+from app.pipeline.state import PipelineState, _merge_critic_metrics
 
 from .db import (
     _db_get_setup,
@@ -126,8 +126,16 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             # state_diff is {node_name: updated_fields_dict}
             node_name = next(iter(state_diff))
             updated   = state_diff[node_name]
-            # Merge diff into our local view of final_state for post-run access
+            # Merge diff into our local view of final_state for post-run access.
+            # astream "updates" mode yields each node's RAW return, not the
+            # reducer-applied channel — so critic telemetry (a deep-merge reducer
+            # field) is accumulated explicitly here, else a later stage's
+            # emission overwrites the earlier one and the rollup undercounts.
+            _prev_critic = final_state.get("critic_metrics_accum") or {}
             final_state = {**final_state, **updated}
+            if "critic_metrics_accum" in updated:
+                final_state["critic_metrics_accum"] = _merge_critic_metrics(
+                    _prev_critic, updated["critic_metrics_accum"])
             rfp_logger.dev(DevLevel.AGENT, "Graph",
                            f"Node '{node_name}' completed",
                            data={"node": node_name,
@@ -166,12 +174,28 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         n_short = len(getattr(dec_out, "shortlisted_vendors", []) or [])
         n_rej   = len(getattr(dec_out, "rejected_vendors",    []) or [])
 
-        # Emit final critic summary (soft warnings accumulated across all nodes)
+        # Emit final critic summary (soft warnings accumulated across all nodes).
+        # Phase 2c — roll up the self-correcting retry telemetry so the run's
+        # event log records how often the Critic-as-controller fired/recovered.
+        _critic_accum = final_state.get("critic_metrics_accum") or {}
+        _critic_blocks = sum(
+            int(m.get("blocks", 0))
+            for agents in _critic_accum.values() for m in agents.values()
+        )
+        _critic_recovered = sum(
+            1
+            for agents in _critic_accum.values() for m in agents.values()
+            if m.get("retry_success")
+        )
         _db_append_event(run_id, {
             "agent": "critic",
             "status": "done",
             "message": "All agent outputs validated by Critic",
-            "log_msg": "Independent quality check complete.",
+            "log_msg": (
+                "Independent quality check complete"
+                + (f" — {_critic_recovered} vendor-stage(s) self-corrected after "
+                   f"{_critic_blocks} block(s)." if _critic_blocks else ".")
+            ),
         })
 
         _db_update_status(run_id, "complete", completed=True)

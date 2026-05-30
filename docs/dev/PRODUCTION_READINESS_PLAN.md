@@ -204,23 +204,25 @@ Priority order based on observed flakiness:
 
 **Measure-first finding (12 smoke runs, 2026-05-30):** Extraction blocked **0/12**, Evaluation **0/12**; all 3 recorded blocks were Explanation (already self-correcting). So this work is **production-robustness for messy real-world input**, not a fix for observed flakiness on clean fixtures — and it ships WITH telemetry to measure the real rate. Stated honestly so a reviewer can trust the claim.
 
+**Verification artifacts (2026-05-30, branch `feat/phase2c-critic-controller-wiring`):** offline tests `tests/test_critic_retry.py` (5) + `tests/test_critic_controller_wiring.py` (13); live 2-vendor smoke `tests/smoke_results/20260530T170123Z` (status=complete, all 9 agents, `summary.json.critic` populated for both vendors × both stages — which also independently validated the astream-reconstruction telemetry fix).
+
 **🔧 Technical evaluator**
-- [ ] T1 — Extraction + Evaluation: a HARD critic verdict retries that agent *for that vendor* with the critic's feedback, max 2 retries (3 attempts). Test: force a block → succeeds on attempt 2.
-- [ ] T2 — Per-vendor isolation: forcing vendor A to retry twice does not affect vendor B's budget/outcome. Test.
-- [ ] T3 — HARD-block guard preserved: retries exhausted → vendor appended to `failed_vendors` with stage + reason (Check C). Test.
-- [ ] T4 — One shared retry helper used by Extraction + Evaluation (same shape as Explanation) — not 3 divergent versions. Greppable.
-- [ ] T5 — Graph topology unchanged (Phase 4 fan-out intact); all existing tests pass; `/phase-done-rfp` Checks A + C green.
+- [x] T1 — Extraction + Evaluation: a HARD critic verdict retries that agent *for that vendor* with the critic's feedback, max 2 retries (3 attempts). **Evidence:** `test_retry_succeeds_on_attempt_2` (engine, asserts feedback propagated) + `test_extraction_per_vendor_recovers_after_block` + `test_evaluation_per_vendor_recovers_after_block` (node-level, both stages).
+- [x] T2 — Per-vendor isolation: forcing vendor A to retry twice does not affect vendor B's budget/outcome. **Evidence:** `test_per_vendor_isolation`.
+- [x] T3 — HARD-block guard preserved: retries exhausted → vendor appended to `failed_vendors` with stage + reason (Check C). **Evidence:** `test_exhausted_marks_vendor_failed` + `test_evaluation_per_vendor_exhausts_to_failed`.
+- [x] T4 — One shared retry helper used by Extraction + Evaluation (same shape as Explanation) — not 3 divergent versions. **Evidence:** grep — 1 definition `app/pipeline/critic_retry.py:57`, 2 call sites (`nodes.py:432`, `:515`).
+- [x] T5 — Graph topology unchanged (Phase 4 fan-out intact); all existing tests pass; `/phase-done-rfp` Checks A + C green. **Evidence:** `test_pipeline_graph.py` 12/12 (19 nodes/27 edges unchanged); live smoke ran all 16 graph nodes; Checks A+C green.
 
 **📦 Product**
-- [ ] P1 — The system self-corrects (not just rejects) at all 3 generation steps — demonstrated by the attempt-2 test.
-- [ ] P2 — **Telemetry:** each run records, per agent, `blocks / retries / retry_successes` in `summary.json`. (The criterion that makes the feature measurable + defensible.)
-- [ ] P3 — No regression on the common path: retry fires only on a block → clean (0%-block) runs unaffected in speed/cost. Measured.
-- [ ] P4 — Honest limitation documented: clean-fixture retry rate = 0%; capability is for messy production input; live rate instrumented (P2).
+- [x] P1 — The system self-corrects (not just rejects) at all 3 generation steps — demonstrated by the attempt-2 test. **Evidence:** Explanation (existing graph critic node) + Extraction/Evaluation node-level recovery tests (T1).
+- [x] P2 — **Telemetry:** each run records, per agent, `blocks / retries / retry_successes` in `summary.json`. **Evidence:** `summary.json.critic.by_agent` + `by_vendor` in the live smoke (2 vendors × 2 stages all present); `_summarise_critic_metrics` + reconstruction tests.
+- [x] P3 — No regression on the common path: retry fires only on a block → clean (0%-block) runs unaffected in speed/cost. Measured. **Evidence:** live smoke `blocks=0/retries=0` across both stages; `test_succeeds_first_attempt_no_retry` (0 events on clean path); empty feedback = literal no-op.
+- [x] P4 — Honest limitation documented: clean-fixture retry rate = 0%; capability is for messy production input; live rate instrumented (P2). **Evidence:** this section's measure-first note + metrics doc + BACKLOG P2.0c; live smoke confirmed 0 blocks.
 
 **🏛️ Customer**
-- [ ] C1 — AI fabricates a fact/score → caught AND corrected before the customer sees it; if uncorrectable after retries, the vendor is flagged "could not be evaluated (failed grounding)" with the reason. Never a silently wrong score.
-- [ ] C2 — Audit trail records the self-correction ("Extraction for Vendor X auto-corrected after grounding check, attempt 2").
-- [ ] C3 — Grounding guarantee unchanged or stronger: every fact/score/claim the customer sees is grounded.
+- [x] C1 — AI fabricates a fact/score → caught AND corrected before the customer sees it; if uncorrectable after retries, the vendor is flagged "could not be evaluated (failed grounding)" with the reason. Never a silently wrong score. **Evidence:** T1 (corrected) + T3 (`failed_vendors` with `critic_hard_block after N attempts: <reason>`).
+- [x] C2 — Audit trail records the self-correction ("Extraction for Vendor X auto-corrected after grounding check, attempt 2"). **Evidence:** `_emit` maps `recovered`→`agent.self_corrected` and `retry`→`agent.retry` into the `audit()` table (not only the event_log timeline); `test_recovered_status_writes_audit_row`.
+- [x] C3 — Grounding guarantee unchanged or stronger: every fact/score/claim the customer sees is grounded. **Evidence:** no grounding logic touched; critic still HARD-blocks ungrounded; live smoke "every claim cited".
 
 ---
 
