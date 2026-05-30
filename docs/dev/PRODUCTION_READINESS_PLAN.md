@@ -737,6 +737,33 @@ When customer revises RFP source: bump `rfps.current_version`, write new `evalua
 ### Intent
 Procurement teams need a formal report that a CFO/legal can read, sign, and file. Current ExplanationOutput is minimal narrative; needed is a 10–12 section audit-grade document.
 
+### Plan-vs-reality alignment (reviewed 2026-05-30 — read before starting Phase 7)
+
+This section was drafted before Phases 4 and 5 shipped. Three reconciliations
+MUST be settled before coding, or the build will duplicate state and miss an
+integration:
+
+1. **`decision_confidence` vs confidence fields that already exist.** Today's
+   `ExplanationOutput` ([app/schemas/schema_decision.py:110](app/schemas/schema_decision.py#L110))
+   already has `report_confidence: float` AND `grounding_completeness: float`.
+   Do NOT add a third overlapping field. Decide at implementation time: reuse
+   `report_confidence` for the cover-page "decision confidence", or rename it
+   and document the distinction. The schema below assumes reuse.
+
+2. **Phase 5 "Mode C" is gated on this phase — flipping it on is part of Phase 7.**
+   `app/jobs/deadline_processor.py` currently rejects `autonomy_mode='auto_to_report'`
+   with "Phase 7 PDF not yet implemented" (Phase 5 PR-D). Phase 7 is DONE only
+   when that rejection is removed and `auto_to_report` runs end-to-end to a PDF.
+   Captured as an exit criterion below.
+
+3. **Render from existing sources — do not re-derive.** Three of the "new"
+   fields already have homes on master; Phase 7 formats them, it does not
+   recompute them:
+   - `audit_trail` ← Phase 5 `event_log` table + `evaluation_runs.agent_events`
+   - `mandatory_check_table` ← `DecisionOutput` mandatory-check results
+   - `rejection_reasons` ← `DecisionOutput.review_reasons` / `decision_warnings`
+     plus the rejected vendors' existing `VendorNarrative.grounded_claims`
+
 ### Schema extensions
 ```python
 class PodiumEntry(BaseModel):
@@ -766,10 +793,12 @@ class AuditTrailEntry(BaseModel):
     action: str
     detail: dict
 
-class ExplanationOutput(BaseModel):           # extended
-    ...
+class ExplanationOutput(BaseModel):           # extended — KEEP the 7 existing fields
+    # ALREADY ON MASTER (do NOT redefine/duplicate):
+    #   explanation_id, executive_summary, vendor_narratives, methodology_note,
+    #   limitations, grounding_completeness, report_confidence
     winner_declaration: str
-    decision_confidence: float
+    # decision_confidence: REUSE existing `report_confidence` (see alignment note #1)
     podium: list[PodiumEntry]
     criterion_scorecards: list[CriterionScorecard]
     pairwise_comparisons: list[PairwiseComparison]
@@ -797,7 +826,8 @@ class ExplanationOutput(BaseModel):           # extended
 - [app/schemas/schema_decision.py](app/schemas/schema_decision.py), [app/agents/explanation.py](app/agents/explanation.py), [app/prompts/explanation/pairwise_comparison.yaml](app/prompts/explanation/) (new), [app/output/report_template.html](app/output/) (new), [app/output/pdf_report.py](app/output/pdf_report.py), [app/api/evaluation_routes.py](app/api/evaluation_routes.py), [tests/test_pdf_report.py](tests/) (new).
 
 ### Exit / pass criteria — Phase 7
-- [ ] `ExplanationOutput` schema includes all 8 new fields listed above; Pydantic validates correctly.
+- [ ] `ExplanationOutput` is extended with the new report fields (podium, criterion_scorecards, pairwise_comparisons, mandatory_check_table, rejection_reasons, audit_trail, risks_and_open_questions, winner_declaration) on top of its 7 existing fields; Pydantic validates correctly.
+- [ ] **Confidence reconciliation (alignment note #1):** the report's "decision confidence" reuses the existing `report_confidence` field — no duplicate `decision_confidence` field is added. Verified by grep: exactly one confidence float feeds the cover page.
 - [ ] `app/output/report_template.html` exists with all 12 sections rendered in the right order from sample fixture data.
 - [ ] `app/output/pdf_report.py render_pdf()` returns valid PDF bytes (test: first 4 bytes are `%PDF`).
 - [ ] New endpoint `GET /api/v1/runs/{run_id}/report.pdf` returns HTTP 200 with `Content-Type: application/pdf`.
@@ -806,6 +836,8 @@ class ExplanationOutput(BaseModel):           # extended
 - [ ] `tests/test_pdf_report.py` includes a snapshot test against a golden HTML fixture (timestamps masked) — passes.
 - [ ] Pairwise comparison narratives are grounded: every claim has a `grounding_quote` from one of the two vendors' chunks; verified by extending Phase 1's grounding-completeness check to pairwise narratives.
 - [ ] Report renders correctly when one or more vendors failed (Phase 4 `failed_vendors` appendix appears with explanation).
+- [ ] **Render-from-source (alignment note #3):** `audit_trail` is populated from the Phase 5 `event_log` table + `evaluation_runs.agent_events` (not recomputed); `mandatory_check_table` and `rejection_reasons` are formatted from the existing `DecisionOutput` fields. Verified by a test asserting the rendered audit_trail row count matches the `agent_events` row count for the run.
+- [ ] **Phase 5 Mode C flipped on (alignment note #2):** `app/jobs/deadline_processor.py` no longer rejects `autonomy_mode='auto_to_report'`; an `auto_to_report` RFP runs end-to-end at the deadline and emits an `rfp.evaluation_complete` event with a PDF artifact. Verified by extending `tests/test_deadline_lifecycle.py::test_mode_c_gated` into a now-passes-through case.
 
 ---
 
