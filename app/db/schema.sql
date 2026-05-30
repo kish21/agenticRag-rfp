@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     agent_events     JSONB NOT NULL DEFAULT '[]',
     agent_log        JSONB NOT NULL DEFAULT '[]',
     decision_output  JSONB,
+    explanation_output JSONB,        -- Phase 7: narratives + report fields for the customer PDF report
     vendor_names     JSONB DEFAULT '{}',
     created_at       TIMESTAMPTZ DEFAULT now(),
     completed_at     TIMESTAMPTZ,

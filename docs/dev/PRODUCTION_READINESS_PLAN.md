@@ -750,11 +750,15 @@ integration:
    `report_confidence` for the cover-page "decision confidence", or rename it
    and document the distinction. The schema below assumes reuse.
 
-2. **Phase 5 "Mode C" is gated on this phase — flipping it on is part of Phase 7.**
-   `app/jobs/deadline_processor.py` currently rejects `autonomy_mode='auto_to_report'`
-   with "Phase 7 PDF not yet implemented" (Phase 5 PR-D). Phase 7 is DONE only
-   when that rejection is removed and `auto_to_report` runs end-to-end to a PDF.
-   Captured as an exit criterion below.
+2. **Phase 5 "Mode C" auto-trigger moves to Phase 8 (revised 2026-05-30 during build).**
+   Phase 7 delivers report *generation* (HTML + PDF, on-demand via the report
+   endpoints). But making `auto_to_report` *run on its own at the deadline*
+   requires the cron to create an evaluation run and drive the full pipeline —
+   `app/jobs/deadline_processor.py` today has **no evaluation-trigger wiring,
+   only ingestion**. That autonomous "deadline → evaluate → report → deliver"
+   flow is exactly Phase 8's job (it sits next to email delivery), so the Mode C
+   flip is re-homed to Phase 8. Phase 7 leaves the existing Mode C gate untouched;
+   the report is available on-demand the moment a run completes.
 
 3. **Render from existing sources — do not re-derive.** Three of the "new"
    fields already have homes on master; Phase 7 formats them, it does not
@@ -837,7 +841,7 @@ class ExplanationOutput(BaseModel):           # extended — KEEP the 7 existing
 - [ ] Pairwise comparison narratives are grounded: every claim has a `grounding_quote` from one of the two vendors' chunks; verified by extending Phase 1's grounding-completeness check to pairwise narratives.
 - [ ] Report renders correctly when one or more vendors failed (Phase 4 `failed_vendors` appendix appears with explanation).
 - [ ] **Render-from-source (alignment note #3):** `audit_trail` is populated from the Phase 5 `event_log` table + `evaluation_runs.agent_events` (not recomputed); `mandatory_check_table` and `rejection_reasons` are formatted from the existing `DecisionOutput` fields. Verified by a test asserting the rendered audit_trail row count matches the `agent_events` row count for the run.
-- [ ] **Phase 5 Mode C flipped on (alignment note #2):** `app/jobs/deadline_processor.py` no longer rejects `autonomy_mode='auto_to_report'`; an `auto_to_report` RFP runs end-to-end at the deadline and emits an `rfp.evaluation_complete` event with a PDF artifact. Verified by extending `tests/test_deadline_lifecycle.py::test_mode_c_gated` into a now-passes-through case.
+- [ ] **Report available on-demand:** `GET /api/v1/evaluate/{run_id}/report.html` (in-app view) and `.../report.pdf` (download) return the report for any completed run; a non-complete run returns HTTP 409. (The **Mode C auto-trigger** — `auto_to_report` auto-evaluating at the deadline and emitting `rfp.evaluation_complete` — is delivered in **Phase 8**, alongside email delivery, per alignment note #2.)
 
 ---
 
@@ -845,6 +849,8 @@ class ExplanationOutput(BaseModel):           # extended — KEEP the 7 existing
 
 ### Intent
 Executives and approvers don't want to watch the pipeline. They want fire-and-forget — kick off evaluation, walk away, receive the finished PDF in their inbox / shared folder / Teams channel.
+
+**Includes the Phase 5 "Mode C" auto-trigger (re-homed here 2026-05-30).** Phase 7 built report *generation*; Phase 8 owns the autonomous flow that *uses* it: at the deadline, for `autonomy_mode='auto_to_report'`, the scheduler creates an evaluation run, drives the pipeline to completion, renders the report, and emits `rfp.evaluation_complete` — then a delivery channel (email/folder/Teams) sends it. This requires adding evaluation-trigger wiring to `app/jobs/deadline_processor.py` (today it only runs ingestion). Until then the existing Mode C gate stands and the report is available on-demand via the report endpoints. Exit criterion: extend `tests/test_deadline_lifecycle.py::test_mode_c_gated` into a now-passes-through case.
 
 ### Approach
 Pluggable channel modules + subscription model + retry with exponential backoff.

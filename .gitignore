@@ -49,8 +49,10 @@ evals/
 *.jsonl
 
 # Platform runtime outputs (contain real RFP/vendor data)
-output/
+/output/
 app/output/*.pdf
+# but the report template is SOURCE (the global *.html ignore would catch it)
+!app/output/report_template.html
 *.db
 
 # Temp / scratch
@@ -130,3 +132,4 @@ copilot_appreview.md
 
 # Phase 5 test-generated drop folders (transient)
 tests/_drops_*/
+tests/_phase7_*

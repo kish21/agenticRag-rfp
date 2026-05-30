@@ -107,6 +107,47 @@ class VendorNarrative(BaseModel):
     # drift pattern (unicode, paraphrase, wrong chunk) can be inspected.
     ungrounded_examples: List[dict] = []
 
+# ── Phase 7 — customer-grade PDF report models ───────────────────────────────
+
+
+class PodiumEntry(BaseModel):
+    """One row of the ranked podium (section 4 of the report)."""
+    rank: int
+    vendor_id: str
+    vendor_name: str
+    total_score: float
+    score_delta_vs_next: float = 0.0   # gap to the next-ranked vendor
+    tipping_factor: str = ""           # one-line "what decided this rank"
+
+
+class CriterionScorecard(BaseModel):
+    """One criterion row of the criterion × vendor scorecard matrix (section 5)."""
+    criterion_id: str
+    criterion_name: str
+    weight: float
+    per_vendor_scores: Dict[str, float] = {}   # vendor_id -> raw score
+    rubric_used: str = ""
+
+
+class PairwiseComparison(BaseModel):
+    """Winner-vs-runner-up narrative (section 6). Every claim in key_evidence is
+    a GroundedClaim with a verbatim quote from one of the two vendors' chunks."""
+    winner_id: str
+    runner_up_id: str
+    narrative: str
+    key_evidence: List[GroundedClaim] = []
+
+
+class AuditTrailEntry(BaseModel):
+    """One agent event for the audit-trail appendix (section 12). Rendered from
+    the run's `agent_events` / `event_log` — NOT recomputed. `timestamp` is the
+    ISO string as stored, to avoid parse-fragility on render."""
+    timestamp: str = ""
+    agent: str = ""
+    action: str = ""
+    detail: Dict[str, Any] = {}
+
+
 class ExplanationOutput(BaseModel):
     explanation_id: str
     executive_summary: str
@@ -115,6 +156,19 @@ class ExplanationOutput(BaseModel):
     limitations: List[str] = []
     grounding_completeness: float = Field(ge=0.0, le=1.0)
     report_confidence: float
+    # ── Phase 7 report fields (all optional → backward-compatible with the
+    #    pre-Phase-7 Explanation agent). The report's cover-page "decision
+    #    confidence" REUSES `report_confidence` above — there is deliberately
+    #    NO separate `decision_confidence` field (see PRODUCTION_READINESS_PLAN
+    #    Phase 7 alignment note #1). ──
+    winner_declaration: str = ""
+    podium: List[PodiumEntry] = []
+    criterion_scorecards: List[CriterionScorecard] = []
+    pairwise_comparisons: List[PairwiseComparison] = []
+    mandatory_check_table: List[Dict[str, Any]] = []
+    rejection_reasons: Dict[str, List[GroundedClaim]] = {}
+    audit_trail: List[AuditTrailEntry] = []
+    risks_and_open_questions: List[str] = []
 
 
 class AuditOverride(BaseModel):
