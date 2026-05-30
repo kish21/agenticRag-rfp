@@ -56,6 +56,7 @@ class ReportContext(BaseModel):
 
     grounding_completeness: float = 0.0
     vendor_narratives: list[dict[str, Any]] = []   # prose, from explanation_output
+    vendor_names: dict[str, Any] = {}              # vendor_id -> display name
     generated_at: str = ""
 
 
@@ -249,6 +250,7 @@ def build_report_context(run: dict, org_name: str = "Meridian Financial Services
         audit_trail=_audit_trail(events),
         grounding_completeness=float(exp.get("grounding_completeness", 0.0)),
         vendor_narratives=narratives,
+        vendor_names=dict(names),
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     )
 
