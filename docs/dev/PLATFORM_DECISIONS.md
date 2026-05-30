@@ -1,5 +1,11 @@
 # Platform Decisions & Implementation Log
-*Last updated: 2026-05-14*
+*Last updated: 2026-05-30*
+
+> **Note on file paths (May 2026 refactor):** `app/core/` was split into focused
+> sub-packages. Provider modules now live at `app/providers/{llm,embedding,reranker,observability,compute}.py`
+> and Modal deployment moved from `app_modal.py` to `deploy/modal.py`. Current references
+> below reflect the new layout; the "Files Changed This Session" log at the bottom is a
+> point-in-time record and keeps its original (pre-refactor) paths.
 
 ---
 
@@ -70,9 +76,9 @@ Critic runs after every agent — cannot be skipped. HARD flag blocks the pipeli
 
 ## Provider Abstractions Built
 
-All providers follow the same pattern as `llm_provider.py` — swap via `.env`, zero code changes.
+All providers follow the same pattern as `app/providers/llm.py` — swap via `.env`, zero code changes.
 
-### LLM Provider (`app/core/llm_provider.py`)
+### LLM Provider (`app/providers/llm.py`)
 ```
 LLM_PROVIDER=openai       → GPT-4o (current default)
 LLM_PROVIDER=anthropic    → Claude (key not configured yet)
@@ -82,7 +88,7 @@ LLM_PROVIDER=azure        → Azure OpenAI
 LLM_PROVIDER=modal        → Qwen 2.5 72B AWQ via vLLM on Modal A100 (open source, no per-token cost)
 ```
 
-### Embedding Provider (`app/core/embedding_provider.py`) ← NEW
+### Embedding Provider (`app/providers/embedding.py`)
 ```
 EMBEDDING_PROVIDER=openai   → text-embedding-3-large, 3072-dim (current default)
 EMBEDDING_PROVIDER=azure    → Azure OpenAI embedding deployment
@@ -91,7 +97,7 @@ EMBEDDING_PROVIDER=modal    → BAAI/bge-large-en-v1.5, 1024-dim (Modal A10G GPU
 ```
 Switching model changes vector dimensions. Existing Qdrant collections need re-ingestion.
 
-### Reranker Provider (`app/core/reranker_provider.py`)
+### Reranker Provider (`app/providers/reranker.py`)
 ```
 RERANKER_PROVIDER=bge     → BAAI/bge-reranker-v2-m3, local CrossEncoder (current default)
 RERANKER_PROVIDER=cohere  → Cohere Rerank v3 API (paid)
@@ -99,7 +105,7 @@ RERANKER_PROVIDER=colbert → ColBERT v2.0 via ragatouille (local)
 RERANKER_PROVIDER=none    → Vector score order, no reranking
 ```
 
-### Observability Provider (`app/core/observability_provider.py`) ← NEW
+### Observability Provider (`app/providers/observability.py`)
 ```
 OBSERVABILITY_PROVIDER=langfuse  → LangFuse cloud (current default)
 OBSERVABILITY_PROVIDER=stdout    → JSON logs to console (dev/air-gapped)
@@ -128,7 +134,7 @@ COMPUTE_PROVIDER=local_worker    → In-process FastAPI (air-gapped)
 
 ### Deploy command
 ```bash
-modal deploy app_modal.py --env rag
+modal deploy deploy/modal.py --env rag
 ```
 
 ### After deploy — configure .env
@@ -140,7 +146,7 @@ MODAL_LLM_MODEL=qwen2.5-72b
 
 ### One-time model weight pre-download
 ```bash
-modal run app_modal.py::download_llm_weights --env rag
+modal run deploy/modal.py::download_llm_weights --env rag
 ```
 Caches Qwen 2.5 72B AWQ weights in a Modal Volume (`agentic-llm-weights`) so cold starts don't re-download 36GB.
 
@@ -199,7 +205,7 @@ when real customer usage data informs the right trade-offs.
 | retrieval_top_k | 10 |
 | rerank_top_n | 5 |
 | confidence_retry_threshold | 0.75 |
-| llm_temperature | 0.1 |
+| llm_temperature | 0.0 (Phase 1 determinism — was 0.1) |
 
 ---
 
@@ -275,8 +281,8 @@ Truncates all PostgreSQL fact/run tables, deletes all Qdrant collections, re-see
 
 ## What's Next (Priority Order)
 
-1. **`modal deploy app_modal.py --env rag`** — deploy all three images (off VPN; SSL issue blocks gRPC)
-2. **`modal run app_modal.py::download_llm_weights --env rag`** — pre-cache model weights in Volume
+1. **`modal deploy deploy/modal.py --env rag`** — deploy all three images (off VPN; SSL issue blocks gRPC)
+2. **`modal run deploy/modal.py::download_llm_weights --env rag`** — pre-cache model weights in Volume
 3. **Set `MODAL_LLM_ENDPOINT` in `.env`** after deploy, switch `LLM_PROVIDER=modal`
 4. **`compute_provider.py`** — abstraction layer so Azure/AWS customers don't need Modal
 5. **Tier 1 agent improvements** — table-aware PDF, tool_use extraction, configurable tiers

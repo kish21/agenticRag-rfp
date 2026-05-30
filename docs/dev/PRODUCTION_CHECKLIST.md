@@ -1,6 +1,6 @@
 # Production Deployment Checklist
 
-# Last updated: 2026-05-02
+# Last updated: 2026-05-30 (paths updated for the May 2026 app/core → sub-package refactor; Modal lives at deploy/modal.py; tooling lives under tools/)
 
 # Work through this top to bottom before going live.
 
@@ -32,15 +32,15 @@ These services run on Docker locally and are unreachable from Modal or any cloud
 
 ## 2. Modal Scheduled Jobs — Re-enable after cloud DB is live
 
-Both functions are commented out in `app_modal.py` because they require cloud PostgreSQL.
+Both functions are commented out in `deploy/modal.py` because they require cloud PostgreSQL.
 
-**File:** `app_modal.py` — lines 79–109
+**File:** `deploy/modal.py`
 
 Steps:
 
 1. Uncomment `daily_cleanup` and `rate_monitor` functions
 2. Remove the `# PRODUCTION TODO` comment block
-3. Redeploy: `modal deploy app_modal.py --env rag`
+3. Redeploy: `modal deploy deploy/modal.py --env rag`
 
 ---
 
@@ -67,7 +67,7 @@ All placeholder values must be replaced before production. Check `.env`:
 
 ### 4a. JWT Secret Key
 
-The `.env` has a real key but `app/config.py` has a hardcoded fallback `"change-me-in-production"`.
+The `.env` has a real key but `app/config/loader.py` has a hardcoded fallback `"change-me-in-production"`.
 Ensure `JWT_SECRET_KEY` is always set in the environment — never rely on the default.
 Rotate it if it has been shared or committed anywhere.
 
@@ -149,7 +149,7 @@ modal secret create agentic-platform-secrets \
   --env rag
 
 # 3. Deploy
-modal deploy app_modal.py --env rag
+modal deploy deploy/modal.py --env rag
 
 # 4. Verify function is live
 modal app list --env rag
@@ -161,16 +161,16 @@ modal app list --env rag
 
 ```bash
 # All checkpoints still green
-python checkpoint_runner.py all
+python tools/checkpoint_runner.py status
 
 # Contracts intact
-python contract_tests.py
+PYTHONPATH=. python tools/contract_tests.py
 
 # Regression above threshold
 python tests/regression/run_regression.py
 
 # Drift clean
-python drift_detector.py
+python tools/drift_detector.py
 ```
 
 Expected: 66/66 checkpoints, 14/14 contracts, 18+/20 regression, no drift.
