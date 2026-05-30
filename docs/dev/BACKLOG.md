@@ -121,7 +121,20 @@ Things that make the product usable rather than demoable.
 
 **Test case.** Use Chemtura/YASH fixture: "What client references did YASH provide?" — should find John Deere, Stanley Works, Monsanto with page numbers.
 
-### P1.12 — Real BM25 sparse retrieval (promoted from P2.1 on 2026-05-29)
+### P1.12 — Real BM25 sparse retrieval ✅ DONE 2026-05-30 (PR feat/bm25-native-sparse)
+
+**Resolution.** Replaced the MD5-hash TF approximation with real BM25: `fastembed`
+`Qdrant/bm25` produces document/query sparse vectors (proper tokenizer, currency
++ alphanumerics preserved, length-normalised TF) and the Qdrant collection now
+sets sparse `modifier=IDF`, so Qdrant applies corpus IDF server-side = full BM25.
+`get_sparse_embedding()` split into asymmetric `get_sparse_document_embedding()` /
+`get_sparse_query_embedding()`. `rank-bm25` removed (was unused). Backfill via
+`tools/reindex_bm25.py`. Acceptance: `tests/test_sparse_retrieval_bm25.py` (3 tests,
+green) — ISO 27001≠ISO 9001, £10M≠£1M, exact SLA clause > paraphrase.
+
+> **Note vs. original plan:** Qdrant has no `modifier="bm25"` — the enum is
+> `Modifier.IDF` / `Modifier.NONE`. Native BM25 = TF sparse vectors (fastembed)
+> + `modifier=IDF` server-side, which required adding `fastembed` (approved).
 
 **Problem (external reviewer, 2026-05-29).** `app/retrieval/pipeline.py:33-53` builds the "sparse vector" for hybrid retrieval by hashing words with MD5 into 100,000 buckets and storing raw normalised term-frequency. For procurement RFP evaluation this is **wrong in three specific ways:**
 

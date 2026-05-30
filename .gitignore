@@ -127,3 +127,6 @@ SESSION_PLAN.md
 PLATFORM_REVIEW_2026.md
 Codex_review.md
 copilot_appreview.md
+
+# Phase 5 test-generated drop folders (transient)
+tests/_drops_*/
