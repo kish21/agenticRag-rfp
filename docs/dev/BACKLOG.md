@@ -43,6 +43,52 @@
 
 Things that prevent shipping to a paying customer.
 
+### P0.16 — Tenant isolation: PostgreSQL RLS is currently INERT (external audit 2026-05-30)
+
+**Provenance.** External auditor flagged tenant-isolation issues (7 prompts, see end of this item). Verified against the code 2026-05-30 — the findings are real, and the root cause is **deeper than the audit states**. ⚠️ Note: P0.12 below claims "RLS prevents cross-org leakage" — that claim is **FALSE today** (see below); fix this item first.
+
+**Verdict (verified): RLS enforces NOTHING right now, for TWO independent reasons.**
+
+1. **The RLS context is never set on query connections.** [app/api/middleware.py:54-59](app/api/middleware.py#L54-L59) does `with engine.connect() as conn: conn.execute("SET LOCAL app.current_org_id=…"); conn.commit()`. `SET LOCAL` is **transaction-scoped**, so `commit()` discards it immediately, and then the connection closes and returns to the pool. Route handlers open a *different* connection. → the context is a **guaranteed no-op** (worse than the audit's "separate connection" framing).
+2. **The app role bypasses RLS entirely.** `schema.sql` has `ENABLE ROW LEVEL SECURITY` on 22 tables but **`FORCE ROW LEVEL SECURITY` on 0**. The app connects as `platformuser` (the Postgres container **superuser + table owner**). In PostgreSQL, **RLS does not apply to the table owner/superuser unless `FORCE ROW LEVEL SECURITY` is set.** → even with the context fixed, RLS would still be bypassed. **The audit's 7 prompts do not mention this — it is the single most important fix.**
+
+**Naming split (also confirmed).** Everything uses `app.current_org_id` EXCEPT `org_settings`, which uses `app.org_id`:
+- code: [app/api/org_settings_routes.py:49](app/api/org_settings_routes.py#L49), [app/domain/org_settings.py:77](app/domain/org_settings.py#L77),[110](app/domain/org_settings.py#L110)
+- RLS policies: [app/db/schema.sql:571](app/db/schema.sql#L571),[581](app/db/schema.sql#L581)
+
+**Honest severity.** Likely **no active cross-org leak today** — isolation is actually carried by **application-level `WHERE org_id` filters** (`_db_get_run`, `require_run_access`, Phase 9 visibility). The app works *because* RLS is bypassed and the app filters do the real work. BUT: (a) the README/security claim "isolation enforced at JWT + RLS + Qdrant" is **false** for the RLS layer — a diligence reviewer will catch it; (b) there is **no DB backstop** — one forgotten `WHERE org_id` in any future query leaks tenants silently. Not a fire today; a real defense-in-depth hole + a false security claim.
+
+**Action plan (TEST-FIRST — prove the gap, then fix, then prove the fix):**
+
+1. **Cross-org isolation tests that FAIL today** (prove RLS is inert):
+   - **DB/RLS level:** connect as a *non-owner* role with `app.current_org_id` = org A; assert a raw `SELECT` cannot see org B rows in `evaluation_runs`, `rfps`, `vendor_documents`, `org_settings`, `org_settings_audit`, extracted_* tables. (These FAIL now → proves the hole.)
+   - **API level:** org A token → 404/403 reading/updating/deleting org B's run / RFP / vendor docs / settings / override / export / admin-attribution (audit Prompts 4–6 routes).
+   - Missing tenant context → zero protected rows.
+2. **Make RLS real:**
+   - `FORCE ROW LEVEL SECURITY` on all 22 protected tables (Alembic migration). AND/OR run the app as a dedicated **non-owner** DB role (`platform_app`) that only RLS governs. (FORCE is the minimum; non-owner role is belt-and-suspenders.)
+   - Move `SET LOCAL app.current_org_id` OUT of the throwaway-connection middleware and INTO the **actual DB session/dependency** used by handlers (so it's on the same connection, inside the same transaction as the query, NOT committed away). Fix/remove the misleading middleware + its comment.
+   - Standardize `app.org_id` → `app.current_org_id` everywhere (org_settings code + schema.sql:571/581 policies); Alembic migration for the policy change. No remaining runtime `app.org_id`.
+3. **Vendor + run ownership (Prompts 5–6):** every vendor access tied to current org + RFP/run (not vendor_id alone); run_id never trusted alone. Tests for invite/attribute/results/override/admin endpoints.
+4. **Re-run step-1 tests → now PASS.** Then write the **honest** enterprise-reviewer summary (Prompt 7) — only after tests prove RLS enforces.
+
+**Acceptance criteria:** (a) `FORCE ROW LEVEL SECURITY` on all protected tables; (b) RLS context set on the same connection as queries (verified by a test); (c) zero runtime `app.org_id`; (d) DB-level + API-level cross-org read/write tests green; (e) README/PERFORMANCE security claims updated to match reality; (f) reviewer summary written and true.
+
+**Effort.** ~2–3 days (DB role + migrations + session refactor + comprehensive tests). **Do before any enterprise security review / due diligence.**
+
+<details><summary>External auditor's 7 prompts (preserved verbatim)</summary>
+
+1. **Move RLS context into actual DB session** — `SET LOCAL app.current_org_id` belongs in the DB dependency/session used by handlers, not middleware on a separate connection; every authenticated request's connection has org context before queries; keep public routes working; tests: org A can't read/update/delete org B rows; context on the same connection as the query.
+2. **Standardize on `app.current_org_id`** — replace all `app.org_id`; update `org_settings`/`org_settings_audit` policies + app code; Alembic if needed; tests: org A settings/audit not visible to org B; no runtime `app.org_id` remains.
+3. **Remove `app.org_id` from org_settings policies** — `org_settings` + `org_settings_audit` use `current_setting('app.current_org_id', true)`; update `app/domain/org_settings.py` + routes; Alembic; tests: read own / not others' / can't update others' / audit isolated.
+4. **Cross-org read/write isolation tests** — two orgs + tokens + data; org A can't read/update/delete org B evaluation runs / RFPs / vendor docs / settings; missing context → no rows; both API (403/404) and DB/RLS level.
+5. **Vendor ownership tests** — org A can't access org B vendor docs / invite-update-attribute on org B's RFP; vendor_id must belong to current RFP; run only uses vendor_ids of that org/RFP; cross-org guessing → 404. Endpoints: invite, eval create/confirm, results/detail, override, admin attribution.
+6. **Run ownership tests** — org A can't view setup/stream/results/export/override/delete org B's run; consistent 404/403. Routes: `/evaluate/{run_id}/{setup,confirm,status,results,export,override}` + delete/retry.
+7. **Enterprise reviewer summary** — concise technical note: isolation model, org_id from JWT, how `app.current_org_id` is set, how RLS uses it, route-level org/run/vendor ownership checks, what tests prove, what happens on cross-org access, remaining limitations. Tone for a security-conscious buyer / due-diligence reviewer.
+
+</details>
+
+---
+
 ### P0.12 — Multi-user visibility and role-based access
 
 **Problem.** Today any user with a JWT for the same `org_id` can see any evaluation that org has run. RLS prevents cross-org leakage but not within-org. A procurement intern can see the CFO's confidential negotiations.
