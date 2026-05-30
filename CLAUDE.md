@@ -91,25 +91,27 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Current skill:** Phase 3 + Phase 5 complete on 2026-05-29. On 2026-05-30: docs refresh (#172), real BM25 sparse retrieval / BACKLOG P1.12 (#173), Phase 7 plan-vs-reality alignment (#174). Phase 1, 2 (Explanation only), 4, 9 already on master. Remaining: 2c, 6, 7, 8, 10.
-**Last verified checkpoint:** #173 merged — `tests/test_sparse_retrieval_bm25.py` (3 tests) green in CI; sparse retrieval is now real BM25 (fastembed `Qdrant/bm25` + Qdrant `modifier=IDF`), `get_sparse_embedding()` split into document/query embeddings, `rank-bm25` dropped, `tools/reindex_bm25.py` added.
-**Next action:** see **NEXT SESSION PLAN** block below — Phase 7 (customer-grade PDF report) is now unblocked; spec + exit criteria aligned in #174.
+**Current skill:** Phase 3 + Phase 5 done 2026-05-29. On 2026-05-30 (8 PRs): docs refresh (#172), real BM25/P1.12 (#173), Phase 7 plan alignment (#174), session state (#175), **Phase 7 customer report (#176)**, report polish (#177), **frontend View/Download report buttons (#178)**, **Phase 8a delivery channel foundation (#179)**. Phase 1, 2 (Explanation only), 4, 7, 9 on master. Remaining: 2c, 6, 8b, 10.
+**Last verified checkpoint:** #179 merged. Phase 7 report core live (`app/output/report_builder.py` + `report_template.html` + `pdf_report.py`; `GET /api/v1/evaluate/{run_id}/report.html|.pdf`; explanation_output persisted via alembic 0008). Phase 8a delivery channels live (`app/delivery/` — email_smtp + folder_drop + registry; 10 tests green). `tests/test_phase7_report.py` (15) + `tests/test_delivery.py` (10) green in CI.
+**Next action:** see **NEXT SESSION PLAN** below — **Phase 8b** (Mode C auto-trigger + event dispatcher).
 **Blockers:** none
 
 ### NEXT SESSION PLAN (set 2026-05-30 — start here)
 
-**BUILD PHASE 7 — customer-grade PDF report.** Spec + exit criteria are aligned and on master (#174). Read `docs/dev/PRODUCTION_READINESS_PLAN.md` "Phase 7" first — especially the **"Plan-vs-reality alignment"** block and the revised exit criteria. The three things the build MUST get right (already exit criteria):
+**BUILD PHASE 8b — autonomous delivery (Mode C auto-trigger + event dispatcher).** Phase 8a (channels) is on master (#179). This phase wires the "deadline → evaluate → report → deliver" flow. Read `docs/dev/PRODUCTION_READINESS_PLAN.md` "Phase 8".
 
-1. **Reuse `report_confidence`** for the cover-page "decision confidence" — do NOT add a duplicate `decision_confidence` field (`ExplanationOutput` already has `report_confidence` + `grounding_completeness`).
-2. **Flip Phase 5 Mode C on** — remove the `auto_to_report` rejection in `app/jobs/deadline_processor.py`; run it end-to-end to a PDF; extend `tests/test_deadline_lifecycle.py::test_mode_c_gated`.
-3. **Render `audit_trail` / `mandatory_check_table` / `rejection_reasons` from existing sources** (`event_log`, `agent_events`, `DecisionOutput`) — don't recompute.
+1. **Schema:** `delivery_subscriptions` + `delivery_attempts` (UNIQUE `(subscription_id, run_id, trigger)` for idempotency) + alembic `0009`.
+2. **Dispatcher** (`app/jobs/delivery_dispatcher.py`): read `event_log` where `delivered_at IS NULL` for `rfp.evaluation_complete` / `rfp.facts_ready`; match subscriptions; build `DeliveryPayload` from the run (use `app/output/report_builder.build_report_context` + `pdf_report` — pdf may be None); dispatch via `app.delivery.get_channel`; record `delivery_attempts` (idempotent); set `event_log.delivered_at`; retry/backoff via `app/infra/rate_limiter.py`.
+3. **Mode C auto-trigger** (`app/jobs/deadline_processor.py`): at `facts_ready` for `autonomy_mode='auto_to_report'`, REMOVE the rejection — create an `evaluation_runs` row (org_id, rfp_id, setup_id snapshot, vendor_ids from `invited_vendors`), `await _run_pipeline(run_id, org_id)`, emit `rfp.evaluation_complete`. Extend `tests/test_deadline_lifecycle.py::test_mode_c_gated` → now-passes-through.
+4. **One-shot:** `POST /api/v1/evaluate/start` accepts `deliver_to=[{channel,target}]` → transient subscription scoped to that run.
 
-Suggested order: extend schema → `report_template.html` (12 sections) → `pdf_report.py render_pdf()` → `GET /api/v1/runs/{run_id}/report.pdf` → Mode C flip → `tests/test_pdf_report.py` (golden snapshot, timestamps masked) → `/phase-done-rfp`. Recommended Claude Code features (per `/phase-done-rfp`): `/frontend-design` → `/anti-ai-ui` for the HTML/CSS template.
+**Two real constraints (decided 2026-05-30):**
+- The Mode C eval-trigger needs **Postgres + the full pipeline + a live LLM** to verify end-to-end — offline-mockable tests + CI only go so far; the true deadline→inbox path proves out live.
+- **Real email needs the customer's SMTP creds** in `.env` (`SMTP_HOST/PORT/USERNAME/PASSWORD/FROM/USE_TLS`, e.g. Hostinger). The channel is config-driven and ready.
 
 **What we are deliberately NOT doing next session** (each has a reason — re-evaluate later, not now)
 - Phase 2c (Extraction + Evaluation critic-as-controller) — wait for production traffic that surfaces flakiness
 - Phase 6 (incremental re-eval for addenda) — wait for customer who actually sends addenda
-- Phase 8 (delivery channels) — depends on Phase 7
 - Phase 10 (architecture doc) — `/doc-create --doc-type architecture --audience cto` can cover this in a future doc session
 - Modal cron deploy — costs $5-15/month for zero customer benefit until first real `auto_to_evaluate` customer
 
