@@ -39,6 +39,9 @@ def test_values_match_is_punctuation_insensitive_but_not_synonym():
     # ...but genuinely different words must NOT (don't fold valid/expired together).
     assert not matching.values_match("valid", "expired")
     assert not matching.values_match("current", "lapsed")
+    # ...and a punctuation-only/placeholder actual must NOT false-match (regression guard).
+    assert not matching.values_match("ISO 27001", "--")
+    assert not matching.values_match("ISO 27001", "—")
 
 
 def test_key_fields_match_requires_all():

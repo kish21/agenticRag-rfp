@@ -64,9 +64,11 @@ def values_match(expected, actual) -> bool:
             return True
         denom = max(abs(en), 1e-9)
         return abs(en - an) / denom <= _NUM_REL_TOL
-    # string comparison: either contains the other (punctuation-insensitive)
+    # string comparison: either contains the other (punctuation-insensitive).
+    # Require BOTH non-empty: a punctuation-only/placeholder actual ("--", "—")
+    # folds to "" and would otherwise false-match any expected via ("" in e).
     e, a = _norm_value(expected), _norm_value(actual)
-    return bool(e) and (e in a or a in e)
+    return bool(e) and bool(a) and (e in a or a in e)
 
 
 def key_fields_match(expected: dict, actual_fields: dict) -> bool:
