@@ -516,6 +516,17 @@ async def main_async(args) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     tee = Tee(out_dir / "transcript.log")
 
+    # RLS (post-#190): the app engine connects as the non-superuser platform_app
+    # role. This dev smoke harness verifies the PIPELINE (not tenant isolation —
+    # that's proven in tests/test_tenant_isolation_rls.py), and it seeds/reads many
+    # rows for one org outside any request context. Mirror tests/conftest.py: route
+    # the app engine to the RLS-exempt owner role for the run. Without this, the
+    # evaluation_runs insert is rejected by row-level security.
+    import app.db.fact_store as _fs
+    from app.db.session import admin_engine_url as _admin_url
+    _fs.app_engine_url = _admin_url
+    _fs._engine = None
+
     overall_ok = False
     try:
         section("LANGGRAPH SMOKE TEST")

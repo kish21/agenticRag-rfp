@@ -261,12 +261,19 @@ async def _evaluate_mandatory_check(
     except ValueError:
         decision = ComplianceStatus.INSUFFICIENT_EVIDENCE
 
+    # E3.b — a flagged contradiction means compliance cannot be confirmed, whatever
+    # the model proposed. Force insufficient_evidence and never let the optimistic
+    # chunk-fallback below flip it to PASS by re-finding the value that happens to pass.
+    contradictions = parsed.get("contradictions_found") or []
+    if contradictions:
+        decision = ComplianceStatus.INSUFFICIENT_EVIDENCE
+
     # Fallback: fire when (a) no facts + insufficient_evidence, OR
     # (b) facts exist but decision is FAIL and extraction was NOT already retried
     # by the extraction critic (which would mean the failure is genuine).
     # extraction_was_retried prevents looping between the two critics.
     extraction_was_retried = target.fact_type in (retried_fact_types or [])
-    should_fallback = org_id and (
+    should_fallback = org_id and not contradictions and (
         (not relevant_facts and decision == ComplianceStatus.INSUFFICIENT_EVIDENCE)
         or (relevant_facts and decision == ComplianceStatus.FAIL and not extraction_was_retried)
     )
