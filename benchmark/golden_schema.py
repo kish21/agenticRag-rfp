@@ -93,7 +93,10 @@ class ScenarioGolden(BaseModel):
     # contradictions, missing evidence, …). Documentation + grouping only.
     stresses: list[str] = Field(default_factory=list)
     rfp_pdf: str
-    criteria_csv: str
+    # A fixed EvaluationSetup (deterministic criterion_id/check_id/target_id),
+    # injected directly so the benchmark measures the DOWNSTREAM pipeline against
+    # a known answer key rather than re-deriving criteria via the LLM each run.
+    setup_json: str
     vendors: list[ExpectedVendor]
 
     def present_facts(self) -> list[ExpectedFact]:
