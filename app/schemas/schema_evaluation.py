@@ -24,6 +24,11 @@ class CriterionScore(BaseModel):
     evidence_used: List[str]
     score_rationale: str
     variance_estimate: float
+    # E3: True when NO evidence fed this criterion. The LLM is NOT asked to invent
+    # a score in that case — raw_score stays 0 but this flag means "not scored,
+    # evidence insufficient", which the comparator/decision/report/UI surface
+    # distinctly from a genuine 0/10. Default False keeps older payloads valid.
+    insufficient_evidence: bool = False
 
 class EvaluationOutput(BaseModel):
     evaluation_id: str

@@ -17,6 +17,7 @@ interface CriterionScore {
   confidence: number;
   rubric_band_applied: string;
   score_rationale: string;
+  insufficient_evidence?: boolean;
 }
 
 interface ShortlistedVendor {
@@ -72,6 +73,30 @@ function scoreBar(score: number, max = 10) {
         fontVariantNumeric: "tabular-nums",
       }}>
         {score}
+      </span>
+    </div>
+  );
+}
+
+// Insufficient-evidence state (E3): a criterion with no evidence is NOT scored.
+// A dashed warning pill (not a filled bar) reads as "absent / not assessed" —
+// visually unmistakable from a genuine 0/10 solid bar.
+function insufficientBadge() {
+  return (
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "4px 8px", borderRadius: "var(--radius)",
+      border: "1px dashed var(--color-warning)", backgroundColor: "transparent",
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: 999,
+        backgroundColor: "var(--color-warning)", flexShrink: 0,
+      }} />
+      <span style={{
+        fontFamily: MONO, fontSize: 10, fontWeight: 600, letterSpacing: "0.07em",
+        textTransform: "uppercase", color: "var(--color-warning)", whiteSpace: "nowrap",
+      }}>
+        Insufficient evidence
       </span>
     </div>
   );
@@ -303,7 +328,7 @@ export default function ComparePage() {
                           >
                             {c ? (
                               <>
-                                {scoreBar(c.raw_score)}
+                                {c.insufficient_evidence ? insufficientBadge() : scoreBar(c.raw_score)}
                                 {active === `${v.vendor_id}-${cid}` && (
                                   <p style={{
                                     fontFamily: FONT, fontSize: 11,

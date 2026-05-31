@@ -1,0 +1,104 @@
+{
+  "scenario_id": "06_missing_evidence",
+  "title": "Mandatory evidence missing",
+  "stresses": [
+    "missing",
+    "rejection"
+  ],
+  "rfp_pdf": "rfp.pdf",
+  "setup_json": "setup.json",
+  "vendors": [
+    {
+      "vendor_id": "omega",
+      "vendor_pdf": "vendor_omega.pdf",
+      "facts": [
+        {
+          "fact_type": "sla",
+          "key_fields": {
+            "priority_level": "P1",
+            "response_minutes": 15,
+            "resolution_hours": 4,
+            "uptime_percentage": 99.9
+          },
+          "grounding_substring": "15-minute response time",
+          "expected_page": null,
+          "present": true,
+          "note": ""
+        },
+        {
+          "fact_type": "project",
+          "key_fields": {
+            "client_name": "Northbridge Building Society",
+            "client_sector": "financial services",
+            "user_count": 5000
+          },
+          "grounding_substring": "Northbridge Building Society",
+          "expected_page": null,
+          "present": true,
+          "note": ""
+        },
+        {
+          "fact_type": "pricing",
+          "key_fields": {
+            "amount": 1200000
+          },
+          "grounding_substring": "£1,200,000",
+          "expected_page": null,
+          "present": true,
+          "note": ""
+        },
+        {
+          "fact_type": "certification",
+          "key_fields": {},
+          "grounding_substring": null,
+          "expected_page": null,
+          "present": false,
+          "note": "No ISO 27001 certificate mentioned anywhere."
+        },
+        {
+          "fact_type": "insurance",
+          "key_fields": {},
+          "grounding_substring": null,
+          "expected_page": null,
+          "present": false,
+          "note": "No professional indemnity insurance mentioned."
+        }
+      ],
+      "mandatory": [
+        {
+          "check_id": "chk-iso27001",
+          "outcome": "insufficient_evidence",
+          "note": ""
+        },
+        {
+          "check_id": "chk-pi-insurance",
+          "outcome": "insufficient_evidence",
+          "note": ""
+        }
+      ],
+      "criteria": [
+        {
+          "criterion_id": "crit-experience",
+          "expectation": "6-8",
+          "note": ""
+        },
+        {
+          "criterion_id": "crit-sla",
+          "expectation": "9-10",
+          "note": ""
+        },
+        {
+          "criterion_id": "crit-security",
+          "expectation": "insufficient",
+          "note": ""
+        },
+        {
+          "criterion_id": "crit-pricing",
+          "expectation": "6-8",
+          "note": ""
+        }
+      ],
+      "expected_rejected": true
+    }
+  ]
+}

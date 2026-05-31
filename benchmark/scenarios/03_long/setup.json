@@ -1,0 +1,142 @@
+{
+  "setup_id": "setup-benchmark",
+  "org_id": "00000000-0000-0000-0000-0000000000e3",
+  "department": "Procurement",
+  "rfp_id": "rfp-benchmark",
+  "rfp_confirmed": true,
+  "mandatory_checks": [
+    {
+      "check_id": "chk-iso27001",
+      "name": "ISO 27001 certification",
+      "description": "Vendor must hold a current ISO 27001 certificate.",
+      "what_passes": "A valid, in-date ISO 27001 certificate is evidenced.",
+      "extraction_target_id": "ext-cert-iso",
+      "source": null,
+      "is_locked": null,
+      "page_reference": null
+    },
+    {
+      "check_id": "chk-pi-insurance",
+      "name": "Professional Indemnity >= \u00a35M",
+      "description": "Vendor must hold professional indemnity insurance of at least \u00a35M.",
+      "what_passes": "Evidence of PI cover of \u00a35,000,000 or more.",
+      "extraction_target_id": "ext-ins-pi",
+      "source": null,
+      "is_locked": null,
+      "page_reference": null
+    }
+  ],
+  "scoring_criteria": [
+    {
+      "criterion_id": "crit-experience",
+      "name": "Relevant financial-services experience",
+      "weight": 0.35,
+      "rubric_9_10": "Multiple directly-comparable FS engagements with measurable outcomes.",
+      "rubric_6_8": "At least one relevant FS engagement.",
+      "rubric_3_5": "Tangential or non-FS experience only.",
+      "rubric_0_2": "No relevant experience evidenced.",
+      "extraction_target_ids": [
+        "ext-proj-fs"
+      ],
+      "source": null,
+      "is_locked": null,
+      "page_reference": null
+    },
+    {
+      "criterion_id": "crit-sla",
+      "name": "Service-level commitments",
+      "weight": 0.3,
+      "rubric_9_10": "Strong, specific SLAs with high uptime and fast P1 response.",
+      "rubric_6_8": "Reasonable documented SLAs.",
+      "rubric_3_5": "Vague or weak SLAs.",
+      "rubric_0_2": "No SLA commitments evidenced.",
+      "extraction_target_ids": [
+        "ext-sla-p1"
+      ],
+      "source": null,
+      "is_locked": null,
+      "page_reference": null
+    },
+    {
+      "criterion_id": "crit-security",
+      "name": "Security approach",
+      "weight": 0.2,
+      "rubric_9_10": "Independently certified, robust security posture.",
+      "rubric_6_8": "Sound security approach.",
+      "rubric_3_5": "Partial security evidence.",
+      "rubric_0_2": "No security evidence.",
+      "extraction_target_ids": [
+        "ext-cert-iso"
+      ],
+      "source": null,
+      "is_locked": null,
+      "page_reference": null
+    },
+    {
+      "criterion_id": "crit-pricing",
+      "name": "Commercial proposal",
+      "weight": 0.15,
+      "rubric_9_10": "Clear, transparent, competitive pricing.",
+      "rubric_6_8": "Clear pricing.",
+      "rubric_3_5": "Unclear pricing.",
+      "rubric_0_2": "No pricing evidenced.",
+      "extraction_target_ids": [
+        "ext-pricing-annual"
+      ],
+      "source": null,
+      "is_locked": null,
+      "page_reference": null
+    }
+  ],
+  "extraction_targets": [
+    {
+      "target_id": "ext-cert-iso",
+      "name": "ISO 27001 certification",
+      "description": "Current ISO 27001 information-security certification.",
+      "fact_type": "certification",
+      "is_mandatory": true,
+      "feeds_criterion_id": "crit-security",
+      "feeds_check_id": "chk-iso27001"
+    },
+    {
+      "target_id": "ext-ins-pi",
+      "name": "Professional Indemnity insurance",
+      "description": "Professional indemnity insurance and coverage amount.",
+      "fact_type": "insurance",
+      "is_mandatory": true,
+      "feeds_criterion_id": null,
+      "feeds_check_id": "chk-pi-insurance"
+    },
+    {
+      "target_id": "ext-proj-fs",
+      "name": "Financial-services reference project",
+      "description": "Reference engagement in the financial-services sector.",
+      "fact_type": "project",
+      "is_mandatory": false,
+      "feeds_criterion_id": "crit-experience",
+      "feeds_check_id": null
+    },
+    {
+      "target_id": "ext-sla-p1",
+      "name": "Priority-1 SLA commitments",
+      "description": "Response/resolution times and uptime guarantee.",
+      "fact_type": "sla",
+      "is_mandatory": false,
+      "feeds_criterion_id": "crit-sla",
+      "feeds_check_id": null
+    },
+    {
+      "target_id": "ext-pricing-annual",
+      "name": "Annual managed-services fee",
+      "description": "Proposed annual price for the managed service.",
+      "fact_type": "pricing",
+      "is_mandatory": false,
+      "feeds_criterion_id": "crit-pricing",
+      "feeds_check_id": null
+    }
+  ],
+  "total_weight": 1.0,
+  "confirmed_by": "benchmark",
+  "confirmed_at": null,
+  "source": "manually_defined"
+}

@@ -149,6 +149,15 @@ async def run_comparator_agent(
         # report data. Entirely-missing vendors are warned about above.
         for vid in (v for v in vendor_ids if v in evaluation_outputs):
             cs = score_lookup.get(vid, {}).get(criterion.criterion_id)
+            if cs and getattr(cs, "insufficient_evidence", False):
+                # E3 — unscored for lack of evidence: exclude from the comparison
+                # rather than present it as a genuine 0 (which would mislabel the
+                # vendor "weakest" on this criterion).
+                warnings.append(
+                    f"Vendor {vid} excluded from criterion {criterion.criterion_id} "
+                    "comparison — insufficient evidence (not scored)."
+                )
+                continue
             if cs:
                 vendor_scores[vid] = cs.raw_score
                 vendor_evidences[vid] = cs.evidence_used
@@ -157,6 +166,15 @@ async def run_comparator_agent(
                 vendor_scores[vid] = 0
                 vendor_evidences[vid] = []
                 warnings.append(f"No score for vendor {vid} on criterion {criterion.criterion_id}")
+
+        # E3 — if every vendor was insufficient on this criterion there is nothing
+        # to compare: skip the LLM call and the degenerate empty comparison row.
+        if not vendor_scores:
+            warnings.append(
+                f"Criterion {criterion.criterion_id}: all vendors have insufficient "
+                "evidence — excluded from cross-vendor comparison."
+            )
+            continue
 
         rubric_summary = criterion.rubric_9_10[:80]
         try:

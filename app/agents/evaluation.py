@@ -320,11 +320,26 @@ async def _score_criterion(
     critic_feedback: str = "",
 ) -> CriterionScore:
     has_facts = bool(relevant_facts)
-    facts_text = (
-        json.dumps(relevant_facts, indent=2, default=str)
-        if has_facts
-        else "No specific facts extracted for this criterion — score based on the broader evidence below if present, otherwise score 0."
-    )
+    # E3 — no forced scores: if NO evidence feeds this criterion, do not ask the
+    # LLM to invent a 0. Declare insufficient evidence so the ranking/report/UI
+    # can distinguish "we couldn't assess this" from a genuine 0/10.
+    if not has_facts:
+        return CriterionScore(
+            criterion_id=criterion.criterion_id,
+            vendor_id=vendor_id,
+            raw_score=0,
+            weighted_contribution=0.0,
+            confidence=0.0,
+            rubric_band_applied="insufficient_evidence",
+            evidence_used=[],
+            score_rationale=(
+                "No evidence was extracted for this criterion; marked insufficient "
+                "rather than scored. Requires human review."
+            ),
+            variance_estimate=0.0,
+            insufficient_evidence=True,
+        )
+    facts_text = json.dumps(relevant_facts, indent=2, default=str)
     messages = [
         {"role": "system", "content": get_prompt("evaluation/score_criterion")},
         {
@@ -426,7 +441,7 @@ async def run_evaluation_agent(
         if not relevant:
             warnings.append(
                 f"Criterion {criterion.criterion_id} ({criterion.name}): no targeted facts found — "
-                "scored with empty context, LLM will apply 0-2 rubric band"
+                "marked INSUFFICIENT EVIDENCE (not scored). Requires human review."
             )
         try:
             score = await _score_criterion(criterion, relevant, vendor_id,
@@ -445,10 +460,20 @@ async def run_evaluation_agent(
         overall_compliance = "pass"
 
     total_score = round(sum(s.weighted_contribution for s in criterion_scores), 4)
+    # Confidence reflects only the criteria we could actually score — an
+    # insufficient-evidence criterion carries no signal and must not drag it down.
+    scored = [s for s in criterion_scores if not s.insufficient_evidence]
     avg_confidence = (
-        round(sum(s.confidence for s in criterion_scores) / len(criterion_scores), 3)
-        if criterion_scores else 0.0
+        round(sum(s.confidence for s in scored) / len(scored), 3) if scored else 0.0
     )
+    insufficient_criteria = [s.criterion_id for s in criterion_scores if s.insufficient_evidence]
+    if insufficient_criteria:
+        warnings.append(
+            "Insufficient evidence to score: " + ", ".join(insufficient_criteria)
+            + " — flagged for human review and excluded from the confidence average. "
+            "(Their 0 weighted contribution is still in total_weighted_score pending "
+            "coverage-normalised ranking — see BACKLOG E3.d.)"
+        )
 
     output = EvaluationOutput(
         evaluation_id=evaluation_id,
