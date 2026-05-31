@@ -149,6 +149,15 @@ async def run_comparator_agent(
         # report data. Entirely-missing vendors are warned about above.
         for vid in (v for v in vendor_ids if v in evaluation_outputs):
             cs = score_lookup.get(vid, {}).get(criterion.criterion_id)
+            if cs and getattr(cs, "insufficient_evidence", False):
+                # E3 — unscored for lack of evidence: exclude from the comparison
+                # rather than present it as a genuine 0 (which would mislabel the
+                # vendor "weakest" on this criterion).
+                warnings.append(
+                    f"Vendor {vid} excluded from criterion {criterion.criterion_id} "
+                    "comparison — insufficient evidence (not scored)."
+                )
+                continue
             if cs:
                 vendor_scores[vid] = cs.raw_score
                 vendor_evidences[vid] = cs.evidence_used

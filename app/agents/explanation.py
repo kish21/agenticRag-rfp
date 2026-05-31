@@ -290,6 +290,17 @@ async def run_explanation_agent(
                 f"{n.vendor_id}: zero grounded claims — narrative has no verifiable content."
             )
 
+    # E3 — surface criteria that could not be scored for lack of evidence so the
+    # report never presents them as a genuine 0/10.
+    for sv in decision_output.shortlisted_vendors:
+        insufficient = [c.criterion_id for c in sv.criterion_breakdown
+                        if getattr(c, "insufficient_evidence", False)]
+        if insufficient:
+            limitations.append(
+                f"{sv.vendor_id}: insufficient evidence to score {insufficient} — "
+                "these criteria were NOT scored (not counted as 0); human review needed."
+            )
+
     output = ExplanationOutput(
         explanation_id=explanation_id,
         executive_summary=_build_executive_summary(decision_output, vendor_narratives),
