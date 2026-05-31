@@ -470,7 +470,9 @@ async def run_evaluation_agent(
     if insufficient_criteria:
         warnings.append(
             "Insufficient evidence to score: " + ", ".join(insufficient_criteria)
-            + " — not folded into the score as a 0; human review recommended."
+            + " — flagged for human review and excluded from the confidence average. "
+            "(Their 0 weighted contribution is still in total_weighted_score pending "
+            "coverage-normalised ranking — see BACKLOG E3.d.)"
         )
 
     output = EvaluationOutput(

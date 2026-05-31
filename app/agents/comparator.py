@@ -167,6 +167,15 @@ async def run_comparator_agent(
                 vendor_evidences[vid] = []
                 warnings.append(f"No score for vendor {vid} on criterion {criterion.criterion_id}")
 
+        # E3 — if every vendor was insufficient on this criterion there is nothing
+        # to compare: skip the LLM call and the degenerate empty comparison row.
+        if not vendor_scores:
+            warnings.append(
+                f"Criterion {criterion.criterion_id}: all vendors have insufficient "
+                "evidence — excluded from cross-vendor comparison."
+            )
+            continue
+
         rubric_summary = criterion.rubric_9_10[:80]
         try:
             comparison = await _compare_criterion(

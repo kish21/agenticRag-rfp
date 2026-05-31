@@ -104,7 +104,10 @@ def _scorecards(shortlisted: list[dict]) -> list[CriterionScorecard]:
                     per_vendor_scores={},
                     rubric_used=c.get("rubric_band_applied", ""),
                 )
-            cards[cid].per_vendor_scores[vid] = float(c.get("raw_score", 0))
+            # E3 — do NOT emit a fabricated 0 for a criterion with no evidence;
+            # omit the score so the report never shows it as a genuine 0/10.
+            if not c.get("insufficient_evidence"):
+                cards[cid].per_vendor_scores[vid] = float(c.get("raw_score", 0))
     return list(cards.values())
 
 

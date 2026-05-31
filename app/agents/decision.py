@@ -165,8 +165,9 @@ async def run_decision_agent(
         ]
         if insufficient_criteria:
             review_reasons.append(
-                f"Vendor {vendor_id} has criteria with insufficient evidence (not scored): "
-                f"{insufficient_criteria}. Score reflects only evidenced criteria — human review recommended."
+                f"Vendor {vendor_id} has criteria with insufficient evidence (not scored on merit): "
+                f"{insufficient_criteria}. These contribute 0 to the total/recommendation pending "
+                "coverage-normalised ranking (BACKLOG E3.d) — human review recommended."
             )
 
         shortlisted.append(

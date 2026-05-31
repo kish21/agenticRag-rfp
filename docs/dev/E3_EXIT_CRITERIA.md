@@ -70,7 +70,7 @@ re-run. A criterion is NOT "done" on assertion — only when its verified-by pas
 
 | ID | Criterion | Verified by |
 |----|-----------|-------------|
-| D1 | The evaluation output can represent **insufficient evidence** for a scoring criterion distinctly from a real `0`; a criterion with no evidence is **not folded into the ranking as a fabricated 0**. | Schema field + evaluation-agent logic; unit test on the `missing_evidence` scenario. |
+| D1 | The evaluation output represents **insufficient evidence** for a scoring criterion distinctly from a real `0`: the agent no longer asks the LLM to fabricate a score/rationale, flags `insufficient_evidence`, and surfaces it in comparator/decision/explanation/report/UI. **Met (flag-only).** ⚠️ The criterion's `0` contribution still sits in `total_weighted_score` — true *exclusion from the ranking* (coverage-normalised) is the **deferred follow-up E3.d** (your signed-off "flag-only" scope choice). | Schema field + evaluation logic; `tests/test_insufficient_evidence.py`; benchmark `forced_when_insufficient` 5→1. |
 | D2 | Comparator, decision, and explanation handle the insufficient state correctly (no crash, not silently treated as 0). | Pipeline runs the `missing_evidence` scenario end-to-end; benchmark green. |
 | D3 | The **frontend surfaces** low-confidence / insufficient-evidence to the user (a visible state, not hidden). Built via the UI skills (`/frontend-design` → `/frontend-component` → `/anti-ai-ui`). | UI renders the state; screenshot/described in PR. |
 
