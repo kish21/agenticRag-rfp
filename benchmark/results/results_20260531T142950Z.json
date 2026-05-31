@@ -1,0 +1,147 @@
+{
+  "commit": "06387ab",
+  "generated_at": "2026-05-31T14:29:50+00:00",
+  "config": {
+    "llm_provider": "openai",
+    "model": "gpt-4o",
+    "embedding_provider": "openai",
+    "reranker_provider": "bge"
+  },
+  "scenarios": [
+    {
+      "scenario_id": "01_clean",
+      "title": "Clean prose proposal",
+      "stresses": [
+        "baseline",
+        "prose"
+      ],
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "retrieval": {
+            "present_facts": 5,
+            "retrieved": 5,
+            "recall": 1.0,
+            "missed": []
+          },
+          "extraction": {
+            "per_type": {
+              "certification": {
+                "present": 1,
+                "extracted": 2,
+                "recall": 0.0,
+                "precision": 0.0,
+                "hallucinated_against_absent": 0
+              },
+              "insurance": {
+                "present": 1,
+                "extracted": 2,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "pricing": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "project": {
+                "present": 1,
+                "extracted": 0,
+                "recall": 0.0,
+                "precision": null,
+                "hallucinated_against_absent": 0
+              },
+              "sla": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              }
+            },
+            "recall": 0.6,
+            "precision_present": 0.5,
+            "hallucinated_against_absent": 0,
+            "total_present": 5,
+            "total_extracted": 6
+          },
+          "grounding": {
+            "facts_with_quote": 6,
+            "honest_citations": 6,
+            "fabricated_citations": 0,
+            "ungrounded_facts": 0,
+            "grounding_accuracy": 1.0,
+            "fabricated": []
+          },
+          "scoring": {
+            "band_agreement": 0.75,
+            "band_checked": 4,
+            "insufficient_expected": 0,
+            "insufficient_correct": 0,
+            "insufficient_rate": null,
+            "forced_when_insufficient": 0,
+            "mandatory_accuracy": 1.0,
+            "mandatory_checked": 2,
+            "rejection_correct": true
+          },
+          "consistency": {
+            "criteria_with_repeats": 4,
+            "mean_score_stdev": 0.0,
+            "max_score_stdev": 0.0
+          }
+        }
+      ],
+      "runtime": {
+        "wall_clock_s": 68.801,
+        "slowest_stage": "retrieval_per_vendor",
+        "node_timings_s": {
+          "planner": 0.4624,
+          "ingestion": 9.5904,
+          "retrieval_start": 0.06,
+          "retrieval_per_vendor": 29.2532,
+          "retrieval_done": 0.0275,
+          "extraction_start": 0.0288,
+          "extraction_per_vendor": 13.9711,
+          "extraction_done": 0.0294,
+          "evaluation_start": 0.0323,
+          "evaluation_per_vendor": 6.6788,
+          "evaluation_done": 0.034,
+          "comparator": 2.0722,
+          "decision": 0.0606,
+          "explanation_start": 0.0308,
+          "explanation_per_vendor": 6.4349,
+          "explanation_finalise": 0.0031,
+          "explanation_critic": 0.0313
+        },
+        "total_cost_usd": 0.050983,
+        "total_llm_calls": 11,
+        "cache_hit_rate": 0.6857,
+        "blocked": false,
+        "blocked_agent": "",
+        "errored": false
+      }
+    }
+  ],
+  "aggregate": {
+    "scenarios": 1,
+    "vendors": 1,
+    "retrieval_recall": 1.0,
+    "extraction_recall": 0.6,
+    "extraction_precision_present": 0.5,
+    "grounding_accuracy": 1.0,
+    "fabricated_citations_total": 0,
+    "hallucinated_against_absent_total": 0,
+    "band_agreement": 0.75,
+    "insufficient_rate": null,
+    "forced_when_insufficient_total": 0,
+    "mandatory_accuracy": 1.0,
+    "rejection_correct": 1.0,
+    "total_cost_usd": 0.050983,
+    "total_wall_clock_s": 68.801,
+    "operational_failures": 0
+  },
+  "failures": []
+}
