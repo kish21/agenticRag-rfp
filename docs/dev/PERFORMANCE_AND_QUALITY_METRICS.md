@@ -301,6 +301,39 @@ Full plan with exit criteria per phase: [docs/dev/PRODUCTION_READINESS_PLAN.md](
 
 ---
 
+## E3 — Evidence-quality benchmark (measured 2026-05-31, gpt-4o)
+
+First repeatable, ground-truth benchmark of evidence quality. 6 synthetic
+scenarios (clean, table-heavy, long/buried, short, conflicting, missing-evidence)
+with answer keys grounded **by construction** (the same sentence seeds both the
+PDF and the golden quote — verified verbatim by `tests/test_benchmark_dataset.py`).
+Methodology + integrity model: [benchmark/README.md](../../benchmark/README.md);
+contract: [E3_EXIT_CRITERIA.md](E3_EXIT_CRITERIA.md). Numbers below are recomputed
+by `python -m benchmark.runner.run_benchmark` — no hand-entered figures.
+
+| Metric | Baseline (`93ac2d3`) | After no-forced-scores (`f89a46d`) | Evidence |
+|---|---|---|---|
+| **Grounding / citation accuracy** | **1.00** | **1.00** | every extracted fact's quote is verbatim in source |
+| **Fabricated citations** | **0** | **0** | across all 6 scenarios |
+| Retrieval recall@k | 1.00 | 1.00 | present-fact grounding text was retrieved |
+| Forced score when evidence absent | **5** | **1** | the no-forced-scores fix (Stage 4) |
+| Insufficient-evidence rate | **0.00** | **0.80** | system now says "insufficient" not a fake 0 |
+| Score consistency (stdev, 3 repeats) | 0.0 | 0.0 | temperature=0 determinism |
+| Extraction recall (per fact) | 0.63 | 0.60 | **open gap** — ~37% of facts missed |
+| Mandatory accuracy | 0.83 | 0.83 | conflicting-evidence check is the miss |
+| Cost / full run | $0.35 | $0.36 | 6 scenarios, 0 operational failures |
+
+**Honest reading.** The product's core promise — *every claim cited to verbatim
+source, never fabricated* — measures **1.00 grounding / 0 fabricated**. The
+no-forced-scores change is confirmed (forced 5→1, insufficient-rate 0.00→0.80).
+**Known open gaps, logged in BACKLOG, not hidden:** extraction recall ~0.60;
+contradiction handling (the 1 remaining forced case + conflicting mandatory) does
+not yet resolve to "insufficient"; missing-mandatory becomes `review_required`
+rather than rejection. Dev-box caveat: the BGE reranker fell back to vector order
+(no HF egress); retrieval recall was 1.00 regardless.
+
+---
+
 ## How to verify any claim in this document yourself
 
 ```bash
