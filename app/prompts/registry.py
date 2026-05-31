@@ -156,7 +156,12 @@ def get_prompt(name: str, **variables: str) -> str:
 
     template = _cache[name]
 
-    # Fill variables using {var} placeholders (double braces {{ }} are literal braces)
+    # Substitute ONLY the named input variables, e.g. {schema} -> value. This is a
+    # targeted str.replace, NOT str.format(), so a bare "{" in the template is safe
+    # and does NOT need escaping. WARNING: "{{ }}" is NOT collapsed to "{ }" — it is
+    # passed to the model verbatim. Author JSON examples with single braces.
+    # (Some setup/* YAMLs still use "{{ }}" from a LangChain round-trip — tracked as
+    # a prompt-content cleanup in the refinement pass; see docs/dev/BACKLOG.md.)
     for key, value in variables.items():
         template = template.replace("{" + key + "}", str(value))
 
