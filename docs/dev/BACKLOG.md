@@ -48,7 +48,7 @@ An external auditor produced 8 work-streams to get from "strong prototype" to "e
 | # | Work-stream | Verified status | What's actually left |
 |---|---|---|---|
 | **E1** | Tenant isolation | ✅ DONE — see **P0.16** | RLS now enforces: non-superuser `platform_app` role + FORCE RLS + same-connection org context (pure-ASGI middleware). Proven by `tests/test_tenant_isolation_rls.py`; reviewer note `docs/dev/TENANT_ISOLATION.md`. |
-| **E2** | Auth hardening | ✅ DONE 2026-05-31 | env-aware secure cookie; one-account-per-email aligned; jti session allowlist (`auth_sessions`) enforces revocation incl. SSE; one-time invite/reset tokens (`auth_onetime_tokens`); no plaintext passwords. Reviewer note `docs/dev/AUTH_HARDENING.md`; `tests/test_auth_hardening.py` (13). |
+| **E2** | Auth hardening | ✅ DONE 2026-05-31 (PR #193) | env-aware secure cookie; one-account-per-email aligned; jti session allowlist (`auth_sessions`) enforces revocation incl. SSE; one-time invite/reset tokens (`auth_onetime_tokens`); no plaintext passwords. Reviewer note `docs/dev/AUTH_HARDENING.md`; `tests/test_auth_hardening.py` (13). |
 | **E3** | Evidence quality / benchmark | 🟡 OPEN — real gap | grounding built; **no held-out annotated benchmark + measured retrieval/extraction/citation metrics** |
 | **E4** | Buyer-ready reports | 🟢 ~85% DONE (#176/#178) | **only DOCX + an override-history section** remain |
 | **E5** | Approval workflow | 🟡 PARTIAL | tables + assignments + override exist; missing full approve/reject/request-change actions + notifications (Phase 8) |
