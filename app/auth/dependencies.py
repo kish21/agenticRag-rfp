@@ -10,16 +10,38 @@ Usage in route:
         # current_user.role is verified from JWT
         ...
 """
+import logging
 from typing import Generator
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from app.auth.jwt import decode_token, TokenData
+from app.auth.sessions import session_is_active
 from app.db.fact_store import get_engine, get_admin_engine
 
 security = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "meridian_session"
+
+
+def _token_not_revoked(token_data: TokenData) -> bool:
+    """Check the token's session is still active in the allowlist.
+
+    Tokens minted after the E2 hardening carry a ``jti`` and MUST have a live
+    ``auth_sessions`` row — this is what makes logout / forced sign-out / reset
+    able to revoke a JWT before it expires. Legacy tokens (no jti) are allowed
+    through for backward compatibility. Uses the owner engine (RLS-exempt
+    identity path). Fails closed: if the lookup errors, the token is rejected."""
+    if not token_data.jti:
+        return True  # legacy token, predates the session allowlist
+    try:
+        with get_admin_engine().connect() as conn:
+            return session_is_active(conn, token_data.jti)
+    except Exception:
+        # Fail closed: a lookup we cannot complete must not authorise the token.
+        logger.exception("Session revocation lookup failed; rejecting token")
+        return False
 
 
 async def get_current_user(
@@ -53,9 +75,14 @@ async def get_current_user(
         raise credentials_exception
 
     try:
-        return decode_token(token)
+        token_data = decode_token(token)
     except JWTError:
         raise credentials_exception
+
+    if not _token_not_revoked(token_data):
+        raise credentials_exception
+
+    return token_data
 
 
 def get_db() -> Generator:
@@ -96,6 +123,9 @@ async def get_current_user_optional(
     if token is None:
         return None
     try:
-        return decode_token(token)
+        token_data = decode_token(token)
     except JWTError:
         return None
+    if not _token_not_revoked(token_data):
+        return None
+    return token_data
