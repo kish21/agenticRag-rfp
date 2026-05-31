@@ -1,9 +1,17 @@
 """
 Prompt registry for Meridian AI Platform.
 
-Load order:
-  1. LangSmith Hub  (if LANGSMITH_API_KEY is set and network is reachable)
-  2. Local YAML fallback in app/prompts/
+Source of truth:
+  1. Local YAML in app/prompts/  — AUTHORITATIVE, used by default on every run, so
+     the committed repo deterministically defines runtime prompt behaviour.
+  2. LangSmith Hub — OPT-IN only (set PROMPTS_USE_HUB=true). The Hub is a *publish*
+     target via tools/push_prompts.py, not a runtime override.
+
+Why: the Hub used to be loaded first and silently overrode the committed YAML
+whenever it was network-reachable — so the same code ran different (often stale)
+prompts depending on connectivity (e.g. the Hub copy of explanation/generate_narrative
+was 3x smaller/older than the local one). Local-first makes the folder the single
+source of truth.
 
 Call get_prompt(name, **vars) — returns the filled prompt string ready for call_llm().
 """
@@ -71,11 +79,14 @@ def _langsmith_session():
 
 @lru_cache(maxsize=1)
 def _langsmith_available() -> bool:
-    """Returns True only if LANGSMITH_API_KEY is set, hub is reachable, AND
-    PROMPTS_FORCE_LOCAL is not enabled. Local-YAML override is critical for dev
-    workflows where the YAML has been updated but the Hub version is stale
-    (e.g. Phase 1 grounded_claims/system_facts split — the local YAML moves
-    first, the Hub version follows once the new prompt is validated)."""
+    """Whether to load prompts from the LangSmith Hub.
+
+    Local YAML is authoritative and used by DEFAULT, so the Hub is strictly
+    opt-in: it is consulted only when PROMPTS_USE_HUB=true (and the key is set and
+    the hub is reachable). PROMPTS_FORCE_LOCAL=true is still honoured as a hard
+    override. Default (neither set) → local YAML, deterministically."""
+    if os.getenv("PROMPTS_USE_HUB", "false").lower() != "true":
+        return False
     if os.getenv("PROMPTS_FORCE_LOCAL", "false").lower() == "true":
         return False
     if not os.getenv("LANGSMITH_API_KEY"):
@@ -137,11 +148,11 @@ def get_prompt(name: str, **variables: str) -> str:
             template = _load_from_langsmith(langsmith_id)
             if template:
                 _cache[name] = template
-                print(f"  [prompt] {name} <- LangSmith Hub ({langsmith_id})")
+                print(f"  [prompt] {name} <- LangSmith Hub (PROMPTS_USE_HUB={langsmith_id})")
 
         if name not in _cache:
             _cache[name] = _load_from_yaml(yaml_file)
-            print(f"  [prompt] {name} <- local YAML (LangSmith unavailable)")
+            print(f"  [prompt] {name} <- local YAML (authoritative)")
 
     template = _cache[name]
 
