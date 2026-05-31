@@ -30,7 +30,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from fastapi.responses import StreamingResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-from app.auth.dependencies import get_current_user, COOKIE_NAME
+from app.auth.dependencies import get_current_user, COOKIE_NAME, _token_not_revoked
 from app.auth.jwt import TokenData, decode_token
 from app.infra.audit import audit
 from app.auth.rbac import require_run_access, require_admin_role, log_access
@@ -693,6 +693,11 @@ async def run_stream_alias(run_id: str, request: Request):
     try:
         user = decode_token(cookie_token)
     except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # SSE auth is cookie-only and bypasses the get_current_user dependency, so
+    # apply the same server-side revocation check here — otherwise a logged-out
+    # or reset/revoked token could keep streaming until JWT exp (E2).
+    if not _token_not_revoked(user):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     _db_get_run(run_id, user.org_id)
     return StreamingResponse(

@@ -201,6 +201,13 @@ class Settings(BaseModel):
     # ── App ───────────────────────────────────────────────────────────
     app_api_key: str = ""
     allowed_origins: list[str] = ["http://localhost:3000"]
+    # Deployment environment. Drives security defaults (e.g. secure cookies).
+    # Set ENVIRONMENT=production (or staging) on any non-local deploy.
+    environment: str = "development"
+    # Whether to mark the auth cookie Secure (HTTPS-only). Defaults to True in
+    # production/staging; can be forced via COOKIE_SECURE for edge cases
+    # (e.g. local HTTPS, or a prod proxy that terminates TLS upstream).
+    cookie_secure: bool = False
 
     # ── Qdrant ────────────────────────────────────────────────────────
     qdrant_host: str = "localhost"
@@ -295,6 +302,8 @@ def load_settings() -> Settings:
     platform_raw = _load_yaml(CONFIG_DIR / "platform.yaml")
     product_raw  = _load_yaml(CONFIG_DIR / "product.yaml")
 
+    _env = _e("ENVIRONMENT", "development")
+
     env: dict = {
         "llm_provider":               _e("LLM_PROVIDER", "openai"),
         "openai_api_key":             _e("OPENAI_API_KEY"),
@@ -330,6 +339,8 @@ def load_settings() -> Settings:
         "cohere_rerank_model":        _e("COHERE_RERANK_MODEL", "rerank-english-v3.0"),
         "app_api_key":                _e("APP_API_KEY"),
         "allowed_origins":            [o.strip() for o in _e("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()],
+        "environment":                _env,
+        "cookie_secure":              _eb("COOKIE_SECURE", _env.lower() in ("production", "prod", "staging", "stage")),
         "qdrant_host":                _e("QDRANT_HOST", "localhost"),
         "qdrant_port":                _ei("QDRANT_PORT", 6333),
         "qdrant_collection_prefix":   _e("QDRANT_COLLECTION_PREFIX", "platform"),

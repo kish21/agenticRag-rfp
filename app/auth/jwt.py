@@ -14,11 +14,12 @@ Token payload:
   dept_id      — department identifier (optional, for dept-scoped roles)
   exp          — expiry timestamp
 """
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -36,6 +37,10 @@ class TokenData(BaseModel):
     org_id: str
     role: str
     dept_id: Optional[str] = None
+    # Unique token id ("jti"). Present on all tokens minted after the E2 auth
+    # hardening; None for legacy tokens. Used to look the session up in the
+    # auth_sessions allowlist so a token can be revoked server-side.
+    jti: Optional[str] = None
 
 
 class Token(BaseModel):
@@ -44,6 +49,9 @@ class Token(BaseModel):
     expires_in: int
     org_id: str
     role: str
+    # The token's jti, exposed to the caller so it can record the session.
+    # Excluded from API responses (it is already inside the signed JWT).
+    jti: Optional[str] = Field(default=None, exclude=True)
 
 
 def hash_password(password: str) -> str:
@@ -58,12 +66,19 @@ def create_access_token(
     email: str,
     org_id: str,
     role: str,
-    dept_id: Optional[str] = None
+    dept_id: Optional[str] = None,
+    jti: Optional[str] = None,
 ) -> Token:
-    """Creates a signed JWT token with org_id and role in payload."""
+    """Creates a signed JWT token with org_id, role and a unique jti in payload.
+
+    The jti is returned on the Token so the caller can register the session in
+    the auth_sessions allowlist (enabling server-side revocation). A jti is
+    generated when not supplied.
+    """
     if role not in VALID_ROLES:
         raise ValueError(f"Invalid role: {role}. Must be one of {VALID_ROLES}")
 
+    jti = jti or str(uuid.uuid4())
     expiry = datetime.now(timezone.utc) + timedelta(
         minutes=settings.jwt_expiry_minutes
     )
@@ -72,6 +87,7 @@ def create_access_token(
         "sub": email,
         "org_id": org_id,
         "role": role,
+        "jti": jti,
         "exp": expiry,
     }
     if dept_id:
@@ -88,7 +104,8 @@ def create_access_token(
         token_type="bearer",
         expires_in=settings.jwt_expiry_minutes * 60,
         org_id=org_id,
-        role=role
+        role=role,
+        jti=jti,
     )
 
 
@@ -107,6 +124,7 @@ def decode_token(token: str) -> TokenData:
         org_id = payload.get("org_id")
         role = payload.get("role")
         dept_id = payload.get("dept_id")
+        jti = payload.get("jti")
 
         if not email or not org_id or not role:
             raise JWTError("Missing required fields in token")
@@ -118,7 +136,8 @@ def decode_token(token: str) -> TokenData:
             email=email,
             org_id=org_id,
             role=role,
-            dept_id=dept_id
+            dept_id=dept_id,
+            jti=jti,
         )
     except JWTError:
         raise

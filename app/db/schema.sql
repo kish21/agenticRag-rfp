@@ -425,6 +425,57 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 CREATE POLICY users_org_isolation ON users
     USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
 
+-- Session allowlist for JWT revocation (E2). One row per issued token (jti).
+-- get_current_user checks the row is active on every request, so logout /
+-- forced sign-out / password reset can invalidate a token before it expires.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    jti            UUID PRIMARY KEY,
+    user_id        UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    org_id         UUID NOT NULL REFERENCES organisations(org_id) ON DELETE CASCADE,
+    issued_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at     TIMESTAMPTZ NOT NULL,
+    revoked_at     TIMESTAMPTZ,
+    revoked_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_active
+    ON auth_sessions(jti) WHERE revoked_at IS NULL;
+ALTER TABLE auth_sessions ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_auth_sessions') THEN
+        CREATE POLICY rls_auth_sessions ON auth_sessions
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
+END $$;
+
+-- One-time, expiring tokens for invite-acceptance and password-reset (E2).
+-- Only the SHA-256 hash of the token is stored; the plaintext lives solely in
+-- the link handed to the user. Single-use is enforced via used_at.
+CREATE TABLE IF NOT EXISTS auth_onetime_tokens (
+    token_hash  TEXT PRIMARY KEY,
+    purpose     TEXT NOT NULL CHECK (purpose IN ('invite', 'password_reset')),
+    email       TEXT NOT NULL,
+    org_id      UUID REFERENCES organisations(org_id) ON DELETE CASCADE,
+    role        TEXT,
+    dept_id     UUID,
+    user_id     UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_onetime_email
+    ON auth_onetime_tokens(purpose, email) WHERE used_at IS NULL;
+ALTER TABLE auth_onetime_tokens ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_auth_onetime_tokens') THEN
+        -- org_id is NULL until a reset token is bound to a known user's org; the
+        -- predicate matches a set org and the identity path uses the owner role.
+        CREATE POLICY rls_auth_onetime_tokens ON auth_onetime_tokens
+            USING (org_id IS NULL
+                   OR org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS tenant_modules (
     org_id       UUID NOT NULL REFERENCES organisations(org_id) ON DELETE CASCADE,
     module_key   TEXT NOT NULL,
