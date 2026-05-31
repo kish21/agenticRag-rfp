@@ -1,0 +1,720 @@
+{
+  "commit": "93ac2d3",
+  "generated_at": "2026-05-31T14:26:50+00:00",
+  "config": {
+    "llm_provider": "openai",
+    "model": "gpt-4o",
+    "embedding_provider": "openai",
+    "reranker_provider": "bge"
+  },
+  "scenarios": [
+    {
+      "scenario_id": "01_clean",
+      "title": "Clean prose proposal",
+      "stresses": [
+        "baseline",
+        "prose"
+      ],
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "retrieval": {
+            "present_facts": 5,
+            "retrieved": 5,
+            "recall": 1.0,
+            "missed": []
+          },
+          "extraction": {
+            "per_type": {
+              "certification": {
+                "present": 1,
+                "extracted": 2,
+                "recall": 0.0,
+                "precision": 0.0,
+                "hallucinated_against_absent": 0
+              },
+              "insurance": {
+                "present": 1,
+                "extracted": 2,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "pricing": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "project": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 0.0,
+                "precision": 0.0,
+                "hallucinated_against_absent": 0
+              },
+              "sla": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              }
+            },
+            "recall": 0.6,
+            "precision_present": 0.4286,
+            "hallucinated_against_absent": 0,
+            "total_present": 5,
+            "total_extracted": 7
+          },
+          "grounding": {
+            "facts_with_quote": 7,
+            "honest_citations": 7,
+            "fabricated_citations": 0,
+            "ungrounded_facts": 0,
+            "grounding_accuracy": 1.0,
+            "fabricated": []
+          },
+          "scoring": {
+            "band_agreement": 0.75,
+            "band_checked": 4,
+            "insufficient_expected": 0,
+            "insufficient_correct": 0,
+            "insufficient_rate": null,
+            "forced_when_insufficient": 0,
+            "mandatory_accuracy": 1.0,
+            "mandatory_checked": 2,
+            "rejection_correct": true
+          },
+          "consistency": {
+            "criteria_with_repeats": 0,
+            "mean_score_stdev": null,
+            "max_score_stdev": null
+          }
+        }
+      ],
+      "runtime": {
+        "wall_clock_s": 65.522,
+        "slowest_stage": "evaluation_per_vendor",
+        "node_timings_s": {
+          "planner": 0.236,
+          "ingestion": 8.9338,
+          "retrieval_start": 0.0203,
+          "retrieval_per_vendor": 13.592,
+          "retrieval_done": 0.0181,
+          "extraction_start": 0.0201,
+          "extraction_per_vendor": 15.4951,
+          "extraction_done": 0.0201,
+          "evaluation_start": 0.0243,
+          "evaluation_per_vendor": 18.9114,
+          "evaluation_done": 0.0211,
+          "comparator": 2.5026,
+          "decision": 0.0455,
+          "explanation_start": 0.0283,
+          "explanation_per_vendor": 5.5887,
+          "explanation_finalise": 0.0017,
+          "explanation_critic": 0.0624
+        },
+        "total_cost_usd": 0.05559,
+        "total_llm_calls": 13,
+        "cache_hit_rate": 0.6389,
+        "blocked": false,
+        "blocked_agent": "",
+        "errored": false
+      }
+    },
+    {
+      "scenario_id": "02_table_heavy",
+      "title": "Table-heavy proposal",
+      "stresses": [
+        "tables",
+        "parsing"
+      ],
+      "vendors": [
+        {
+          "vendor_id": "beta",
+          "retrieval": {
+            "present_facts": 5,
+            "retrieved": 5,
+            "recall": 1.0,
+            "missed": []
+          },
+          "extraction": {
+            "per_type": {
+              "certification": {
+                "present": 1,
+                "extracted": 2,
+                "recall": 0.0,
+                "precision": 0.0,
+                "hallucinated_against_absent": 0
+              },
+              "insurance": {
+                "present": 1,
+                "extracted": 2,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "pricing": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "project": {
+                "present": 1,
+                "extracted": 0,
+                "recall": 0.0,
+                "precision": null,
+                "hallucinated_against_absent": 0
+              },
+              "sla": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              }
+            },
+            "recall": 0.6,
+            "precision_present": 0.5,
+            "hallucinated_against_absent": 0,
+            "total_present": 5,
+            "total_extracted": 6
+          },
+          "grounding": {
+            "facts_with_quote": 6,
+            "honest_citations": 6,
+            "fabricated_citations": 0,
+            "ungrounded_facts": 0,
+            "grounding_accuracy": 1.0,
+            "fabricated": []
+          },
+          "scoring": {
+            "band_agreement": 0.75,
+            "band_checked": 4,
+            "insufficient_expected": 0,
+            "insufficient_correct": 0,
+            "insufficient_rate": null,
+            "forced_when_insufficient": 0,
+            "mandatory_accuracy": 1.0,
+            "mandatory_checked": 2,
+            "rejection_correct": true
+          },
+          "consistency": {
+            "criteria_with_repeats": 0,
+            "mean_score_stdev": null,
+            "max_score_stdev": null
+          }
+        }
+      ],
+      "runtime": {
+        "wall_clock_s": 42.215,
+        "slowest_stage": "extraction_per_vendor",
+        "node_timings_s": {
+          "planner": 0.056,
+          "ingestion": 1.9339,
+          "retrieval_start": 0.023,
+          "retrieval_per_vendor": 1.764,
+          "retrieval_done": 0.0188,
+          "extraction_start": 0.0192,
+          "extraction_per_vendor": 18.0176,
+          "extraction_done": 0.018,
+          "evaluation_start": 0.0237,
+          "evaluation_per_vendor": 5.2493,
+          "evaluation_done": 0.0184,
+          "comparator": 3.9068,
+          "decision": 0.0386,
+          "explanation_start": 0.0437,
+          "explanation_per_vendor": 11.04,
+          "explanation_finalise": 0.0027,
+          "explanation_critic": 0.0416
+        },
+        "total_cost_usd": 0.072835,
+        "total_llm_calls": 23,
+        "cache_hit_rate": 0.3611,
+        "blocked": false,
+        "blocked_agent": "",
+        "errored": false
+      }
+    },
+    {
+      "scenario_id": "03_long",
+      "title": "Long proposal, facts buried",
+      "stresses": [
+        "long",
+        "retrieval"
+      ],
+      "vendors": [
+        {
+          "vendor_id": "gamma",
+          "retrieval": {
+            "present_facts": 5,
+            "retrieved": 5,
+            "recall": 1.0,
+            "missed": []
+          },
+          "extraction": {
+            "per_type": {
+              "certification": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 0.0,
+                "precision": 0.0,
+                "hallucinated_against_absent": 0
+              },
+              "insurance": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "pricing": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "project": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 0.0,
+                "precision": 0.0,
+                "hallucinated_against_absent": 0
+              },
+              "sla": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              }
+            },
+            "recall": 0.6,
+            "precision_present": 0.6,
+            "hallucinated_against_absent": 0,
+            "total_present": 5,
+            "total_extracted": 5
+          },
+          "grounding": {
+            "facts_with_quote": 5,
+            "honest_citations": 5,
+            "fabricated_citations": 0,
+            "ungrounded_facts": 0,
+            "grounding_accuracy": 1.0,
+            "fabricated": []
+          },
+          "scoring": {
+            "band_agreement": 1.0,
+            "band_checked": 4,
+            "insufficient_expected": 0,
+            "insufficient_correct": 0,
+            "insufficient_rate": null,
+            "forced_when_insufficient": 0,
+            "mandatory_accuracy": 1.0,
+            "mandatory_checked": 2,
+            "rejection_correct": true
+          },
+          "consistency": {
+            "criteria_with_repeats": 0,
+            "mean_score_stdev": null,
+            "max_score_stdev": null
+          }
+        }
+      ],
+      "runtime": {
+        "wall_clock_s": 41.18,
+        "slowest_stage": "extraction_per_vendor",
+        "node_timings_s": {
+          "planner": 0.044,
+          "ingestion": 3.796,
+          "retrieval_start": 0.0215,
+          "retrieval_per_vendor": 2.0674,
+          "retrieval_done": 0.0187,
+          "extraction_start": 0.0239,
+          "extraction_per_vendor": 15.771,
+          "extraction_done": 0.0171,
+          "evaluation_start": 0.019,
+          "evaluation_per_vendor": 9.5014,
+          "evaluation_done": 0.0183,
+          "comparator": 3.9053,
+          "decision": 0.0371,
+          "explanation_start": 0.0214,
+          "explanation_per_vendor": 5.8937,
+          "explanation_finalise": 0.0016,
+          "explanation_critic": 0.023
+        },
+        "total_cost_usd": 0.066495,
+        "total_llm_calls": 21,
+        "cache_hit_rate": 0.3,
+        "blocked": false,
+        "blocked_agent": "",
+        "errored": false
+      }
+    },
+    {
+      "scenario_id": "04_short",
+      "title": "Short proposal, partial evidence",
+      "stresses": [
+        "short",
+        "insufficient_evidence"
+      ],
+      "vendors": [
+        {
+          "vendor_id": "delta",
+          "retrieval": {
+            "present_facts": 3,
+            "retrieved": 3,
+            "recall": 1.0,
+            "missed": []
+          },
+          "extraction": {
+            "per_type": {
+              "certification": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 0.0,
+                "precision": 0.0,
+                "hallucinated_against_absent": 0
+              },
+              "insurance": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "pricing": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "project": {
+                "present": 0,
+                "extracted": 0,
+                "recall": null,
+                "precision": null,
+                "hallucinated_against_absent": 0
+              },
+              "sla": {
+                "present": 0,
+                "extracted": 0,
+                "recall": null,
+                "precision": null,
+                "hallucinated_against_absent": 0
+              }
+            },
+            "recall": 0.6667,
+            "precision_present": 0.6667,
+            "hallucinated_against_absent": 0,
+            "total_present": 3,
+            "total_extracted": 3
+          },
+          "grounding": {
+            "facts_with_quote": 3,
+            "honest_citations": 3,
+            "fabricated_citations": 0,
+            "ungrounded_facts": 0,
+            "grounding_accuracy": 1.0,
+            "fabricated": []
+          },
+          "scoring": {
+            "band_agreement": 1.0,
+            "band_checked": 2,
+            "insufficient_expected": 2,
+            "insufficient_correct": 0,
+            "insufficient_rate": 0.0,
+            "forced_when_insufficient": 2,
+            "mandatory_accuracy": 1.0,
+            "mandatory_checked": 2,
+            "rejection_correct": true
+          },
+          "consistency": {
+            "criteria_with_repeats": 0,
+            "mean_score_stdev": null,
+            "max_score_stdev": null
+          }
+        }
+      ],
+      "runtime": {
+        "wall_clock_s": 27.471,
+        "slowest_stage": "extraction_per_vendor",
+        "node_timings_s": {
+          "planner": 0.038,
+          "ingestion": 1.3827,
+          "retrieval_start": 0.0354,
+          "retrieval_per_vendor": 1.8179,
+          "retrieval_done": 0.0187,
+          "extraction_start": 0.0206,
+          "extraction_per_vendor": 7.2914,
+          "extraction_done": 0.0185,
+          "evaluation_start": 0.019,
+          "evaluation_per_vendor": 5.6808,
+          "evaluation_done": 0.0184,
+          "comparator": 6.1867,
+          "decision": 0.0442,
+          "explanation_start": 0.0234,
+          "explanation_per_vendor": 4.853,
+          "explanation_finalise": 0.0019,
+          "explanation_critic": 0.0201
+        },
+        "total_cost_usd": 0.037128,
+        "total_llm_calls": 16,
+        "cache_hit_rate": 0.3333,
+        "blocked": false,
+        "blocked_agent": "",
+        "errored": false
+      }
+    },
+    {
+      "scenario_id": "05_conflicting",
+      "title": "Internally conflicting proposal",
+      "stresses": [
+        "conflicting",
+        "contradiction"
+      ],
+      "vendors": [
+        {
+          "vendor_id": "epsilon",
+          "retrieval": {
+            "present_facts": 6,
+            "retrieved": 6,
+            "recall": 1.0,
+            "missed": []
+          },
+          "extraction": {
+            "per_type": {
+              "certification": {
+                "present": 2,
+                "extracted": 1,
+                "recall": 0.5,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "insurance": {
+                "present": 2,
+                "extracted": 1,
+                "recall": 0.5,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "pricing": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "sla": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              }
+            },
+            "recall": 0.6667,
+            "precision_present": 1.0,
+            "hallucinated_against_absent": 0,
+            "total_present": 6,
+            "total_extracted": 4
+          },
+          "grounding": {
+            "facts_with_quote": 4,
+            "honest_citations": 4,
+            "fabricated_citations": 0,
+            "ungrounded_facts": 0,
+            "grounding_accuracy": 1.0,
+            "fabricated": []
+          },
+          "scoring": {
+            "band_agreement": 0.5,
+            "band_checked": 2,
+            "insufficient_expected": 2,
+            "insufficient_correct": 0,
+            "insufficient_rate": 0.0,
+            "forced_when_insufficient": 2,
+            "mandatory_accuracy": 0.0,
+            "mandatory_checked": 2,
+            "rejection_correct": false
+          },
+          "consistency": {
+            "criteria_with_repeats": 0,
+            "mean_score_stdev": null,
+            "max_score_stdev": null
+          }
+        }
+      ],
+      "runtime": {
+        "wall_clock_s": 37.362,
+        "slowest_stage": "extraction_per_vendor",
+        "node_timings_s": {
+          "planner": 0.04,
+          "ingestion": 1.7411,
+          "retrieval_start": 0.0221,
+          "retrieval_per_vendor": 2.3419,
+          "retrieval_done": 0.0223,
+          "extraction_start": 0.0246,
+          "extraction_per_vendor": 16.1824,
+          "extraction_done": 0.0316,
+          "evaluation_start": 0.0289,
+          "evaluation_per_vendor": 6.4463,
+          "evaluation_done": 0.0262,
+          "comparator": 4.9204,
+          "decision": 0.0479,
+          "explanation_start": 0.0289,
+          "explanation_per_vendor": 5.4236,
+          "explanation_finalise": 0.0027,
+          "explanation_critic": 0.031
+        },
+        "total_cost_usd": 0.051332,
+        "total_llm_calls": 22,
+        "cache_hit_rate": 0.2903,
+        "blocked": false,
+        "blocked_agent": "",
+        "errored": false
+      }
+    },
+    {
+      "scenario_id": "06_missing_evidence",
+      "title": "Mandatory evidence missing",
+      "stresses": [
+        "missing",
+        "rejection"
+      ],
+      "vendors": [
+        {
+          "vendor_id": "omega",
+          "retrieval": {
+            "present_facts": 3,
+            "retrieved": 3,
+            "recall": 1.0,
+            "missed": []
+          },
+          "extraction": {
+            "per_type": {
+              "certification": {
+                "present": 0,
+                "extracted": 0,
+                "recall": null,
+                "precision": null,
+                "hallucinated_against_absent": 0
+              },
+              "insurance": {
+                "present": 0,
+                "extracted": 0,
+                "recall": null,
+                "precision": null,
+                "hallucinated_against_absent": 0
+              },
+              "pricing": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              },
+              "project": {
+                "present": 1,
+                "extracted": 0,
+                "recall": 0.0,
+                "precision": null,
+                "hallucinated_against_absent": 0
+              },
+              "sla": {
+                "present": 1,
+                "extracted": 1,
+                "recall": 1.0,
+                "precision": 1.0,
+                "hallucinated_against_absent": 0
+              }
+            },
+            "recall": 0.6667,
+            "precision_present": 1.0,
+            "hallucinated_against_absent": 0,
+            "total_present": 3,
+            "total_extracted": 2
+          },
+          "grounding": {
+            "facts_with_quote": 2,
+            "honest_citations": 2,
+            "fabricated_citations": 0,
+            "ungrounded_facts": 0,
+            "grounding_accuracy": 1.0,
+            "fabricated": []
+          },
+          "scoring": {
+            "band_agreement": 0.6667,
+            "band_checked": 3,
+            "insufficient_expected": 1,
+            "insufficient_correct": 0,
+            "insufficient_rate": 0.0,
+            "forced_when_insufficient": 1,
+            "mandatory_accuracy": 1.0,
+            "mandatory_checked": 2,
+            "rejection_correct": false
+          },
+          "consistency": {
+            "criteria_with_repeats": 0,
+            "mean_score_stdev": null,
+            "max_score_stdev": null
+          }
+        }
+      ],
+      "runtime": {
+        "wall_clock_s": 48.237,
+        "slowest_stage": "evaluation_per_vendor",
+        "node_timings_s": {
+          "planner": 0.0753,
+          "ingestion": 2.7145,
+          "retrieval_start": 0.0343,
+          "retrieval_per_vendor": 1.7026,
+          "retrieval_done": 0.0286,
+          "extraction_start": 0.0282,
+          "extraction_per_vendor": 11.1599,
+          "extraction_done": 0.0237,
+          "evaluation_start": 0.0263,
+          "evaluation_per_vendor": 17.0884,
+          "evaluation_done": 0.0289,
+          "comparator": 4.8701,
+          "decision": 0.0555,
+          "explanation_start": 0.0588,
+          "explanation_per_vendor": 10.2736,
+          "explanation_finalise": 0.0069,
+          "explanation_critic": 0.0619
+        },
+        "total_cost_usd": 0.062615,
+        "total_llm_calls": 34,
+        "cache_hit_rate": 0.2766,
+        "blocked": false,
+        "blocked_agent": "",
+        "errored": false
+      }
+    }
+  ],
+  "aggregate": {
+    "scenarios": 6,
+    "vendors": 6,
+    "retrieval_recall": 1.0,
+    "extraction_recall": 0.6333,
+    "extraction_precision_present": 0.6992,
+    "grounding_accuracy": 1.0,
+    "fabricated_citations_total": 0,
+    "hallucinated_against_absent_total": 0,
+    "band_agreement": 0.7778,
+    "insufficient_rate": 0.0,
+    "forced_when_insufficient_total": 5,
+    "mandatory_accuracy": 0.8333,
+    "rejection_correct": 0.6667,
+    "total_cost_usd": 0.345995,
+    "total_wall_clock_s": 261.987,
+    "operational_failures": 0
+  },
+  "failures": []
+}
