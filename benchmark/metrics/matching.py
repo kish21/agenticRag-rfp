@@ -41,8 +41,21 @@ def _to_number(v) -> float | None:
     return None
 
 
+def _norm_value(s: str) -> str:
+    """Looser normalisation for FACT-VALUE comparison only: also folds punctuation
+    to spaces so cosmetic format variants match (e.g. 'financial-services' ==
+    'financial services', 'ISO 27001:2022' == 'ISO 27001 2022'). NOT used for the
+    grounding/verbatim check (`text_contains`/`norm`), which must stay strict."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", norm(s))).strip()
+
+
 def values_match(expected, actual) -> bool:
-    """Compare one expected value against one actual value (number- or string-aware)."""
+    """Compare one expected value against one actual value (number- or string-aware).
+
+    String comparison is punctuation-insensitive (see `_norm_value`) so the
+    benchmark does not record a false miss when the extracted value is correct but
+    formatted differently. It does NOT fold semantically-different words together
+    (e.g. 'valid' vs 'expired' still differ) — only formatting."""
     if actual is None:
         return False
     en, an = _to_number(expected), _to_number(actual)
@@ -51,8 +64,8 @@ def values_match(expected, actual) -> bool:
             return True
         denom = max(abs(en), 1e-9)
         return abs(en - an) / denom <= _NUM_REL_TOL
-    # string comparison: either contains the other (normalised)
-    e, a = norm(expected), norm(actual)
+    # string comparison: either contains the other (punctuation-insensitive)
+    e, a = _norm_value(expected), _norm_value(actual)
     return bool(e) and (e in a or a in e)
 
 

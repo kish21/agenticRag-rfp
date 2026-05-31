@@ -32,6 +32,15 @@ def test_values_match_numbers_and_strings():
     assert not matching.values_match("ISO 27001", "SOC 2")
 
 
+def test_values_match_is_punctuation_insensitive_but_not_synonym():
+    # Cosmetic format variants must match (E3.a fix)...
+    assert matching.values_match("financial services", "financial-services")
+    assert matching.values_match("ISO 27001:2022", "ISO 27001 2022")
+    # ...but genuinely different words must NOT (don't fold valid/expired together).
+    assert not matching.values_match("valid", "expired")
+    assert not matching.values_match("current", "lapsed")
+
+
 def test_key_fields_match_requires_all():
     assert matching.key_fields_match({"a": 1, "b": "x"}, {"a": 1, "b": "x y"})
     assert not matching.key_fields_match({"a": 1, "b": "x"}, {"a": 1})        # missing b
