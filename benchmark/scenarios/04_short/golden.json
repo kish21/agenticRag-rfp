@@ -16,8 +16,7 @@
           "fact_type": "certification",
           "key_fields": {
             "standard_name": "ISO 27001",
-            "valid_until": "2027-08-31",
-            "status": "valid"
+            "valid_until": "2027-08-31"
           },
           "grounding_substring": "certificate number ISO-DEL-31007",
           "expected_page": null,

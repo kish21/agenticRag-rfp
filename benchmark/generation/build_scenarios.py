@@ -136,8 +136,10 @@ class ScenarioSpec:
 # Strong, complete fact set parametrised by vendor display name + cert number.
 def _full_facts(v: str, cn: str) -> list[FactSpec]:
     return [
-        FactSpec("certification", {"standard_name": "ISO 27001", "valid_until": "2027-08-31",
-                                   "status": "valid"},
+        # key_fields = the IDENTIFYING facts only. `status` is an interpretation
+        # (the model emits "current" for an in-date cert, not "valid"), so it is
+        # not part of identity — the cert number + validity date identify it.
+        FactSpec("certification", {"standard_name": "ISO 27001", "valid_until": "2027-08-31"},
                  f"{v} holds ISO 27001:2022 certification, certificate number {cn}, "
                  f"independently audited and valid until 31 August 2027.",
                  grounding=f"certificate number {cn}"),

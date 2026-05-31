@@ -319,18 +319,31 @@ by `python -m benchmark.runner.run_benchmark` — no hand-entered figures.
 | Forced score when evidence absent | **5** | **1** | the no-forced-scores fix (Stage 4) |
 | Insufficient-evidence rate | **0.00** | **0.80** | system now says "insufficient" not a fake 0 |
 | Score consistency (stdev, 3 repeats) | 0.0 | 0.0 | temperature=0 determinism |
-| Extraction recall (per fact) | 0.63 | 0.60 | **open gap** — ~37% of facts missed |
+| Extraction recall (per fact) | ~~0.63~~ → **0.80** | see correction note | corrected after E3.a |
 | Mandatory accuracy | 0.83 | 0.83 | conflicting-evidence check is the miss |
 | Cost / full run | $0.35 | $0.36 | 6 scenarios, 0 operational failures |
+
+> **Correction (E3.a, commit on `e3a-extraction-recall`).** The first baseline
+> reported extraction recall **0.60** and I called it a "~37% missed" pipeline
+> gap. That was **wrong** — investigation (dumping the actual extracted facts)
+> showed certifications and projects were extracted *correctly*; the benchmark
+> mis-scored them because (a) the value matcher failed on cosmetic format
+> differences (`financial-services` vs `financial services`) and (b) a golden
+> `status: "valid"` field that the model correctly emits as `current`. After
+> fixing the matcher (punctuation-insensitive for value comparison only — not the
+> grounding check) and trimming the golden to identifying fields, true extraction
+> recall is **~0.80** (clean/long/short → 1.00). This corrects a *measurement*
+> error, not the pipeline.
 
 **Honest reading.** The product's core promise — *every claim cited to verbatim
 source, never fabricated* — measures **1.00 grounding / 0 fabricated**. The
 no-forced-scores change is confirmed (forced 5→1, insufficient-rate 0.00→0.80).
-**Known open gaps, logged in BACKLOG, not hidden:** extraction recall ~0.60;
-contradiction handling (the 1 remaining forced case + conflicting mandatory) does
-not yet resolve to "insufficient"; missing-mandatory becomes `review_required`
-rather than rejection. Dev-box caveat: the BGE reranker fell back to vector order
-(no HF egress); retrieval recall was 1.00 regardless.
+Extraction recall ~0.80 is a single-run point estimate (extraction has some
+run-to-run variance). **Genuine remaining gaps, logged in BACKLOG, not hidden:**
+`project` facts missed in table-heavy/sparse layouts (E3.a residual); contradiction
+handling does not yet resolve to "insufficient" (E3.b); missing-mandatory becomes
+`review_required` rather than rejection (E3.c). Dev-box caveat: the BGE reranker
+fell back to vector order (no HF egress); retrieval recall was 1.00 regardless.
 
 ---
 
