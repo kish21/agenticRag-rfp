@@ -48,6 +48,41 @@ def route_to_approval_tier(contract_value: float) -> ApprovalRouting:
     )
 
 
+def _rejecting_decisions(compliance_decisions: list) -> list:
+    """The mandatory compliance decisions that justify rejecting a vendor.
+
+    (All `compliance_decisions` are mandatory checks by construction — they come
+    from the setup's mandatory_checks.) Returns the rejecting subset; an empty
+    list means "do not reject".
+
+    A vendor is rejected on either:
+      * a FAIL — a mandatory requirement explicitly not met, or
+      * an undemonstrated mandatory (INSUFFICIENT_EVIDENCE with no contradiction)
+        — but ONLY when the vendor has NO contradicted mandatory check anywhere
+        (E3.c: genuinely missing evidence, e.g. omega — "no ISO 27001 anywhere").
+
+    The contradiction guard is VENDOR-LEVEL on purpose: a vendor that submitted
+    conflicting evidence anywhere (e.g. epsilon — insurance £10M vs £2M) is a
+    human-review case for its WHOLE submission, not an auto-reject — even if a
+    different mandatory looks "missing" (which, given the known cert-extraction
+    collapse, may itself be an undetected contradiction). This keeps the
+    auto-reject path robust to extraction noise and aligned with the #198 / E3.b
+    "contradiction → human review, report completes" philosophy.
+    """
+    has_contradiction = any(d.contradictions_found for d in compliance_decisions)
+    rejecting = []
+    for d in compliance_decisions:
+        if d.decision == ComplianceStatus.FAIL:
+            rejecting.append(d)
+        elif (
+            d.decision == ComplianceStatus.INSUFFICIENT_EVIDENCE
+            and not d.contradictions_found
+            and not has_contradiction
+        ):
+            rejecting.append(d)
+    return rejecting
+
+
 def _recommendation(score: float) -> str:
     """Return the highest band the score qualifies for.
 
@@ -67,16 +102,21 @@ async def _build_rejection_notice(
     evaluation: EvaluationOutput,
 ) -> RejectionNotice:
     """
-    Builds a RejectionNotice with evidence_citations populated from
-    the compliance decisions that FAIL.
+    Builds a RejectionNotice with evidence_citations populated from the
+    compliance decisions that reject the vendor (FAIL or undemonstrated
+    mandatory — see _rejecting_decisions).
     """
-    failed = [
-        d for d in evaluation.compliance_decisions
-        if d.decision == ComplianceStatus.FAIL
-    ]
+    failed = _rejecting_decisions(evaluation.compliance_decisions)
 
     failed_checks = [d.check_id for d in failed]
-    rejection_reasons = [d.reasoning for d in failed]
+    # A genuinely-missing mandatory carries no reasoning of its own; synthesise a
+    # clear, honest reason so the notice never rejects on an empty string.
+    rejection_reasons = [
+        d.reasoning
+        or f"Mandatory requirement {d.check_id} not demonstrated "
+           "(no supporting evidence found in the proposal)."
+        for d in failed
+    ]
     evidence_citations = [e for d in failed for e in d.evidence_used]
     clause_refs = [d.check_id for d in failed]
 
@@ -94,6 +134,12 @@ async def _build_rejection_notice(
             citations = parsed.get("evidence") or []
             evidence_citations = [c for c in citations if isinstance(c, str)]
         except Exception:
+            evidence_citations = []
+        # A missing-mandatory rejection has no positive evidence to extract, so
+        # the LLM may legitimately return none. Fall back to the (always
+        # non-empty) rejection reasons so the notice is never citation-empty —
+        # the absence statement IS the grounded basis for the rejection.
+        if not evidence_citations:
             evidence_citations = rejection_reasons[:3]
 
     return RejectionNotice(
@@ -123,12 +169,9 @@ async def run_decision_agent(
     shortlisted_vendors = []
 
     for vendor_id, evaluation in evaluation_outputs.items():
-        has_fail = any(
-            d.decision == ComplianceStatus.FAIL
-            for d in evaluation.compliance_decisions
-        )
+        has_reject = bool(_rejecting_decisions(evaluation.compliance_decisions))
 
-        if has_fail:
+        if has_reject:
             notice = await _build_rejection_notice(vendor_id, evaluation)
             rejected_vendors.append(notice)
         else:
