@@ -54,7 +54,7 @@ Embeddings are configurable via EMBEDDING_PROVIDER (openai/azure/local/modal) �
 
 Two deployment surfaces:
 - **FastAPI** (local or any cloud): real-time API, agent orchestration, retrieval
-- **Modal** (`app_modal.py`): PDF extraction (CPU), batch embeddings (A10G), LLM inference — Qwen 2.5 72B AWQ (A100-80GB), scheduled cleanup/rate monitoring
+- **Modal** (`deploy/modal.py`): PDF extraction (CPU), batch embeddings (A10G), BGE CrossEncoder reranking (A10G, `RERANKER_PROVIDER=modal` — dev/prod call one shared model), LLM inference — Qwen 2.5 72B AWQ (A100-80GB), scheduled cleanup/rate monitoring
 
 Modal routes: PDFs >50 pages or scanned PDFs → Modal for burst CPU/OCR
 Modal schedules: daily cleanup, 30-minute rate monitoring

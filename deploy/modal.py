@@ -4,6 +4,7 @@ Modal serverless deployment.
 What runs on Modal:
   - Heavy PDF extraction (large files, scanned PDFs, OCR)       → pdf_image, CPU
   - Open-source batch embeddings (BGE on GPU)                   → embed_image, A10G
+  - Open-source reranking (BGE CrossEncoder on GPU)             → embed_image, A10G
   - LLM inference — Qwen 2.5 72B AWQ via vLLM                  → llm_image, A100-80GB
   - LLM fine-tuning — domain-specific (procurement/HR/legal)    → llm_image, H100 (future)
   - Daily cleanup + rate monitoring                             → pdf_image (needs cloud PG)
@@ -220,6 +221,40 @@ def embed_single_on_modal(text: str, model_name: str) -> list[float]:
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(model_name, trust_remote_code=True)
     return model.encode([text[:8000]], normalize_embeddings=True)[0].tolist()
+
+
+# ── Reranker — BGE CrossEncoder on A10G GPU ──────────────────────────────────
+# Used when RERANKER_PROVIDER=modal. Running the open-source BGE reranker on Modal
+# (instead of the local box) means dev and production call the SAME model and get
+# identical scores — and the local/dev box never needs to reach HuggingFace
+# (which is blocked behind the corporate proxy). Reuses embed_image: it already
+# ships sentence-transformers + torch, the only deps CrossEncoder needs.
+_RERANK_MODEL = None
+
+
+@app.function(
+    image=embed_image,
+    gpu="A10G",
+    secrets=[platform_secrets],
+    timeout=120,
+    min_containers=0,   # cold start only — no idle billing (~$1.10/hr warm)
+)
+def rerank_on_modal(query: str, documents: list[str], model_name: str) -> list[float]:
+    """
+    Score each (query, document) pair with a BGE CrossEncoder on a Modal GPU.
+    Called by app/providers/reranker.py when RERANKER_PROVIDER=modal.
+
+    Returns a flat list of relevance scores aligned 1:1 with `documents` (NOT
+    sorted). The caller attaches the scores and does the sort + top-N, so dev and
+    production share one ranking implementation and only the scoring runs on GPU.
+    The model is cached on the warm container after first load.
+    """
+    global _RERANK_MODEL
+    from sentence_transformers import CrossEncoder
+    if _RERANK_MODEL is None:
+        _RERANK_MODEL = CrossEncoder(model_name)
+    scores = _RERANK_MODEL.predict([(query, d) for d in documents])
+    return [float(s) for s in scores]
 
 
 # ── PRODUCTION TODO ───────────────────────────────────────────────────────────

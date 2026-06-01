@@ -3,6 +3,20 @@ Reranker provider abstraction.
 Mirrors llm_provider.py pattern exactly.
 Switch reranker by changing RERANKER_PROVIDER in .env.
 No agent code changes required.
+
+Providers:
+  bge     — BGE CrossEncoder via sentence-transformers on the local box (needs
+            the model in the local HF cache; first run downloads ~2.3GB from
+            HuggingFace).
+  modal   — the SAME open-source BGE CrossEncoder, but run on a Modal A10G GPU
+            (deploy/modal.py::rerank_on_modal). Dev and production both call this
+            one deployed model, so scores are identical across environments and
+            the local box never needs to reach HuggingFace. Requires the Modal app
+            to be deployed (`modal deploy deploy/modal.py`); falls back to vector
+            order if Modal is unreachable.
+  cohere  — managed Cohere Rerank API (not open source).
+  colbert — ColBERT via ragatouille (unmaintained; opt-in).
+  none    — no rerank; vector-score order.
 """
 import logging
 
@@ -71,6 +85,8 @@ def rerank(
             return _rerank_cohere(query, candidates, top_n)
         elif provider == "bge":
             return _rerank_bge(query, candidates, top_n)
+        elif provider == "modal":
+            return _rerank_modal(query, candidates, top_n)
         elif provider == "colbert":
             return _rerank_colbert(query, candidates, top_n)
         elif provider == "none":
@@ -128,6 +144,33 @@ def _rerank_bge(
         reverse=True
     )
     return reranked[:top_n]
+
+
+def _rerank_modal(
+    query: str,
+    candidates: list[dict],
+    top_n: int
+) -> list[dict]:
+    """Rerank via the BGE CrossEncoder deployed on Modal (RERANKER_PROVIDER=modal).
+
+    Only the per-pair scoring runs on the Modal GPU; the sort + top-N is done here
+    so the ranking is identical to the local `bge` path. Uses the same BGE model
+    name as `bge`, guaranteeing dev/prod parity. If Modal is unreachable, the
+    exception propagates to rerank()'s handler, which falls back to vector order.
+    """
+    import modal
+    _max_chars = settings.platform.ingestion.max_chunk_chars_for_rerank
+    docs = [c["text"][:_max_chars] for c in candidates]
+    model_name = settings.platform.retrieval.reranker_models["bge"]
+    fn = modal.Function.from_name("agentic-platform", "rerank_on_modal")
+    scores = fn.remote(query, docs, model_name)
+    for i, score in enumerate(scores):
+        candidates[i]["rerank_score"] = float(score)
+    return sorted(
+        candidates,
+        key=lambda x: x["rerank_score"],
+        reverse=True
+    )[:top_n]
 
 
 def _rerank_colbert(
