@@ -162,9 +162,10 @@ async def _generate_vendor_narrative(
             ))
     if is_rejected and rejection is not None:
         reasons = "; ".join(rejection.rejection_reasons) or "mandatory requirement not met"
+        failed = "; ".join(rejection.failed_checks)
         system_facts.append(SystemFact(
             fact_text=(
-                f"Rejected — failed mandatory checks: {rejection.failed_checks}. {reasons}."
+                f"Rejected — failed mandatory checks: {failed}. {reasons}."
             ),
             origin="decision", origin_id=vendor_id,
         ))

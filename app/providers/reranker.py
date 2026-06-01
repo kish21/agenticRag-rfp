@@ -9,11 +9,11 @@ Providers:
             the model in the local HF cache; first run downloads ~2.3GB from
             HuggingFace).
   modal   — the SAME open-source BGE CrossEncoder, but run on a Modal A10G GPU
-            (deploy/modal.py::rerank_on_modal). Dev and production both call this
-            one deployed model, so scores are identical across environments and
-            the local box never needs to reach HuggingFace. Requires the Modal app
-            to be deployed (`modal deploy deploy/modal.py`); falls back to vector
-            order if Modal is unreachable.
+            (deploy/modal_app.py::rerank_on_modal). Dev and production both call
+            this one deployed model, so scores are identical across environments
+            and the local box never needs to reach HuggingFace. Requires the Modal
+            app to be deployed (`modal deploy deploy/modal_app.py`); falls back to
+            vector order if Modal is unreachable.
   cohere  — managed Cohere Rerank API (not open source).
   colbert — ColBERT via ragatouille (unmaintained; opt-in).
   none    — no rerank; vector-score order.

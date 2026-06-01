@@ -549,6 +549,14 @@ Phase 2c records per-vendor self-correction telemetry (`critic_metrics_accum` �
 
 `run_evaluation_agent(critic_feedback=…)` threads ONE feedback string into **every** mandatory-check and criterion-scoring prompt on a retry, even though a HARD eval block usually concerns a single criterion. Re-prompting all of them is blunt (extra tokens, and unrelated criteria see irrelevant "you failed" text). Acceptable for v1 (retry rate is 0% on clean fixtures), but a refined design routes feedback to the specific failing check/criterion. **Fix.** Have the critic attribute each HARD flag to a `check_id`/`criterion_id`; inject feedback only into that item's prompt. **Effort.** 1 day. **Provenance.** Self-flagged during the Phase 2c architecture review.
 
+### P2.25 — Grounding-completeness computation duplicated across explanation.py and nodes.py (code review 2026-06-01, PR #198)
+
+The `claim_bearing` / `total_claims` / `grounded_claims` / `grounding_completeness` block (plus the methodology_note + limitations text) is byte-identical in `app/agents/explanation.py::run_explanation_agent` (~line 293) and `app/pipeline/nodes.py::explanation_finalise` (~line 763). The **live graph uses `nodes.py`**; `run_explanation_agent` is the legacy single-call path (only `tools/smoke_test.py` + the checkpoint import-probe). **Risk.** A future grounding-rule change applied to one copy silently diverges the smoke-test path from what ships. **Fix.** Extract a shared `_compute_grounding(narratives) -> (completeness, limitations)` helper called from both, or retire the legacy block. **Effort.** Half a day. **Provenance.** `/code-review` of PR #198 (E3.b).
+
+### P2.26 — Vacuous `grounding_completeness=1.0` weakens the critic honesty gate for all-system-facts reports (code review 2026-06-01, PR #198)
+
+E3.b changed the no-claims default from `0.0` to `1.0` and filters to `claim_bearing` narratives (so a vendor whose entire story is trusted `system_facts` isn't scored 0%). Side effect: if **every** vendor is rejected/conflicted and the LLM emits zero `grounded_claims`, `total_claims==0` → `grounding_completeness=1.0`, which passes `critic_after_explanation`'s `<0.70` HARD gate while the report carries **no** PDF-grounded claim yet is labelled "100% grounded." This is the *intended* design (system_facts are trusted-by-construction), but the `1.0` is semantically misleading vs "no claims to ground." **Fix (optional).** Use a distinct sentinel / `None` for "nothing required grounding," or emit a SOFT critic flag when a claim-free report ships so it still gets human eyes. **Effort.** Half a day. **Provenance.** `/code-review` of PR #198 (E3.b) — deliberate per the PR comment; logged for honesty, not a blocker.
+
 ---
 
 ## ⚪ P3 — Polish
