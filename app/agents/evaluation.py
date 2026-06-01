@@ -466,7 +466,11 @@ async def run_evaluation_agent(
     else:
         overall_compliance = "pass"
 
-    total_score = round(sum(s.weighted_contribution for s in criterion_scores), 4)
+    # total_weighted_score is on a 0–10 scale. Each criterion's weighted_contribution is
+    # (raw/10)*weight and the weights sum to 1.0, so the bare sum is 0–1; multiply by 10 so
+    # the total matches the 0–10 per-criterion raw scores AND the 0–10 recommendation_thresholds
+    # in platform.yaml (decision._recommendation compares against this value).
+    total_score = round(sum(s.weighted_contribution for s in criterion_scores) * 10, 2)
     # Confidence reflects only the criteria we could actually score — an
     # insufficient-evidence criterion carries no signal and must not drag it down.
     scored = [s for s in criterion_scores if not s.insufficient_evidence]
