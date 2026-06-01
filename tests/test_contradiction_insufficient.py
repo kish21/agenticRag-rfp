@@ -92,3 +92,49 @@ def test_truly_empty_narrative_still_blocks():
         explanation_id="x", executive_summary="", vendor_narratives=[_narr("ghost")],
         methodology_note="", grounding_completeness=1.0, report_confidence=0.8)
     assert "empty_narrative" in _hard_flags(critic_after_explanation(out, {}))
+
+
+# ── E3.b.2 — a RESOLVED contradiction is SOFT, so the vendor stays in the report ─
+# (instead of being HARD-blocked → retried → dropped, which made the benchmark
+#  grader score the contradicted vendor as an artifact). A contradiction that
+#  co-exists with a PASS/FAIL is still HARD: the decision is genuinely unreliable.
+
+from app.agents.critic import critic_after_evaluation
+from app.schemas.output_models import (
+    EvaluationOutput, ComplianceDecision, DecisionBasis, ExtractionOutput,
+    CriticVerdict,
+)
+
+
+def _eval_out(decision: ComplianceStatus):
+    dec = ComplianceDecision(
+        check_id="MC-001", vendor_id="epsilon", decision=decision, confidence=0.6,
+        reasoning="conflicting evidence", evidence_used=["£10M", "£2M"],
+        contradictions_found=["£10,000,000", "£2,000,000"],
+        decision_basis=DecisionBasis.PARTIAL_COMPLIANCE)
+    return EvaluationOutput(
+        evaluation_id="e1", vendor_id="epsilon", compliance_decisions=[dec],
+        criterion_scores=[], overall_compliance="review_required",
+        total_weighted_score=0.0, score_confidence=0.6)
+
+
+_STUB_EXTRACTION = ExtractionOutput(
+    extraction_id="ex1", vendor_id="epsilon", org_id="org1", source_chunk_ids=[],
+    extraction_completeness=0.8, hallucination_risk=0.1)
+
+
+def test_resolved_contradiction_is_soft_not_blocked():
+    # Contradiction already resolved to insufficient_evidence → SOFT, NOT BLOCKED,
+    # so run_with_critic_retry keeps the vendor in evaluation_output_objects.
+    critic = critic_after_evaluation(
+        _eval_out(ComplianceStatus.INSUFFICIENT_EVIDENCE), _STUB_EXTRACTION)
+    assert critic.overall_verdict != CriticVerdict.BLOCKED
+    soft = {f.check_name for f in critic.flags if f.severity == CriticSeverity.SOFT}
+    assert "contradictions_in_evidence" in soft
+
+
+def test_unresolved_contradiction_on_pass_still_blocks():
+    # A PASS that still carries a contradiction is unreliable → stays HARD (Q07).
+    critic = critic_after_evaluation(
+        _eval_out(ComplianceStatus.PASS), _STUB_EXTRACTION)
+    assert critic.overall_verdict == CriticVerdict.BLOCKED

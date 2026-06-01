@@ -302,11 +302,22 @@ def critic_after_evaluation(
             ))
 
         if decision.contradictions_found:
+            # E3.b.2 — a contradiction the evaluation has ALREADY resolved to
+            # insufficient_evidence is handled correctly (#198 "report always
+            # completes"): it must stay in the report flagged for human review,
+            # NOT be HARD-blocked into a futile retry loop and dropped (a source
+            # contradiction can never be re-prompted away). Downgrade to SOFT.
+            # A contradiction co-existing with a PASS/FAIL is still unreliable —
+            # keep that HARD (defends the Q07 regression).
+            resolved = decision.decision.value == "insufficient_evidence"
             flags.append(_make_flag(
-                CriticSeverity.HARD, "evaluation_agent",
+                CriticSeverity.SOFT if resolved else CriticSeverity.HARD,
+                "evaluation_agent",
                 "contradictions_in_evidence",
                 f"Check {decision.check_id} has contradictory evidence",
                 f"contradictions={decision.contradictions_found}",
+                "Resolved to insufficient_evidence; flag for human review."
+                if resolved else
                 "Cannot make reliable decision. Human review required."
             ))
 
