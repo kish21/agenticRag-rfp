@@ -40,7 +40,18 @@ Think of it as a specialist reader who goes through highlighted paragraphs and f
 
 The extraction schema is **100% driven by the customer's evaluation criteria**. Whatever `extraction_targets` are set up at the start of an evaluation run, those are the only sections the LLM is asked to fill in.
 
-Standard types (only included if the evaluation asks for them):
+> ⚠️ **Current reality (verified 2026-06-01) — read this before assuming typed tables hold data.**
+> Today, `app/domain/criteria.py::_build_targets()` emits **every** extraction target as
+> `fact_type="custom"`. As a result, **all** extracted facts are stored in the single generic
+> `extracted_facts` table, and the five typed tables below (`extracted_certifications`,
+> `_insurance`, `_slas`, `_projects`, `_pricing`) are **created but never populated**.
+> This is a working, internally-consistent design: categories are still customer-driven (via each
+> target's name/description), and "custom" simply means *generic storage* rather than rich typed
+> columns. The five typed tables are **reserved for a possible future "typed-storage" upgrade**
+> (assigning a rich `fact_type` per criterion so you can do structured comparisons like
+> "insurance ≥ £5M?"). The table below describes that *intended* typing — it is **not** what runs today.
+
+Standard types (reserved — only `custom` is emitted in the current code):
 
 | Type | Example |
 |------|---------|
@@ -49,7 +60,7 @@ Standard types (only included if the evaluation asks for them):
 | `sla` | "99.9% uptime SLA, 4-hour critical response time" |
 | `project` | "Deployed for NHS Scotland, 50k users, 2023–present" |
 | `pricing` | "£120/user/month, annual billing, 10% discount for 3-year term" |
-| `custom` | Anything the customer defines — e.g. "ESG commitments", "UK data residency" |
+| `custom` | **The only type used today** — holds whatever the customer defines (e.g. "ESG commitments", "UK data residency") in `extracted_facts` |
 
 ---
 
@@ -86,6 +97,8 @@ The retry prompt is in `app/prompts/extraction/retry_extract.yaml` and managed i
 **Before:** The extraction schema always asked the LLM to find certifications, insurance, SLAs, projects, and pricing — regardless of what the customer actually needed. An HR evaluation looking for "training records" and "DEI policies" would get back empty certification/insurance/SLA arrays and miss the actual custom targets entirely.
 
 **Fix:** `_schema_description()` in `prompts.py` now builds the JSON schema purely from `EvaluationSetup.extraction_targets`. If an evaluation has no certification target, the schema has no certification section.
+
+> **Clarification (2026-06-01):** this fix is real *at the prompt layer* — the schema is built from the targets, not hardcoded. But because `_build_targets()` currently emits every target as `fact_type="custom"` (see the ⚠️ note under **Fact types**), in practice the schema only ever contains the generic `extracted_facts` section. So the *typed* sections (certification/insurance/etc.) are still never requested. The hardcoding moved from the prompt to `_build_targets()`; it was not fully eliminated. Resolving this is a parked design decision, not a bug to rush.
 
 ### 2. Completeness score always wrong — CRITICAL
 **Before:** Completeness was calculated as `found / 6` (always divided by 5 standard types + custom), so an HR evaluation that found all 4 of its custom facts would score 4/6 = 67% — appearing to have missed something, when it hadn't.

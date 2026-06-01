@@ -4,6 +4,7 @@ Modal serverless deployment.
 What runs on Modal:
   - Heavy PDF extraction (large files, scanned PDFs, OCR)       → pdf_image, CPU
   - Open-source batch embeddings (BGE on GPU)                   → embed_image, A10G
+  - Open-source reranking (BGE CrossEncoder on GPU)             → embed_image, A10G
   - LLM inference — Qwen 2.5 72B AWQ via vLLM                  → llm_image, A100-80GB
   - LLM fine-tuning — domain-specific (procurement/HR/legal)    → llm_image, H100 (future)
   - Daily cleanup + rate monitoring                             → pdf_image (needs cloud PG)
@@ -50,6 +51,14 @@ pdf_image = (
 # Model weights are stored in a Modal Volume so cold starts don't re-download.
 # Exposes OpenAI-compatible /v1/chat/completions — zero agent code changes.
 # After deploy, set MODAL_LLM_ENDPOINT in .env to the printed URL.
+#
+# ⚠️ NOT REGISTERED FOR DEPLOY (2026-06-01). The @app.function decorators on the
+# two LLM functions below are commented out so `modal deploy` does NOT build the
+# ~6GB vLLM image — we only run LLM via LLM_PROVIDER=openai today, and the vLLM
+# base image needs a build fix anyway (`python` not on PATH → add
+# `.run_commands("ln -sf $(command -v python3) /usr/local/bin/python")` to
+# llm_image before .pip_install, or use add_python). To enable LLM-on-Modal:
+# apply that image fix and uncomment the two decorators, then redeploy.
 
 QWEN_MODEL_ID   = "Qwen/Qwen2.5-72B-Instruct-AWQ"
 QWEN_SERVED_NAME = "qwen2.5-72b"
@@ -68,16 +77,17 @@ llm_image = (
 )
 
 
-@app.function(
-    image=llm_image,
-    gpu="a100-80gb",
-    secrets=[platform_secrets],
-    timeout=7200,                   # 2 hours — long-running server
-    volumes={LLM_VOLUME_PATH: llm_volume},
-    min_containers=0,               # cold start — no idle billing (A100 costs ~$3.70/hr warm)
-)
-@modal.concurrent(max_inputs=32)   # vLLM handles concurrency internally
-@modal.web_server(LLM_PORT, startup_timeout=600)
+# DISABLED (see note above) — uncomment to register for deploy:
+# @app.function(
+#     image=llm_image,
+#     gpu="a100-80gb",
+#     secrets=[platform_secrets],
+#     timeout=7200,                   # 2 hours — long-running server
+#     volumes={LLM_VOLUME_PATH: llm_volume},
+#     min_containers=0,               # cold start — no idle billing (A100 costs ~$3.70/hr warm)
+# )
+# @modal.concurrent(max_inputs=32)   # vLLM handles concurrency internally
+# @modal.web_server(LLM_PORT, startup_timeout=600)
 def serve_llm_on_modal():
     """
     Serves Qwen 2.5 72B via vLLM on an A100-80GB GPU.
@@ -107,20 +117,21 @@ def serve_llm_on_modal():
     ])
 
 
-@app.function(
-    image=llm_image,
-    gpu="a100-80gb",
-    secrets=[platform_secrets],
-    timeout=3600,
-    volumes={LLM_VOLUME_PATH: llm_volume},
-)
+# DISABLED (see note above) — uncomment to register for deploy:
+# @app.function(
+#     image=llm_image,
+#     gpu="a100-80gb",
+#     secrets=[platform_secrets],
+#     timeout=3600,
+#     volumes={LLM_VOLUME_PATH: llm_volume},
+# )
 def download_llm_weights():
     """
     One-time setup: pre-downloads Qwen 2.5 72B AWQ weights into the Modal Volume.
     Run before first deploy so serve_llm_on_modal starts instantly (no download lag).
 
     Run with:
-        modal run app_modal.py::download_llm_weights --env rag
+        modal run deploy/modal_app.py::download_llm_weights --env rag
     """
     import os
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -132,7 +143,7 @@ def download_llm_weights():
     )
     llm_volume.commit()
     print(f"Weights cached at: {LLM_VOLUME_PATH}/{QWEN_MODEL_ID}")
-    print("You can now deploy: modal deploy app_modal.py --env rag")
+    print("You can now deploy: modal deploy deploy/modal_app.py --env rag")
 
 
 # ── Separate image for open-source embedding — sentence-transformers + torch only.
@@ -222,6 +233,40 @@ def embed_single_on_modal(text: str, model_name: str) -> list[float]:
     return model.encode([text[:8000]], normalize_embeddings=True)[0].tolist()
 
 
+# ── Reranker — BGE CrossEncoder on A10G GPU ──────────────────────────────────
+# Used when RERANKER_PROVIDER=modal. Running the open-source BGE reranker on Modal
+# (instead of the local box) means dev and production call the SAME model and get
+# identical scores — and the local/dev box never needs to reach HuggingFace
+# (which is blocked behind the corporate proxy). Reuses embed_image: it already
+# ships sentence-transformers + torch, the only deps CrossEncoder needs.
+_RERANK_MODEL = None
+
+
+@app.function(
+    image=embed_image,
+    gpu="A10G",
+    secrets=[platform_secrets],
+    timeout=120,
+    min_containers=0,   # cold start only — no idle billing (~$1.10/hr warm)
+)
+def rerank_on_modal(query: str, documents: list[str], model_name: str) -> list[float]:
+    """
+    Score each (query, document) pair with a BGE CrossEncoder on a Modal GPU.
+    Called by app/providers/reranker.py when RERANKER_PROVIDER=modal.
+
+    Returns a flat list of relevance scores aligned 1:1 with `documents` (NOT
+    sorted). The caller attaches the scores and does the sort + top-N, so dev and
+    production share one ranking implementation and only the scoring runs on GPU.
+    The model is cached on the warm container after first load.
+    """
+    global _RERANK_MODEL
+    from sentence_transformers import CrossEncoder
+    if _RERANK_MODEL is None:
+        _RERANK_MODEL = CrossEncoder(model_name)
+    scores = _RERANK_MODEL.predict([(query, d) for d in documents])
+    return [float(s) for s in scores]
+
+
 # ── PRODUCTION TODO ───────────────────────────────────────────────────────────
 # daily_cleanup and rate_monitor are disabled until PostgreSQL moves to cloud.
 # Both functions connect directly to the database and cannot reach localhost.
@@ -229,7 +274,7 @@ def embed_single_on_modal(text: str, model_name: str) -> list[float]:
 #   1. Provision a cloud PostgreSQL (Neon / Supabase / Railway)
 #   2. Update POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER / POSTGRES_PASSWORD
 #      in the Modal secret: modal secret create agentic-platform-secrets ... --env rag
-#   3. Uncomment the two functions below and redeploy: modal deploy app_modal.py --env rag
+#   3. Uncomment the two functions below and redeploy: modal deploy deploy/modal_app.py --env rag
 # ─────────────────────────────────────────────────────────────────────────────
 
 # @app.function(
@@ -265,7 +310,9 @@ def embed_single_on_modal(text: str, model_name: str) -> list[float]:
 @app.function(
     image=pdf_image,
     secrets=[platform_secrets],
-    schedule=modal.Period(minutes=5),
+    # schedule=modal.Period(minutes=5),   # DISABLED 2026-06-01 — cron intentionally off
+    #   ($5-15/mo for zero benefit until a real auto_to_evaluate customer). The function
+    #   stays deployed/callable; re-enable by uncommenting this line and redeploying.
     min_containers=0,
     timeout=900,
 )
@@ -277,5 +324,5 @@ async def phase5_deadline_tick():
 
 
 if __name__ == "__main__":
-    print("Modal app defined. Deploy with: modal deploy app_modal.py")
-    print("Test locally with: modal run app_modal.py::extract_pdf_on_modal")
+    print("Modal app defined. Deploy with: modal deploy deploy/modal_app.py")
+    print("Test locally with: modal run deploy/modal_app.py::extract_pdf_on_modal")

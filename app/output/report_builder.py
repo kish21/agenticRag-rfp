@@ -221,7 +221,7 @@ def build_report_context(run: dict, org_name: str = "Meridian Financial Services
     if ranked:
         top = ranked[0]
         winner = (f"{_vendor_name(top.get('vendor_id', ''), names, top.get('vendor_name'))} "
-                  f"is recommended (score {round(float(top.get('total_score', 0)), 1)}/100, "
+                  f"is recommended (score {round(float(top.get('total_score', 0)), 1)}/10, "
                   f"{top.get('recommendation', '').replace('_', ' ')}).")
     else:
         winner = "No vendor met the requirements for shortlisting."

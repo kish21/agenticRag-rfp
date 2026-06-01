@@ -233,7 +233,7 @@ export default function ComparePage() {
                     {v.vendor_name}
                   </p>
                   <p style={{ fontFamily: MONO, fontWeight: 800, fontSize: 28, color: "var(--color-success)", lineHeight: 1, marginBottom: 4, fontVariantNumeric: "tabular-nums" }}>
-                    {v.total_score?.toFixed(1) ?? "—"}
+                    {v.total_score != null ? (<>{v.total_score.toFixed(1)}<span style={{ fontSize: "0.5em", color: "var(--color-text-muted)", fontWeight: 600 }}>/10</span></>) : "—"}
                   </p>
                   <p style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--color-success)" }}>
                     #{v.rank} · Shortlisted

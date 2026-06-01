@@ -662,6 +662,15 @@ def _build_targets(
     mandatory_checks: list[dict],
     scoring_criteria: list[dict],
 ) -> list[dict]:
+    # NOTE (current behaviour, intentional): every extraction target is emitted as
+    # fact_type="custom". Extraction therefore stores ALL facts in the generic
+    # `extracted_facts` table, and the typed tables (extracted_certifications/
+    # _insurance/_slas/_projects/_pricing) are NOT populated today. This is a
+    # working, internally-consistent design — categories are still customer-driven
+    # via each target's name/description; "custom" just means generic storage.
+    # The 5 typed tables are reserved for a possible future "typed storage" upgrade
+    # (assign a rich fact_type per criterion). Do not assume typed tables hold data.
+    # See docs/dev/AGENT_04_EXTRACTION.md and AGENT_05_EVALUATION.md.
     targets = []
     for mc in mandatory_checks:
         targets.append({

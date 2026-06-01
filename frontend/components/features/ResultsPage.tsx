@@ -348,7 +348,7 @@ export function ResultsPage({ results, activeRunId, isMobile, onStartNewEval }: 
                         </span>
                       )}
                       <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 22, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>
-                        {typeof v.total_score === "number" ? v.total_score.toFixed(1) : "—"}
+                        {typeof v.total_score === "number" ? (<>{v.total_score.toFixed(1)}<span style={{ fontSize: "0.6em", color: "var(--color-text-muted)", fontWeight: 500 }}>/10</span></>) : "—"}
                       </span>
                     </div>
                   </div>
@@ -389,7 +389,7 @@ export function ResultsPage({ results, activeRunId, isMobile, onStartNewEval }: 
                     {v.vendor_name}
                   </p>
                   <span style={{ fontFamily: MONO, fontSize: 20, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                    {typeof v.total_score === "number" ? v.total_score.toFixed(1) : "—"}
+                    {typeof v.total_score === "number" ? (<>{v.total_score.toFixed(1)}<span style={{ fontSize: "0.6em", color: "var(--color-text-muted)", fontWeight: 500 }}>/10</span></>) : "—"}
                   </span>
                 </div>
                 {v.summary && (

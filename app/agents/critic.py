@@ -458,7 +458,13 @@ def critic_after_explanation(
         ))
 
     for narrative in output.vendor_narratives:
-        if len(narrative.grounded_claims) == 0 and narrative.ungrounded_claims_removed == 0:
+        _system_facts = getattr(narrative, "system_facts", []) or []
+        if (len(narrative.grounded_claims) == 0 and narrative.ungrounded_claims_removed == 0
+                and len(_system_facts) == 0):
+            # Truly empty only if there are no PDF claims, none were removed, AND no
+            # system_facts. A vendor whose story is a trusted system determination
+            # (rejection reasons / conflicts carried as system_facts) is NOT empty —
+            # that IS the report content the customer needs.
             flags.append(_make_flag(
                 CriticSeverity.HARD, "explanation_agent",
                 "empty_narrative",

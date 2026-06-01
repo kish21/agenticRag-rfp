@@ -108,7 +108,7 @@
     <tr>
       <td class="rank">#{{ p.rank }}</td>
       <td>{{ p.vendor_name }}</td>
-      <td>{{ "%.1f"|format(p.total_score) }}</td>
+      <td>{{ "%.1f"|format(p.total_score) }}/10</td>
       <td>{% if p.score_delta_vs_next %}<span class="delta">+{{ "%.1f"|format(p.score_delta_vs_next) }}</span>{% else %}—{% endif %}</td>
       <td class="muted">{{ p.tipping_factor }}</td>
     </tr>

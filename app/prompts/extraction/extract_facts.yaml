@@ -20,6 +20,12 @@ template: |
      0.5-0.8 means it is implied or partially stated. Below 0.5 — omit the fact.
   6. Each chunk header shows [chunk_id] [section_type]. Prioritise chunks labelled
      [requirement_response] — they are most likely to contain relevant facts.
+  7. CONFLICTING VALUES: if the document states more than one value for the same
+     fact (e.g. two different insurance amounts, or a certificate described as both
+     valid and lapsed/expired), extract EACH stated value as a SEPARATE fact, each
+     with its own verbatim grounding_quote. Do NOT reconcile, merge, average, or
+     pick one — surface every conflicting value so the contradiction is visible
+     downstream.
 
   Rules for table data (SLAs, pricing tables):
   - PDF tables are often parsed with each cell on its own line in the source text.

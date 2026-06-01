@@ -56,6 +56,7 @@ from .schema_decision import (
     ApprovalRouting,
     DecisionOutput,
     GroundedClaim,
+    SystemFact,
     SynthesisLLMResponse,
     VendorNarrative,
     ExplanationOutput,
