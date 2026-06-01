@@ -51,6 +51,14 @@ pdf_image = (
 # Model weights are stored in a Modal Volume so cold starts don't re-download.
 # Exposes OpenAI-compatible /v1/chat/completions — zero agent code changes.
 # After deploy, set MODAL_LLM_ENDPOINT in .env to the printed URL.
+#
+# ⚠️ NOT REGISTERED FOR DEPLOY (2026-06-01). The @app.function decorators on the
+# two LLM functions below are commented out so `modal deploy` does NOT build the
+# ~6GB vLLM image — we only run LLM via LLM_PROVIDER=openai today, and the vLLM
+# base image needs a build fix anyway (`python` not on PATH → add
+# `.run_commands("ln -sf $(command -v python3) /usr/local/bin/python")` to
+# llm_image before .pip_install, or use add_python). To enable LLM-on-Modal:
+# apply that image fix and uncomment the two decorators, then redeploy.
 
 QWEN_MODEL_ID   = "Qwen/Qwen2.5-72B-Instruct-AWQ"
 QWEN_SERVED_NAME = "qwen2.5-72b"
@@ -69,16 +77,17 @@ llm_image = (
 )
 
 
-@app.function(
-    image=llm_image,
-    gpu="a100-80gb",
-    secrets=[platform_secrets],
-    timeout=7200,                   # 2 hours — long-running server
-    volumes={LLM_VOLUME_PATH: llm_volume},
-    min_containers=0,               # cold start — no idle billing (A100 costs ~$3.70/hr warm)
-)
-@modal.concurrent(max_inputs=32)   # vLLM handles concurrency internally
-@modal.web_server(LLM_PORT, startup_timeout=600)
+# DISABLED (see note above) — uncomment to register for deploy:
+# @app.function(
+#     image=llm_image,
+#     gpu="a100-80gb",
+#     secrets=[platform_secrets],
+#     timeout=7200,                   # 2 hours — long-running server
+#     volumes={LLM_VOLUME_PATH: llm_volume},
+#     min_containers=0,               # cold start — no idle billing (A100 costs ~$3.70/hr warm)
+# )
+# @modal.concurrent(max_inputs=32)   # vLLM handles concurrency internally
+# @modal.web_server(LLM_PORT, startup_timeout=600)
 def serve_llm_on_modal():
     """
     Serves Qwen 2.5 72B via vLLM on an A100-80GB GPU.
@@ -108,20 +117,21 @@ def serve_llm_on_modal():
     ])
 
 
-@app.function(
-    image=llm_image,
-    gpu="a100-80gb",
-    secrets=[platform_secrets],
-    timeout=3600,
-    volumes={LLM_VOLUME_PATH: llm_volume},
-)
+# DISABLED (see note above) — uncomment to register for deploy:
+# @app.function(
+#     image=llm_image,
+#     gpu="a100-80gb",
+#     secrets=[platform_secrets],
+#     timeout=3600,
+#     volumes={LLM_VOLUME_PATH: llm_volume},
+# )
 def download_llm_weights():
     """
     One-time setup: pre-downloads Qwen 2.5 72B AWQ weights into the Modal Volume.
     Run before first deploy so serve_llm_on_modal starts instantly (no download lag).
 
     Run with:
-        modal run app_modal.py::download_llm_weights --env rag
+        modal run deploy/modal_app.py::download_llm_weights --env rag
     """
     import os
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -133,7 +143,7 @@ def download_llm_weights():
     )
     llm_volume.commit()
     print(f"Weights cached at: {LLM_VOLUME_PATH}/{QWEN_MODEL_ID}")
-    print("You can now deploy: modal deploy app_modal.py --env rag")
+    print("You can now deploy: modal deploy deploy/modal_app.py --env rag")
 
 
 # ── Separate image for open-source embedding — sentence-transformers + torch only.
@@ -264,7 +274,7 @@ def rerank_on_modal(query: str, documents: list[str], model_name: str) -> list[f
 #   1. Provision a cloud PostgreSQL (Neon / Supabase / Railway)
 #   2. Update POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER / POSTGRES_PASSWORD
 #      in the Modal secret: modal secret create agentic-platform-secrets ... --env rag
-#   3. Uncomment the two functions below and redeploy: modal deploy app_modal.py --env rag
+#   3. Uncomment the two functions below and redeploy: modal deploy deploy/modal_app.py --env rag
 # ─────────────────────────────────────────────────────────────────────────────
 
 # @app.function(
@@ -314,5 +324,5 @@ async def phase5_deadline_tick():
 
 
 if __name__ == "__main__":
-    print("Modal app defined. Deploy with: modal deploy app_modal.py")
-    print("Test locally with: modal run app_modal.py::extract_pdf_on_modal")
+    print("Modal app defined. Deploy with: modal deploy deploy/modal_app.py")
+    print("Test locally with: modal run deploy/modal_app.py::extract_pdf_on_modal")
