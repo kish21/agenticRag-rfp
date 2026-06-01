@@ -169,6 +169,10 @@ class Settings(BaseModel):
     # ── Modal LLM (vLLM serving Qwen 2.5 72B on A100-80GB) ───────────
     modal_llm_endpoint: str = ""
     modal_llm_model: str = "qwen2.5-72b"
+    # Modal environment the agentic-platform app is deployed to (its secret lives
+    # in "rag"). Runtime Function.from_name lookups must target this env, else they
+    # default to "main" and raise "App ... not found in environment 'main'".
+    modal_environment: str = "rag"
 
     # ── LangSmith ─────────────────────────────────────────────────────
     langsmith_tracing: bool = True
@@ -324,6 +328,7 @@ def load_settings() -> Settings:
         "ollama_model":               _e("OLLAMA_MODEL", "qwen2.5:72b"),
         "modal_llm_endpoint":         _e("MODAL_LLM_ENDPOINT", ""),
         "modal_llm_model":            _e("MODAL_LLM_MODEL", "qwen2.5-72b"),
+        "modal_environment":          _e("MODAL_ENVIRONMENT", "rag"),
         "langsmith_tracing":          _eb("LANGSMITH_TRACING", True),
         "langsmith_api_key":          _e("LANGSMITH_API_KEY"),
         "langsmith_endpoint":         _e("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"),

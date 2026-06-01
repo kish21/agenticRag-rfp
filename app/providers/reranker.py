@@ -162,7 +162,10 @@ def _rerank_modal(
     _max_chars = settings.platform.ingestion.max_chunk_chars_for_rerank
     docs = [c["text"][:_max_chars] for c in candidates]
     model_name = settings.platform.retrieval.reranker_models["bge"]
-    fn = modal.Function.from_name("agentic-platform", "rerank_on_modal")
+    fn = modal.Function.from_name(
+        "agentic-platform", "rerank_on_modal",
+        environment_name=settings.modal_environment,
+    )
     scores = fn.remote(query, docs, model_name)
     for i, score in enumerate(scores):
         candidates[i]["rerank_score"] = float(score)
