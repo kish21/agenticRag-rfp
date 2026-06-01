@@ -10,6 +10,13 @@ After the Extraction Agent has saved structured facts to the database, the Evalu
 
 The total weighted score across all criteria is what the Comparator Agent uses to rank vendors against each other.
 
+> ℹ️ **Where the facts come from (verified 2026-06-01).** `_get_facts_for_target()` routes by
+> `fact_type` and *can* read the five typed tables, but today every extraction target is
+> `fact_type="custom"` (see AGENT_04_EXTRACTION.md ⚠️ note), so in practice **all** facts are
+> read from the single generic `extracted_facts` table, matched to each criterion by `target_id`.
+> The typed-table branches in `_get_facts_for_target()` are not exercised yet. The evaluation
+> logic is correct either way — this is just a note so the empty typed tables don't confuse you.
+
 ---
 
 ## Step-by-step process

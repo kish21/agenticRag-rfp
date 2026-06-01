@@ -126,6 +126,12 @@ Customer uploads RFP PDF + optional criteria CSV
 
 **Output:** One unified set of mandatory checks + scoring criteria + extraction targets.
 
+> ℹ️ **Note on extraction targets (verified 2026-06-01).** `_build_targets()` currently emits every
+> target with `fact_type="custom"`, so downstream extraction stores all facts in the generic
+> `extracted_facts` table and the five typed tables stay empty. Categories are still customer-driven
+> (via each target's name/description); "custom" just means generic storage. See
+> AGENT_04_EXTRACTION.md for the full explanation. Whether to add typed storage is a parked decision.
+
 ---
 
 ### Step 6 — Gap detection and fill
