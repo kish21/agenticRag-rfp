@@ -300,7 +300,9 @@ def rerank_on_modal(query: str, documents: list[str], model_name: str) -> list[f
 @app.function(
     image=pdf_image,
     secrets=[platform_secrets],
-    schedule=modal.Period(minutes=5),
+    # schedule=modal.Period(minutes=5),   # DISABLED 2026-06-01 — cron intentionally off
+    #   ($5-15/mo for zero benefit until a real auto_to_evaluate customer). The function
+    #   stays deployed/callable; re-enable by uncommenting this line and redeploying.
     min_containers=0,
     timeout=900,
 )
