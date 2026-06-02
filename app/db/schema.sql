@@ -594,7 +594,7 @@ CREATE TABLE IF NOT EXISTS org_settings (
     CHECK (llm_temperature            BETWEEN 0 AND 2),
     CHECK (output_tone IN ('formal','conversational','technical')),
     CHECK (citation_style IN ('inline','footnote','appendix')),
-    CHECK (reranker_provider IN ('cohere','bge','colbert','none')),
+    CHECK (reranker_provider IN ('cohere','bge','colbert','modal','none')),
     CHECK (max_evidence_quote_chars BETWEEN 50 AND 2000)
 );
 

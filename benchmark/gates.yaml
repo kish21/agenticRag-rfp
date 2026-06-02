@@ -1,0 +1,36 @@
+# E3.e — Regression gates for the evidence-quality benchmark.
+#
+# The benchmark aggregate (benchmark/metrics/aggregate.py) must hold these
+# thresholds; `run_benchmark --gate` exits non-zero on any violation. These are
+# NOT hardcoded in code — the runner reads this file (see docs/dev/E3_E_REGRESSION_GATES.md).
+#
+# Each gate:
+#   direction : "min" (measured must be >= threshold - tolerance)
+#             | "max" (measured must be <= threshold + tolerance)
+#   threshold : the value taken from the committed reranked baseline
+#   tolerance : run-to-run LLM-noise allowance; 0 = exact, zero-tolerance invariant
+#
+# A missing/None measured value is a violation (fail-closed) — the gate never
+# passes on absent data.
+#
+# Thresholds set from the reranked baseline (RERANKER_PROVIDER=modal). Update them
+# (with a recorded reason) only when an intended product change legitimately moves
+# a number — never to silence a real regression.
+
+gates:
+  # ── Integrity invariants — must never move (zero tolerance) ────────────────
+  fabricated_citations_total:        {direction: max, threshold: 0,    tolerance: 0}
+  hallucinated_against_absent_total: {direction: max, threshold: 0,    tolerance: 0}
+  operational_failures:              {direction: max, threshold: 0,    tolerance: 0}
+  blocked_vendors:                   {direction: max, threshold: 0,    tolerance: 0}
+  rejection_correct:                 {direction: min, threshold: 1.0,  tolerance: 0.0}
+
+  # ── Evidence-quality floors — small tolerance for LLM run-to-run noise ─────
+  grounding_accuracy:                {direction: min, threshold: 1.0,  tolerance: 0.05}
+  mandatory_accuracy:                {direction: min, threshold: 1.0,  tolerance: 0.15}
+  insufficient_rate:                 {direction: min, threshold: 1.0,  tolerance: 0.20}
+  forced_when_insufficient_total:    {direction: max, threshold: 0,    tolerance: 1}
+
+  # ── Retrieval / extraction floors ──────────────────────────────────────────
+  retrieval_recall:                  {direction: min, threshold: 1.0,  tolerance: 0.10}
+  extraction_recall:                 {direction: min, threshold: 0.75, tolerance: 0.15}

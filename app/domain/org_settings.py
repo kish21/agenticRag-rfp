@@ -93,10 +93,19 @@ def invalidate_org_settings(org_id: str) -> None:
         _cache.pop(org_id, None)
 
 
-def upsert_org_settings(org_id: str, updated_by: str, **fields) -> OrgSettings:
+def upsert_org_settings(org_id: str, updated_by: str, *, apply_preset: bool = True,
+                        **fields) -> OrgSettings:
+    """Persist per-org settings (single write path: audit rows + cache invalidation).
+
+    By default the chosen tier preset is overlaid first, so a tier change pulls in
+    its whole config and individual fields layer on top — this is the governed
+    customer path. `apply_preset=False` skips that overlay and writes exactly the
+    fields given over the current resolved values (used by the benchmark to set a
+    single field, e.g. reranker_provider, without the preset re-forcing it).
+    """
     current = get_org_settings(org_id)
     tier = fields.get("quality_tier", current.quality_tier)
-    if tier in cfg.product.presets:
+    if apply_preset and tier in cfg.product.presets:
         preset = cfg.product.presets[tier].config
         fields = {**preset, **{k: v for k, v in fields.items() if k not in preset},
                   "quality_tier": tier}
