@@ -89,6 +89,11 @@ class PlatformGovernance(BaseModel):
     approval_tiers: list[PlatformGovernanceTier]
     recommendation_thresholds: dict[str, float]
 
+class PlatformRanking(BaseModel):
+    # E3.d — coverage floor below which a vendor's coverage-normalised score is
+    # flagged 'low coverage — human review' rather than trusted at face value.
+    min_coverage_for_trust: float = 0.5
+
 class PlatformConfig(BaseModel):
     embedding: PlatformEmbedding
     ingestion: PlatformIngestion
@@ -96,6 +101,7 @@ class PlatformConfig(BaseModel):
     llm: PlatformLLM
     infrastructure: PlatformInfra
     governance: PlatformGovernance
+    ranking: PlatformRanking = PlatformRanking()
     hyde_templates: dict[str, str]    # doc_type -> template
     retrieval_critic_prompt: str
     extraction_critic_prompt: str

@@ -353,8 +353,10 @@ def _build_executive_summary(
     n_rejected = len(decision_output.rejected_vendors)
     n_shortlisted = len(decision_output.shortlisted_vendors)
     top = decision_output.shortlisted_vendors[0] if decision_output.shortlisted_vendors else None
+    # E3.d — headline the coverage-normalised score (the rank basis), not the absolute
+    # total, so the #1 vendor's quoted score is consistent with why it ranked first.
     top_line = (
-        f"Top-ranked vendor: {top.vendor_id} (score {top.total_score:.2f}/10, "
+        f"Top-ranked vendor: {top.vendor_id} (score {top.coverage_normalised_score:.2f}/10, "
         f"{top.recommendation})."
         if top else "No vendors shortlisted."
     )

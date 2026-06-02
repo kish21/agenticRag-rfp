@@ -478,12 +478,33 @@ async def run_evaluation_agent(
         round(sum(s.confidence for s in scored) / len(scored), 3) if scored else 0.0
     )
     insufficient_criteria = [s.criterion_id for s in criterion_scores if s.insufficient_evidence]
+
+    # E3.d — coverage-normalised score. `coverage` is the fraction of total criterion
+    # weight actually assessed; insufficient-evidence criteria contribute 0 to
+    # total_weighted_score (an absolute view), so we also project the observed quality
+    # over the assessed weight onto 0–10. Ranking/recommendation use the normalised score
+    # so a partially-assessed vendor isn't treated as if it scored 0 on the gaps.
+    weight_by_criterion = {
+        c.criterion_id: c.weight for c in evaluation_setup.scoring_criteria
+    }
+    total_weight = sum(weight_by_criterion.values())
+    assessed_weight = sum(
+        weight_by_criterion.get(s.criterion_id, 0.0)
+        for s in criterion_scores
+        if not s.insufficient_evidence
+    )
+    coverage = round(assessed_weight / total_weight, 4) if total_weight else 0.0
+    coverage_normalised_score = (
+        round(total_score / coverage, 2) if coverage else 0.0
+    )
+
     if insufficient_criteria:
         warnings.append(
             "Insufficient evidence to score: " + ", ".join(insufficient_criteria)
             + " — flagged for human review and excluded from the confidence average. "
-            "(Their 0 weighted contribution is still in total_weighted_score pending "
-            "coverage-normalised ranking — see BACKLOG E3.d.)"
+            f"Coverage {coverage:.2f}; ranking uses the coverage-normalised score "
+            f"{coverage_normalised_score:.2f} (vs absolute total {total_score:.2f}) so the "
+            "un-assessed criteria don't count as genuine 0s (E3.d)."
         )
 
     output = EvaluationOutput(
@@ -493,6 +514,8 @@ async def run_evaluation_agent(
         criterion_scores=criterion_scores,
         overall_compliance=overall_compliance,
         total_weighted_score=total_score,
+        coverage=coverage,
+        coverage_normalised_score=coverage_normalised_score,
         score_confidence=avg_confidence,
         evaluation_warnings=warnings,
     )

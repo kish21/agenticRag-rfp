@@ -18,6 +18,7 @@ from app.schemas.output_models import (
 )
 from app.agents.critic import critic_after_comparator
 from app.infra.cost_tracker import mark_agent
+from app.config import settings
 
 
 def _relative_position(rank: int, total: int) -> str:
@@ -190,15 +191,32 @@ async def run_comparator_agent(
         except Exception as e:
             warnings.append(f"Criterion {criterion.criterion_id} comparison failed: {e}")
 
-    # Overall ranking by total_weighted_score (deterministic SQL-style sort)
+    # E3.d — overall ranking by coverage-normalised score (deterministic SQL-style sort),
+    # so a vendor that simply wasn't fully assessed isn't treated as if it scored 0 on the
+    # un-assessed criteria. A vendor assessed on less than the config coverage floor is still
+    # ranked, but flagged low_coverage_vendors so the decision agent routes it to human review
+    # (never silently trusts a sliver of evidence out-ranking a fully-assessed vendor).
     vendor_totals = {
-        vid: ev.total_weighted_score
+        vid: ev.coverage_normalised_score
         for vid, ev in evaluation_outputs.items()
         if vid in vendor_ids
     }
     overall_ranking = [
         vid for vid, _ in sorted(vendor_totals.items(), key=lambda x: x[1], reverse=True)
     ]
+
+    min_coverage = settings.platform.ranking.min_coverage_for_trust
+    low_coverage_vendors = [
+        vid
+        for vid, ev in evaluation_outputs.items()
+        if vid in vendor_ids and ev.coverage < min_coverage
+    ]
+    for vid in low_coverage_vendors:
+        warnings.append(
+            f"Vendor {vid} ranked on a coverage-normalised score but assessed on only "
+            f"{evaluation_outputs[vid].coverage:.0%} of the criterion weight "
+            f"(below the {min_coverage:.0%} trust floor) — flagged for human review."
+        )
 
     # Rank margins: score gap between each vendor and the one ranked above it
     rank_margins: dict[str, float] = {}
@@ -227,6 +245,7 @@ async def run_comparator_agent(
         overall_ranking=overall_ranking,
         ranking_confidence=avg_comparison_confidence,
         rank_margins=rank_margins,
+        low_coverage_vendors=low_coverage_vendors,
         comparison_warnings=warnings,
     )
 

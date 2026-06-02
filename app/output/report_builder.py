@@ -67,12 +67,21 @@ def _vendor_name(vid: str, names: dict[str, Any], fallback: str | None = None) -
     return names.get(vid) or fallback or vid
 
 
+def _rank_score(v: dict) -> float:
+    """E3.d — the score the rank is actually based on: the coverage-normalised score
+    (== total_score at full coverage). Headlining the absolute total_score while ranking
+    by the normalised one can show #1 scoring lower than #2 (a partially-assessed but
+    excellent vendor) and a negative delta. Falls back to total_score for older payloads."""
+    cns = v.get("coverage_normalised_score")
+    return float(cns if cns is not None else v.get("total_score", 0))
+
+
 def _podium(shortlisted: list[dict], names: dict) -> list[PodiumEntry]:
     ranked = sorted(shortlisted, key=lambda v: v.get("rank", 9_999))
     out: list[PodiumEntry] = []
     for i, v in enumerate(ranked):
         nxt = ranked[i + 1] if i + 1 < len(ranked) else None
-        delta = round(float(v.get("total_score", 0)) - float(nxt.get("total_score", 0)), 2) if nxt else 0.0
+        delta = round(_rank_score(v) - _rank_score(nxt), 2) if nxt else 0.0
         # tipping factor: the criterion where this vendor scored highest
         breakdown = v.get("criterion_breakdown", []) or []
         top = max(breakdown, key=lambda c: c.get("raw_score", 0), default=None)
@@ -82,7 +91,7 @@ def _podium(shortlisted: list[dict], names: dict) -> list[PodiumEntry]:
             rank=v.get("rank", i + 1),
             vendor_id=v.get("vendor_id", ""),
             vendor_name=_vendor_name(v.get("vendor_id", ""), names, v.get("vendor_name")),
-            total_score=round(float(v.get("total_score", 0)), 2),
+            total_score=round(_rank_score(v), 2),
             score_delta_vs_next=delta,
             tipping_factor=tipping,
         ))
@@ -169,14 +178,15 @@ def _pairwise(shortlisted: list[dict], narratives_by_vid: dict[str, dict], names
     wid, rid = w.get("vendor_id", ""), r.get("vendor_id", "")
     wname = _vendor_name(wid, names, w.get("vendor_name"))
     rname = _vendor_name(rid, names, r.get("vendor_name"))
-    gap = round(float(w.get("total_score", 0)) - float(r.get("total_score", 0)), 2)
+    w_score, r_score = round(_rank_score(w), 2), round(_rank_score(r), 2)
+    gap = round(w_score - r_score, 2)
 
     evidence = (_grounded_claims_of(narratives_by_vid.get(wid, {}))[:3]
                 + _grounded_claims_of(narratives_by_vid.get(rid, {}))[:3])
 
     narrative = (
         f"{wname} ranked above {rname} by {gap} points "
-        f"({w.get('total_score', 0)} vs {r.get('total_score', 0)}). "
+        f"({w_score} vs {r_score}). "
         f"{wname} was assessed as '{w.get('recommendation', '').replace('_', ' ')}' "
         f"versus '{r.get('recommendation', '').replace('_', ' ')}' for {rname}. "
         "Supporting evidence below is quoted verbatim from each vendor's submission."
@@ -221,7 +231,7 @@ def build_report_context(run: dict, org_name: str = "Meridian Financial Services
     if ranked:
         top = ranked[0]
         winner = (f"{_vendor_name(top.get('vendor_id', ''), names, top.get('vendor_name'))} "
-                  f"is recommended (score {round(float(top.get('total_score', 0)), 1)}/10, "
+                  f"is recommended (score {round(_rank_score(top), 1)}/10, "
                   f"{top.get('recommendation', '').replace('_', ' ')}).")
     else:
         winner = "No vendor met the requirements for shortlisting."
