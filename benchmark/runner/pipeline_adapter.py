@@ -141,9 +141,18 @@ def state_to_actual(
     decision = final_state.get("decision_output")
     rejected_ids = {_get(r, "vendor_id") for r in (_get(decision, "rejected_vendors", []) or [])}
 
+    # E3.b.2 — a vendor whose stage was critic-blocked / failed lands here (NOT in the
+    # *_output_objects), keyed by vendor_id. First entry per vendor = originating failure.
+    blocked: dict[str, dict] = {}
+    for f in (final_state.get("failed_vendors", []) or []):
+        vid = _get(f, "vendor_id")
+        if vid and vid not in blocked:
+            blocked[vid] = {"stage": _get(f, "stage", "") or "", "error": _get(f, "error", "") or ""}
+
     vendors: list[ActualVendor] = []
     for ev in golden.vendors:
         vid = ev.vendor_id
+        b = blocked.get(vid)
         vendors.append(ActualVendor(
             vendor_id=vid,
             source_text=vendor_source_texts.get(vid, ""),
@@ -152,6 +161,8 @@ def state_to_actual(
             criterion_scores=_criterion_scores(evaluation.get(vid)),
             compliance_decisions=_compliance(evaluation.get(vid)),
             rejected=vid in rejected_ids,
+            blocked_stage=(b["stage"] or "unknown") if b else None,
+            blocked_error=b["error"] if b else "",
         ))
 
     return ActualScenario(

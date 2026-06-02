@@ -42,6 +42,13 @@ class ActualVendor(BaseModel):
     criterion_scores: list[ActualCriterionScore] = Field(default_factory=list)
     compliance_decisions: list[ActualComplianceDecision] = Field(default_factory=list)
     rejected: bool = False
+    # E3.b.2 — explicit per-vendor failure signal (from final_state["failed_vendors"]).
+    # When set, the vendor's evaluation was critic-blocked / dropped / failed upstream, so
+    # its empty criterion_scores/compliance_decisions are NOT a real assessment. Metrics must
+    # surface this distinctly (a `blocked_vendors` count) rather than scoring empty == forced.
+    # None for a normally-assessed vendor — never inferred from empty lists.
+    blocked_stage: Optional[str] = None   # e.g. "extraction" | "evaluation" | "retrieval"
+    blocked_error: str = ""
     # For scoring-consistency (B4): repeat-run raw scores, {criterion_id: [score, ...]}.
     repeat_scores: dict = Field(default_factory=dict)
 

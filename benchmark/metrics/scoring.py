@@ -29,7 +29,25 @@ def _score_for(actual: ActualVendor, criterion_id: str):
     return None
 
 
+def _blocked_result(actual: ActualVendor) -> dict:
+    """E3.b.2 — a blocked/dropped vendor never produced an assessment, so its empty
+    scores must NOT be read as 'forced' or mandatory-wrong. Per the signed-off policy
+    (exclude + report separately), every quality rate is excluded (None / 0-denominator)
+    and the vendor is surfaced only via `blocked` / `blocked_stage`."""
+    return {
+        "band_agreement": None, "band_checked": 0,
+        "insufficient_expected": 0, "insufficient_correct": 0, "insufficient_rate": None,
+        "forced_when_insufficient": 0,
+        "mandatory_accuracy": None, "mandatory_checked": 0,
+        "rejection_correct": None,
+        "blocked": True, "blocked_stage": actual.blocked_stage,
+    }
+
+
 def scoring_quality(expected: ExpectedVendor, actual: ActualVendor) -> dict:
+    if actual.blocked_stage is not None:
+        return _blocked_result(actual)
+
     band_total = band_ok = 0
     insf_expected = insf_correct = 0
     forced_when_insufficient = 0       # golden=insufficient but system emitted a score
@@ -70,6 +88,7 @@ def scoring_quality(expected: ExpectedVendor, actual: ActualVendor) -> dict:
         "mandatory_accuracy": round(safe_div(mand_ok, mand_total), 4) if mand_total else None,
         "mandatory_checked": mand_total,
         "rejection_correct": rejection,
+        "blocked": False, "blocked_stage": None,
     }
 
 

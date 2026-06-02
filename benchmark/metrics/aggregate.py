@@ -46,6 +46,9 @@ class BenchmarkResult(BaseModel):
     scenarios: list[ScenarioResult] = Field(default_factory=list)
     aggregate: dict = Field(default_factory=dict)
     failures: list[str] = Field(default_factory=list)
+    # E3.b.2 — per-vendor blocks surfaced loudly, distinct from scenario-level failures.
+    # Each: {"scenario": str, "vendor_id": str, "stage": str}. Empty when no vendor blocked.
+    blocked_vendors: list[dict] = Field(default_factory=list)
 
 
 def evaluate_scenario(golden: ScenarioGolden, actual: ActualScenario) -> ScenarioResult:
@@ -99,9 +102,16 @@ def build_results(commit: str, generated_at: str, config: dict,
         "total_wall_clock_s": round(sum(s.runtime.get("wall_clock_s", 0.0) for s in scenarios), 3),
         "operational_failures": sum(
             1 for s in scenarios if s.runtime.get("errored") or s.runtime.get("blocked")),
+        "blocked_vendors": sum(1 for v in vrs if v.scoring.get("blocked")),
     }
+    blocked = [
+        {"scenario": s.scenario_id, "vendor_id": v.vendor_id,
+         "stage": v.scoring.get("blocked_stage") or "unknown"}
+        for s in scenarios for v in s.vendors if v.scoring.get("blocked")
+    ]
     return BenchmarkResult(commit=commit, generated_at=generated_at, config=config,
-                           scenarios=scenarios, aggregate=agg, failures=failures)
+                           scenarios=scenarios, aggregate=agg, failures=failures,
+                           blocked_vendors=blocked)
 
 
 def _ratio(numer: int, denom: int) -> Optional[float]:
@@ -142,6 +152,7 @@ def render_markdown(result: BenchmarkResult) -> str:
         f"| Total cost (USD) | {_fmt(a.get('total_cost_usd'))} |",
         f"| Total wall-clock (s) | {_fmt(a.get('total_wall_clock_s'))} |",
         f"| Operational failures | {_fmt(a.get('operational_failures'))} |",
+        f"| **Blocked vendors** | {_fmt(a.get('blocked_vendors'))} |",
         "",
         "## Per scenario",
         "",
@@ -162,6 +173,10 @@ def render_markdown(result: BenchmarkResult) -> str:
                 f"| {_fmt(s.runtime.get('total_cost_usd'))} "
                 f"| {_fmt(s.runtime.get('wall_clock_s'))} |"
             )
+    if result.blocked_vendors:
+        L += ["", "## Blocked vendors (excluded from quality rates — E3.b.2)", ""]
+        L += [f"- {b['scenario']}/{b['vendor_id']} — blocked at `{b['stage']}`"
+              for b in result.blocked_vendors]
     if result.failures:
         L += ["", "## Failures", ""] + [f"- {f}" for f in result.failures]
     return "\n".join(L) + "\n"

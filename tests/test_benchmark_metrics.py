@@ -212,3 +212,83 @@ def test_state_to_actual_maps_pipeline_state():
     assert v.retrieved_texts == ["a 15-minute response time"]
     assert v.compliance_decisions[0].decision == "insufficient_evidence"
     assert actual.node_timings_s == {"ingestion": 5.0} and actual.cost["total_cost_usd"] == 0.3
+    assert v.blocked_stage is None                     # not in failed_vendors → assessed
+
+
+# ── E3.b.2: blocked-vendor grader robustness ──────────────────────────────────
+
+def test_state_to_actual_marks_blocked_vendor_from_failed_vendors():
+    """G2 — a vendor in final_state['failed_vendors'] gets an explicit blocked_stage,
+    NOT inferred from its (empty) output objects."""
+    from benchmark.runner.pipeline_adapter import state_to_actual
+
+    golden = ScenarioGolden(
+        scenario_id="05_conflicting", title="Conflict", stresses=["conflicting"],
+        rfp_pdf="rfp.pdf", setup_json="setup.json",
+        vendors=[ExpectedVendor(vendor_id="epsilon", vendor_pdf="v.pdf")],
+    )
+    final_state = {
+        "extraction_output_objects": {},
+        "evaluation_output_objects": {},               # dropped → no eval output
+        "retrieval_output_objects": {},
+        "decision_output": None,
+        "failed_vendors": [{"vendor_id": "epsilon", "stage": "evaluation",
+                            "error": "critic_hard_block after 3 attempts", "ts": "2026-06-02T00:00:00Z"}],
+        "blocked": False, "blocked_agent": "", "error_message": "",
+    }
+    actual = state_to_actual(golden, final_state, {"epsilon": "doc"}, {}, {})
+    v = actual.vendors[0]
+    assert v.blocked_stage == "evaluation"
+    assert "critic_hard_block" in v.blocked_error
+    assert v.criterion_scores == [] and v.compliance_decisions == []
+
+
+def test_scoring_excludes_blocked_vendor_distinctly():
+    """H1/H2 — a blocked vendor (empty scores + blocked_stage) is NOT scored as forced /
+    mandatory-wrong; the ONLY difference from an assessed-insufficient vendor is blocked_stage."""
+    exp = ExpectedVendor(
+        vendor_id="epsilon", vendor_pdf="v.pdf",
+        mandatory=[ExpectedMandatory(check_id="c1", outcome="pass")],
+        criteria=[ExpectedCriterion(criterion_id="k", expectation="insufficient")],
+        expected_rejected=False,
+    )
+    # Identical empty result, differing ONLY by blocked_stage.
+    blocked = ActualVendor(vendor_id="epsilon", blocked_stage="evaluation")
+    dropped_silently = ActualVendor(vendor_id="epsilon")   # empty but NOT flagged blocked
+
+    sb = scoring_quality(exp, blocked)
+    sd = scoring_quality(exp, dropped_silently)
+
+    # Blocked: excluded from every quality rate, surfaced via `blocked`.
+    assert sb["blocked"] is True and sb["blocked_stage"] == "evaluation"
+    assert sb["forced_when_insufficient"] == 0
+    assert sb["insufficient_expected"] == 0 and sb["mandatory_checked"] == 0
+    assert sb["mandatory_accuracy"] is None and sb["rejection_correct"] is None
+    # The two cases are provably distinguishable (the whole point of E3.b.2):
+    assert sd["blocked"] is False
+    assert sd["forced_when_insufficient"] == 1          # silent-empty WAS mis-scored as forced
+    assert sb["forced_when_insufficient"] != sd["forced_when_insufficient"]
+
+
+def test_aggregate_surfaces_blocked_vendors():
+    """I1 — build_results counts blocked_vendors and lists them; render_markdown shows the section."""
+    golden = ScenarioGolden(
+        scenario_id="05_conflicting", title="Conflict", stresses=["conflicting"],
+        rfp_pdf="rfp.pdf", setup_json="setup.json",
+        vendors=[ExpectedVendor(vendor_id="epsilon", vendor_pdf="v.pdf",
+                                criteria=[ExpectedCriterion(criterion_id="k", expectation="insufficient")])],
+    )
+    actual = ActualScenario(
+        scenario_id="05_conflicting", node_timings_s={"x": 1.0}, cost={"total_cost_usd": 0.05},
+        vendors=[ActualVendor(vendor_id="epsilon", blocked_stage="evaluation",
+                              blocked_error="critic_hard_block")],
+    )
+    sr = evaluate_scenario(golden, actual)
+    res = build_results("abc123", "2026-06-02T00:00:00Z", {"model": "test"}, [sr], [])
+    assert res.aggregate["blocked_vendors"] == 1
+    assert res.blocked_vendors == [{"scenario": "05_conflicting", "vendor_id": "epsilon",
+                                    "stage": "evaluation"}]
+    # forced count must NOT be inflated by the blocked vendor.
+    assert res.aggregate["forced_when_insufficient_total"] == 0
+    md = render_markdown(res)
+    assert "Blocked vendors" in md and "epsilon" in md and "blocked at `evaluation`" in md
