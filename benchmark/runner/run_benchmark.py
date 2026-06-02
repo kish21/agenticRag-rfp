@@ -51,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scenario", help="run only this scenario id (default: all)")
     ap.add_argument("--repeats", type=int, default=1,
                     help="re-runs per scenario for scoring-consistency (default 1)")
+    ap.add_argument("--gate", action="store_true",
+                    help="E3.e: after the run, check the aggregate against benchmark/gates.yaml "
+                         "and exit non-zero on any regression (default: report-only, no gate)")
     args = ap.parse_args(argv)
 
     dirs = sorted(d for d in SCENARIOS.iterdir() if d.is_dir())
@@ -95,7 +98,15 @@ def main(argv: list[str] | None = None) -> int:
         for b in result.blocked_vendors:
             print(f"    - {b['scenario']}/{b['vendor_id']} @ {b['stage']}")
 
-    return 1 if failures else 0
+    gate_failed = False
+    if args.gate:                                      # E3.e — opt-in regression gate
+        from benchmark.metrics.gates import check_gates, load_gates, render_gate_table
+        report = check_gates(result.aggregate, load_gates())
+        print(render_gate_table(report))
+        gate_failed = not report.passed
+
+    # Exit non-zero on an operational failure (C3) OR a tripped gate (E3.e).
+    return 1 if (failures or gate_failed) else 0
 
 
 if __name__ == "__main__":

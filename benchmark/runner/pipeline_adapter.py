@@ -176,6 +176,20 @@ def state_to_actual(
     )
 
 
+def _seed_org_settings(org_id: str, reranker_provider: str) -> None:
+    """Write an org_settings row for the throw-away benchmark org so retrieval
+    honours the configured reranker (E3.e).
+
+    Reuses the one org_settings write path (`upsert_org_settings`) with
+    `apply_preset=False`: the tier preset hardcodes reranker_provider='bge' and
+    would otherwise re-drop our value. Scoped to the benchmark org only —
+    real-tenant precedence (preset wins) is untouched.
+    """
+    from app.domain.org_settings import upsert_org_settings
+    upsert_org_settings(org_id, updated_by="benchmark", apply_preset=False,
+                        reranker_provider=reranker_provider)
+
+
 # ── Impure: run one scenario through the real pipeline ────────────────────────
 
 def run_scenario(scenario_dir: Path, golden: ScenarioGolden, *, repeats: int = 1) -> ActualScenario:
@@ -225,6 +239,12 @@ def run_scenario(scenario_dir: Path, golden: ScenarioGolden, *, repeats: int = 1
     try:
         with org_context(org_id):
             save_evaluation_setup(setup.model_dump(mode="json"), org_id=org_id)
+            # E3.e — make the benchmark honour RERANKER_PROVIDER from .env. The
+            # throw-away org otherwise has no org_settings row, so retrieval reads
+            # the product default (`bge`) and the explicit provider= argument wins
+            # over the global setting — silently measuring un-reranked retrieval on
+            # a no-HF-egress box. Seed this org's setting from settings.reranker_provider.
+            _seed_org_settings(org_id, settings.reranker_provider)
             engine = get_engine()
             with engine.begin() as conn:
                 conn.execute(sa.text("""
