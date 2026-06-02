@@ -12,6 +12,14 @@ jobs:
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    # gitleaks-action@v2 lists the PR's commits via the GitHub API to scope its
+    # scan range; on pull_request events that needs pull-requests:read. Without
+    # an explicit block the job inherits the repo default (contents:read only)
+    # and the action crashes on a 403 — a red "secret scan" with no real leak.
+    # Least-privilege: only the two scopes the action actually uses.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
