@@ -146,6 +146,16 @@ governance:
     acceptable: 4.0
     marginal: 0.0
 
+# E3.d — coverage-normalised ranking. Vendors are ranked by their coverage-normalised
+# score (quality over the criterion-weight actually assessed), so a vendor that simply
+# wasn't fully assessed is not treated as if it scored 0 on the un-assessed criteria.
+# A vendor assessed on LESS than this fraction of total criterion weight is still ranked,
+# but flagged 'low coverage — human review', never silently trusted (avoids a sliver of
+# evidence out-ranking a fully-assessed vendor). Domain-agnostic: coverage is computed
+# from generic criterion weights only.
+ranking:
+  min_coverage_for_trust: 0.5
+
 hyde_templates:
   vendor_response: |
     Write a 2-3 sentence passage from a vendor response document

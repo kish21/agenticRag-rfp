@@ -188,7 +188,10 @@ async def run_decision_agent(
     review_reasons = []
     for rank, (vendor_id, evaluation) in enumerate(shortlisted_sorted, start=1):
         criterion_scores = evaluation.criterion_scores
-        rec = _recommendation(evaluation.total_weighted_score)
+        # E3.d — recommend from the coverage-normalised score (quality over what was
+        # actually assessed) so a partially-assessed vendor isn't mislabelled 'marginal'
+        # for criteria it was never scored on. Equals total_weighted_score at full coverage.
+        rec = _recommendation(evaluation.coverage_normalised_score)
 
         # Surface unresolved insufficient_evidence decisions on shortlisted vendors
         unresolved = [
@@ -209,8 +212,18 @@ async def run_decision_agent(
         if insufficient_criteria:
             review_reasons.append(
                 f"Vendor {vendor_id} has criteria with insufficient evidence (not scored on merit): "
-                f"{insufficient_criteria}. These contribute 0 to the total/recommendation pending "
-                "coverage-normalised ranking (BACKLOG E3.d) — human review recommended."
+                f"{insufficient_criteria}. Coverage {evaluation.coverage:.0%}; rank + recommendation "
+                f"use the coverage-normalised score {evaluation.coverage_normalised_score:.2f} "
+                f"(absolute total {evaluation.total_weighted_score:.2f}) — human review recommended."
+            )
+
+        # E3.d — a vendor ranked despite low coverage is trusted only with a human in the
+        # loop; the comparator flags these below the configured coverage floor.
+        if vendor_id in comparator_output.low_coverage_vendors:
+            review_reasons.append(
+                f"Vendor {vendor_id} ranked on a coverage-normalised score but assessed on only "
+                f"{evaluation.coverage:.0%} of the criterion weight — below the trust floor. "
+                "Rank is not reliable without human review."
             )
 
         shortlisted.append(
@@ -219,6 +232,8 @@ async def run_decision_agent(
                 vendor_name=vendor_id,
                 rank=rank,
                 total_score=evaluation.total_weighted_score,
+                coverage=evaluation.coverage,
+                coverage_normalised_score=evaluation.coverage_normalised_score,
                 score_confidence=evaluation.score_confidence,
                 criterion_breakdown=criterion_scores,
                 recommendation=rec,

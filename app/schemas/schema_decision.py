@@ -18,6 +18,11 @@ class ShortlistedVendor(BaseModel):
     vendor_name: str
     rank: int
     total_score: float
+    # E3.d — coverage of the assessment and the coverage-normalised score the rank +
+    # recommendation are derived from. total_score stays the absolute 0–10 value for
+    # backward-compat; coverage < platform.ranking.min_coverage_for_trust drives a review flag.
+    coverage: float = 1.0
+    coverage_normalised_score: float = 0.0
     score_confidence: float
     criterion_breakdown: List[CriterionScore]
     recommendation: Literal[

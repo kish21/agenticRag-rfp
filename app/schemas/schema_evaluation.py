@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal, List, Dict
 
 from .schema_enums import ComplianceStatus, DecisionBasis
@@ -37,8 +37,28 @@ class EvaluationOutput(BaseModel):
     criterion_scores: List[CriterionScore]
     overall_compliance: Literal["pass", "fail", "review_required"]
     total_weighted_score: float
+    # E3.d — coverage-normalised ranking. `coverage` is the fraction of total criterion
+    # weight actually assessed (criteria with insufficient_evidence are excluded);
+    # `coverage_normalised_score` projects the observed quality over that assessed weight
+    # onto 0–10 (== total_weighted_score when coverage == 1.0). Ranking/recommendation
+    # use the normalised score so a vendor that simply wasn't fully assessed is not
+    # treated as if it scored 0 on the un-assessed criteria. Defaults keep older payloads
+    # valid: coverage 1.0 + normalised falls back to total_weighted_score at use-site.
+    coverage: float = Field(default=1.0, ge=0.0, le=1.0)
+    coverage_normalised_score: float = 0.0
     score_confidence: float = Field(ge=0.0, le=1.0)
     evaluation_warnings: List[str] = []
+
+    @model_validator(mode="after")
+    def _derive_normalised_at_full_coverage(self) -> "EvaluationOutput":
+        # Back-compat: at full coverage the normalised score IS the absolute total (maths:
+        # total / 1.0). Older payloads / fixtures that set only total_weighted_score and
+        # leave coverage at its 1.0 default therefore rank exactly as before, instead of
+        # defaulting normalised to 0.0 and being mislabelled 'marginal' / ranked last.
+        # The evaluation agent sets both explicitly; this only fills the unset default.
+        if self.coverage >= 1.0 and self.coverage_normalised_score == 0.0:
+            object.__setattr__(self, "coverage_normalised_score", self.total_weighted_score)
+        return self
 
 
 class VendorCriterionComparison(BaseModel):
@@ -68,4 +88,7 @@ class ComparatorOutput(BaseModel):
     overall_ranking: List[str]
     ranking_confidence: float
     rank_margins: Dict[str, float]
+    # E3.d — vendors ranked but assessed on less than platform.ranking.min_coverage_for_trust
+    # of the criterion weight; surfaced so the decision agent flags them for human review.
+    low_coverage_vendors: List[str] = []
     comparison_warnings: List[str] = []
