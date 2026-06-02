@@ -89,6 +89,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  grounding_accuracy={result.aggregate.get('grounding_accuracy')}  "
           f"fabricated={result.aggregate.get('fabricated_citations_total')}  "
           f"cost=${result.aggregate.get('total_cost_usd')}  failures={len(failures)}")
+    if result.blocked_vendors:                         # E3.b.2 — surface loudly (C3)
+        print(f"  [BLOCKED] {len(result.blocked_vendors)} vendor(s) dropped pre-assessment "
+              "(excluded from quality rates):")
+        for b in result.blocked_vendors:
+            print(f"    - {b['scenario']}/{b['vendor_id']} @ {b['stage']}")
 
     return 1 if failures else 0
 

@@ -93,6 +93,15 @@ honest threshold before measuring. The runner therefore reports numbers and only
 
 ---
 
+## Follow-ups (built after the baseline)
+
+- **E3.b.2 — grader robustness** ([`E3_B2_GRADER_ROBUSTNESS.md`](E3_B2_GRADER_ROBUSTNESS.md)):
+  a critic-blocked / dropped vendor is now represented distinctly (`blocked_stage`)
+  and **excluded** from the quality-rate denominators (reported as a separate
+  `blocked_vendors` count), so a future HARD-block can never be silently
+  mis-scored as a forced/insufficient/mandatory failure. Protects benchmark
+  integrity and is a prerequisite for the E3.e regression gate.
+
 ## Explicitly OUT of scope for E3 (so scope can't silently creep)
 
 - Scanned/OCR scenario — **deferred (signed off 2026-05-31)**; depends on the
