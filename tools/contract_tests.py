@@ -275,7 +275,7 @@ def c_fact_store_linkage():
     )
     for model in [ExtractedCertification, ExtractedInsurance,
                   ExtractedSLA, ExtractedProject, ExtractedPricing]:
-        fields = model.__fields__
+        fields = model.model_fields  # Pydantic v2 (was deprecated __fields__)
         assert "source_chunk_id" in fields, \
             f"{model.__name__} missing source_chunk_id"
         assert "grounding_quote" in fields, \
