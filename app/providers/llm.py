@@ -155,8 +155,9 @@ async def call_llm(
     Cache contract (Phase 3):
       • If LLM_CACHE_ENABLED=true (default) AND use_cache=True, the response
         is looked up in llm_response_cache before the provider is called.
-        Cache hit → return cached + increment hit_count. Miss → dispatch
-        normally, then INSERT ... ON CONFLICT DO NOTHING.
+        Cache hit → return cached + record the hit in RunCostAccumulator
+        (the read itself is write-free). Miss → dispatch normally, then
+        INSERT ... ON CONFLICT DO NOTHING.
       • use_cache=False → skip both read and write (still calls provider).
       • cache_bust="X" → include X in the key so callers can force a fresh
         sample under a new cache slot (e.g., critic retries, model debug).

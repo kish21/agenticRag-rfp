@@ -281,3 +281,35 @@ def test_call_llm_hits_cache_without_provider_call(cleanup_cache):
             result = asyncio.run(call_llm(messages=msgs))
 
     assert result == "PRECACHED"
+
+
+# ── Audit finding #2 — read path must NOT write (no write-on-read) ────────
+
+
+def test_lookup_hit_does_not_write(cleanup_cache):
+    """A cache HIT is read-only: lookup() returns the response but must not
+    bump hit_count / last_hit_at (the old UPDATE-on-read antipattern). Cache-hit
+    metrics live in RunCostAccumulator, not these columns."""
+    k = _key(_msgs(f"readonly-{uuid.uuid4().hex}"))
+    cleanup_cache(k)
+    assert llm_cache.store(
+        cache_key=k, provider="openai", model="gpt-4o",
+        response="ro-response", prompt_tokens=7, completion_tokens=3,
+    ) is True
+
+    # Three hits — would have incremented hit_count to 3 under the old code.
+    for _ in range(3):
+        hit = llm_cache.lookup(k)
+        assert hit is not None and hit.response == "ro-response"
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                "SELECT hit_count, last_hit_at FROM llm_response_cache "
+                "WHERE cache_key = :k"
+            ),
+            {"k": k},
+        ).fetchone()
+    assert row.hit_count == 0, "lookup() must not write hit_count on a read"
+    assert row.last_hit_at is None, "lookup() must not write last_hit_at on a read"

@@ -94,19 +94,26 @@ def build_cache_key(
 
 
 def lookup(cache_key: str) -> Optional[CachedResponse]:
-    """Returns the cached response if present + increments hit_count + last_hit_at."""
+    """Returns the cached response if present, else None.
+
+    Read-only by design: a cache HIT must never write. The previous
+    implementation ran an ``UPDATE … hit_count+1 … RETURNING`` on every hit,
+    turning each read into a WAL-logged, row-locking write (a write-on-read
+    bottleneck under parallel evaluations). Cache-hit metrics are recorded
+    independently by ``RunCostAccumulator`` (``record_cache_event`` in
+    ``call_llm``), so the ``hit_count``/``last_hit_at`` columns are not read
+    anywhere — they are kept for back-compat but no longer maintained here.
+    """
     from app.db.fact_store import get_engine  # local import to keep startup light
 
     engine = get_engine()
-    with engine.begin() as conn:
+    with engine.connect() as conn:
         row = conn.execute(
             sa.text(
                 """
-                UPDATE llm_response_cache
-                SET hit_count = hit_count + 1,
-                    last_hit_at = now()
+                SELECT response, provider, model, prompt_tokens, completion_tokens
+                FROM llm_response_cache
                 WHERE cache_key = :k
-                RETURNING response, provider, model, prompt_tokens, completion_tokens
                 """
             ),
             {"k": cache_key},
