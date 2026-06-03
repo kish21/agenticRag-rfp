@@ -468,6 +468,27 @@ def critic_after_explanation(
             "Report contains some unverified claims. Review before sending."
         ))
 
+    # P2.26 — a claim-free report (no narrative made any PDF claim) computes a
+    # *vacuous* grounding_completeness of 1.0: there was nothing to ground, which
+    # is NOT the same as "100% of claims verified". Such a report ships with zero
+    # PDF-grounded content (e.g. every vendor rejected/conflicted, the story
+    # carried entirely by trusted system_facts) yet sails through the numeric
+    # honesty gate above. Surface it as a SOFT flag so a human still reviews it
+    # rather than letting the vacuous 1.0 pass silently. (Deferred import:
+    # explanation imports critic at module load.)
+    from app.agents.explanation import compute_grounding
+    _, _total_claims, _ = compute_grounding(output.vendor_narratives)
+    if _total_claims == 0:
+        flags.append(_make_flag(
+            CriticSeverity.SOFT, "explanation_agent",
+            "claim_free_report",
+            "Report contains no PDF-grounded claims — grounding_completeness is "
+            "vacuously 1.0 (nothing to ground, not 100% verified)",
+            f"total_claims=0, grounding_completeness={output.grounding_completeness}",
+            "Report content rests entirely on system determinations "
+            "(rejections/conflicts). Human review recommended before sending."
+        ))
+
     for narrative in output.vendor_narratives:
         _system_facts = getattr(narrative, "system_facts", []) or []
         if (len(narrative.grounded_claims) == 0 and narrative.ungrounded_claims_removed == 0
