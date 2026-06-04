@@ -60,6 +60,13 @@ def _defaults_for(org_id: str) -> OrgSettings:
     preset = cfg.product.presets.get(tier) or cfg.product.presets["balanced"]
     d.update(preset.config)
     d["quality_tier"] = tier
+    # The reranker backend is a DEPLOYMENT choice (which engine: local-HF bge /
+    # GPU modal / API cohere / none), not a product-quality tier choice. Source it
+    # from the operator's .env (RERANKER_PROVIDER) so an air-gapped operator who
+    # sets =modal or =none is honoured. The preset no longer pins it, so this is
+    # the single authoritative default surface for a defaulted org. An org that
+    # explicitly picks a reranker (its own org_settings row) still wins.
+    d["reranker_provider"] = cfg.reranker_provider
     return OrgSettings(org_id=org_id, **d)
 
 

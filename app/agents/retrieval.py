@@ -215,11 +215,14 @@ async def run_retrieval_agent(
         {"text": r["text"], "score": r["score"], "payload": r["payload"]}
         for r in raw_results
     ]
+    rerank_warnings: list[str] = []
     reranked = await asyncio.to_thread(
         rerank_candidates,
         query, candidates, top_n=n_final,
         provider=org_settings.reranker_provider if org_settings else None,
+        warnings=rerank_warnings,
     )
+    reranking_degraded = bool(rerank_warnings)
 
     # Step 4: Lost-in-middle reorder (best first, second-best last)
     # Context compression is intentionally skipped: compressing chunk text
@@ -253,6 +256,11 @@ async def run_retrieval_agent(
         )
 
     avg_score = sum(c.final_score for c in chunks) / len(chunks) if chunks else 0.0
+    confidence = min(1.0, avg_score)
+    if reranking_degraded:
+        # Fail-open but LOUD: reranking fell back to vector order, so lower the
+        # confidence to surface the degradation downstream (config-driven factor).
+        confidence *= settings.platform.retrieval.rerank_degraded_confidence_factor
 
     mode = "hybrid" if use_hybrid_search else "dense"
     if hyde_used:
@@ -267,9 +275,10 @@ async def run_retrieval_agent(
         retrieval_strategy=retrieval_strategy,
         chunks=chunks,
         total_candidates_before_rerank=len(raw_results),
-        confidence=round(min(1.0, avg_score), 3),
+        confidence=round(confidence, 3),
         empty_retrieval=len(chunks) == 0,
-        warnings=[],
+        reranking_degraded=reranking_degraded,
+        warnings=rerank_warnings,
     )
 
     log_retrieval(

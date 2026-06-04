@@ -267,11 +267,21 @@ async def retrieval_per_vendor(state: PipelineState) -> dict:
         async with vendor_slot():
             seen: set = set()
             merged_chunks = []
+            # #212: aggregate the fail-open-but-loud reranker-degradation signal
+            # across per-query retrievals so it survives into the combined output
+            # the rest of the graph consumes (otherwise it is silently dropped).
+            reranking_degraded = False
+            merged_warnings: list[str] = []
             for query in queries:
                 ret_out, ret_critic = await run_retrieval_agent(
                     query=query, vendor_id=vid, org_id=org_id, rfp_id=rfp_id,
                     is_mandatory_check=(query in mandatory_names),
                     org_settings=org_settings)
+                if ret_out.reranking_degraded:
+                    reranking_degraded = True
+                for w in ret_out.warnings:
+                    if w not in merged_warnings:
+                        merged_warnings.append(w)
                 if ret_critic.overall_verdict.value != "approved":
                     rfp_logger.dev(DevLevel.INFO, agent,
                                    f"Vendor {vid} query '{query[:60]}' "
@@ -285,6 +295,14 @@ async def retrieval_per_vendor(state: PipelineState) -> dict:
                         seen.add(chunk.chunk_id)
                         merged_chunks.append(chunk)
 
+            combined_confidence = (
+                sum(c.final_score for c in merged_chunks) / len(merged_chunks)
+                if merged_chunks else 0.0
+            )
+            if reranking_degraded:
+                combined_confidence *= (
+                    settings.platform.retrieval.rerank_degraded_confidence_factor
+                )
             combined = RetrievalOutput(
                 query_id=str(uuid.uuid4()),
                 original_query="; ".join(queries[:3]) + ("..." if len(queries) > 3 else ""),
@@ -293,11 +311,10 @@ async def retrieval_per_vendor(state: PipelineState) -> dict:
                 retrieval_strategy="multi-query-merge",
                 chunks=merged_chunks,
                 total_candidates_before_rerank=len(merged_chunks),
-                confidence=round(
-                    sum(c.final_score for c in merged_chunks) / len(merged_chunks), 3
-                ) if merged_chunks else 0.0,
+                confidence=round(min(1.0, combined_confidence), 3),
                 empty_retrieval=(len(merged_chunks) == 0),
-                warnings=[],
+                reranking_degraded=reranking_degraded,
+                warnings=merged_warnings,
             )
 
             # Per-vendor critic — restored after Phase 4 regression review.

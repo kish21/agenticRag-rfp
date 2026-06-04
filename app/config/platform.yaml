@@ -35,6 +35,10 @@ retrieval:
   sparse_vector_name: "sparse"
   fusion_method: "rrf"
   rrf_k: 60
+  # Multiplier applied to retrieval confidence when the reranker failed and we
+  # fell back to vector-score order (issue #212 fail-open-but-loud). <1.0 makes
+  # the degradation visible downstream (e.g. the critic's low-confidence gate).
+  rerank_degraded_confidence_factor: 0.8
 
 llm:
   primary_model: "gpt-4o"

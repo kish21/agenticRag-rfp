@@ -60,6 +60,9 @@ class PlatformRetrieval(BaseModel):
     sparse_vector_name: str
     fusion_method: str
     rrf_k: int
+    # issue #212 — confidence multiplier when the reranker fails and we fall back
+    # to vector order (fail-open-but-loud). Defaulted so older configs still load.
+    rerank_degraded_confidence_factor: float = 0.8
 
 class PlatformLLM(BaseModel):
     primary_model: str

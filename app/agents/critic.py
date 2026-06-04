@@ -168,7 +168,24 @@ def critic_after_retrieval(
             "mark as insufficient_evidence."
         ))
 
-    if not output.empty_retrieval and output.confidence < 0.4:
+    if output.reranking_degraded:
+        flags.append(_make_flag(
+            CriticSeverity.SOFT, "retrieval_agent",
+            "reranking_degraded",
+            "Reranker was unavailable — retrieval fell back to vector-score order, "
+            "which lowers result precision (common cause: air-gapped box with no "
+            "model access). Results are usable but not reranked.",
+            f"warnings={output.warnings}",
+            "Check RERANKER_PROVIDER / model availability for this deployment. "
+            "Set RERANKER_PROVIDER=modal (GPU, no local HF egress) or =none if "
+            "reranking is intentionally disabled."
+        ))
+
+    # When reranking degraded, the confidence was deliberately penalised (#212)
+    # and the reranking_degraded flag above already explains the low number — so
+    # skip this flag to avoid misattributing the cause to "vendor doesn't address
+    # the criterion".
+    if not output.empty_retrieval and not output.reranking_degraded and output.confidence < 0.4:
         flags.append(_make_flag(
             CriticSeverity.SOFT, "retrieval_agent",
             "low_retrieval_confidence",

@@ -35,7 +35,12 @@ presets:
       use_reranking: true
       use_query_rewriting: true
       use_hybrid_search: true
-      reranker_provider: "bge"
+      # NOTE: the reranker BACKEND (bge/modal/cohere/none) is deliberately NOT set
+      # here. It is a deployment concern, not a quality-tier one, so it is sourced
+      # from the operator's .env RERANKER_PROVIDER in domain/org_settings._defaults_for.
+      # Pinning it in the preset previously made .env dead config and forced a local
+      # HuggingFace download in air-gapped VPCs (silent degrade to vector order). See
+      # docs/dev/E212_RERANKER_AIRGAPPED_DEFAULT.md.
       retrieval_top_k: 10
       rerank_top_n: 5
       mandatory_check_use_llm_verify: true

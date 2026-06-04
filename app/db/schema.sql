@@ -565,7 +565,7 @@ CREATE TABLE IF NOT EXISTS org_settings (
     use_reranking                   BOOLEAN     NOT NULL DEFAULT TRUE,
     use_query_rewriting             BOOLEAN     NOT NULL DEFAULT TRUE,
     use_hybrid_search               BOOLEAN     NOT NULL DEFAULT FALSE,
-    reranker_provider               TEXT        NOT NULL DEFAULT 'cohere',
+    reranker_provider               TEXT        NOT NULL DEFAULT 'bge',
     retrieval_top_k                 INTEGER     NOT NULL DEFAULT 5,
     rerank_top_n                    INTEGER     NOT NULL DEFAULT 3,
     mandatory_check_use_llm_verify  BOOLEAN     NOT NULL DEFAULT TRUE,
