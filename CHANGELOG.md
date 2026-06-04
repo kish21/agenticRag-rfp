@@ -37,8 +37,16 @@ Until the first tagged release, all changes are tracked under **[Unreleased]**.
 
 - Remediated dependency CVEs surfaced by the new pip-audit gate: pypdf 5.4.0→6.11.0,
   python-multipart 0.0.18→0.0.27, weasyprint 63.1→68.0, python-jose 3.3.0→3.4.0,
-  python-dotenv 1.1.0→1.2.2, pinned starlette 1.0.1 (instrumentator 8.0.0). Five
-  unfixable-in-context CVEs are ignored with written justification in CI. pytest 8→9 and a
-  python-jose→PyJWT migration are tracked as follow-ups.
+  python-dotenv 1.1.0→1.2.2, pinned starlette 1.0.1 (instrumentator 8.0.0).
+- Moved `sentence-transformers` (local BGE reranker + local embeddings) to an optional
+  `requirements-local.txt`, keeping `transformers`/`torch` out of the default/prod image —
+  this **removes both transformers CVEs entirely** (no ignore needed) and slims the image.
+  The `bge`/`local` providers now fail loud with an install hint if selected without it;
+  the default `modal`+`openai` path is unaffected.
+
+### Changed
+
+- The default install no longer pulls heavy local ML libs. For air-gapped/local model
+  inference run `pip install -r requirements.txt -r requirements-local.txt`.
 
 [Unreleased]: https://github.com/kish21/agenticRag-rfp/commits/master

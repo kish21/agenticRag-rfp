@@ -27,8 +27,11 @@ qdrant-client==1.17.1       # updated: llama-index-vector-stores-qdrant 0.10.0 r
 
 # ── Reranking ─────────────────────────────────────────────
 cohere==5.21.1              # use cohere.ClientV2() not cohere.Client()
-sentence-transformers==4.1.0  # CrossEncoder API updated in 4.x
-# ColBERT reranking: from sentence_transformers import CrossEncoder
+# Default reranking runs on Modal (RERANKER_PROVIDER=modal) or Cohere — neither needs a
+# heavy local ML lib. The local BGE reranker (RERANKER_PROVIDER=bge) and local embeddings
+# (EMBEDDING_PROVIDER=local) need sentence-transformers + torch; those live in the OPTIONAL
+# requirements-local.txt (kept out of the prod image so transformers/torch CVEs don't ride
+# along an unused path). Install for air-gapped/local mode: pip install -r requirements-local.txt
 
 # ── BM25 keyword search (sparse retrieval) ───────────────
 # fastembed produces real BM25 sparse vectors (Qdrant/bm25 model: proper

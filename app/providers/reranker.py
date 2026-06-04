@@ -31,7 +31,20 @@ _colbert_model = None
 def _get_bge_model():
     global _bge_model
     if _bge_model is None:
-        from sentence_transformers import CrossEncoder
+        try:
+            from sentence_transformers import CrossEncoder
+        except ImportError as e:
+            # sentence-transformers (+ transformers/torch) lives in the OPTIONAL
+            # requirements-local.txt, not the prod image. Selecting the LOCAL bge
+            # backend without it is a configuration error — fail loudly rather than
+            # silently downgrading to no-rerank. Default deployments use
+            # RERANKER_PROVIDER=modal (BGE on Modal) and never reach here.
+            raise RuntimeError(
+                "RERANKER_PROVIDER=bge (local) requires the 'sentence-transformers' "
+                "package, which is not installed. Either install it "
+                "(pip install -r requirements-local.txt) or use RERANKER_PROVIDER=modal "
+                "(BGE on Modal, no local ML deps) or =cohere."
+            ) from e
         _bge_model = CrossEncoder(
             settings.platform.retrieval.reranker_models["bge"],
             max_length=settings.platform.ingestion.max_chunk_chars_for_rerank

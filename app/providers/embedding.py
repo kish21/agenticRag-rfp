@@ -135,7 +135,19 @@ def _embed_azure(texts: list[str]) -> list[list[float]]:
 def _get_local_model():
     global _local_model
     if _local_model is None:
-        from sentence_transformers import SentenceTransformer
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as e:
+            # sentence-transformers (+ transformers/torch) is in the OPTIONAL
+            # requirements-local.txt, not the prod image. Selecting EMBEDDING_PROVIDER=local
+            # without it is a configuration error — fail loudly. Default deployments use
+            # EMBEDDING_PROVIDER=openai (or =modal) and never reach here.
+            raise RuntimeError(
+                "EMBEDDING_PROVIDER=local requires the 'sentence-transformers' package, "
+                "which is not installed. Either install it "
+                "(pip install -r requirements-local.txt) or use EMBEDDING_PROVIDER=openai "
+                "or =modal."
+            ) from e
         _local_model = SentenceTransformer(
             settings.embedding_model_local,
             trust_remote_code=True,

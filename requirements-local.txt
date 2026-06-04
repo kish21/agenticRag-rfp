@@ -1,0 +1,11 @@
+# ── OPTIONAL: local / air-gapped ML providers ─────────────────────────────────
+# Only needed when running the heavy ML models ON THIS BOX instead of on Modal:
+#   RERANKER_PROVIDER=bge     → local BGE CrossEncoder   (app/providers/reranker.py)
+#   EMBEDDING_PROVIDER=local  → local SentenceTransformer (app/providers/embedding.py)
+#
+# Kept out of requirements.txt (and the prod image) on purpose: sentence-transformers
+# pulls transformers + torch, which carry CVEs that have no in-context fix. The default
+# deployment uses RERANKER_PROVIDER=modal + EMBEDDING_PROVIDER=openai and never loads these.
+#
+# Install:  pip install -r requirements.txt -r requirements-local.txt
+sentence-transformers==4.1.0  # provides CrossEncoder (BGE) + SentenceTransformer (local embeddings)
