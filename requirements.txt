@@ -5,7 +5,7 @@
 # Verify:  pip check  (must return no errors)
 
 # ── LLM and agent orchestration ──────────────────────────
-openai==2.33.0              # used by OpenAI + OpenRouter providers
+openai==2.41.0              # used by OpenAI + OpenRouter providers
 anthropic==0.97.0           # updated: langchain-anthropic 1.4.2 requires >=0.96.0
 langchain==1.2.16           # langchain 1.x — new import paths vs 0.x
 langchain-openai==1.2.1     # updated: 1.x required for langchain-core 1.x
