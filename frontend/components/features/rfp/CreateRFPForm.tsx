@@ -183,7 +183,7 @@ export function CreateRFPForm() {
             maxWidth: 520,
           }}
         >
-          Define the rubric, set the deadline, invite the vendors.
+          Define the score guide, set the deadline, invite the vendors.
         </p>
       </div>
 

@@ -31,6 +31,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
 
+  # ── Job 0b: Dependency vulnerability scan (SC-002, #120) ─────────────────
+  # Scans the pinned Python dependencies for known CVEs on every push/PR via
+  # pip-audit (PyPA's Advisory Database). Fail-closed: any known vulnerability
+  # fails the job, matching the project's security baseline. If a transitive
+  # vuln with no available fix appears, triage it and add an explicit
+  # `--ignore-vuln GHSA-xxxx` to `extra-args` below (config in source, never a
+  # silent skip). Least-privilege token: this job only reads code.
+  dependency-audit:
+    name: Dependency CVE scan (pip-audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: pip-audit (requirements + dev requirements)
+        uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: requirements.txt requirements-dev.txt
+
   # ── Job 1: Frontend build ────────────────────────────────────────────────
   frontend-build:
     name: Frontend — Next.js build

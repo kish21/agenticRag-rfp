@@ -1,0 +1,32 @@
+# Dependabot keeps dependencies patched so CVE fixes land as PRs automatically,
+# complementing the pip-audit CI gate (SC-002, #120). Weekly cadence keeps noise low.
+version: 2
+updates:
+  # Python backend
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "security"
+
+  # Frontend (Next.js)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "frontend"
+
+  # GitHub Actions used in CI workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"
