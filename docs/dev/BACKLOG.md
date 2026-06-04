@@ -559,6 +559,10 @@ The `claim_bearing` / `total_claims` / `grounded_claims` / `grounding_completene
 
 E3.b changed the no-claims default from `0.0` to `1.0` and filters to `claim_bearing` narratives (so a vendor whose entire story is trusted `system_facts` isn't scored 0%). Side effect: a claim-free report (`total_claims==0`) reported `grounding_completeness=1.0` and sailed silently through `critic_after_explanation`'s numeric gate while carrying **no** PDF-grounded claim. **Fixed:** `critic_after_explanation` now emits a SOFT `claim_free_report` flag when `total_claims==0` (computed via the shared `compute_grounding`), so a claim-free report (e.g. every vendor rejected/conflicted, story carried by trusted `system_facts`) still gets human eyes. The vacuous `1.0` value is kept (back-compat; system_facts are trusted-by-construction) but is no longer silent. **Provenance.** `/code-review` of PR #198 (E3.b).
 
+### P2.27 — `run_cleanup` deletes a whole org's vectors when ANY one of its setups expires (pre-existing, surfaced by #215, 2026-06-04)
+
+`app/jobs/cleanup.py` deletes Qdrant data at **org granularity**: for each expired `evaluation_setups` row it removes every point with that `org_id`. A Qdrant point carries `org_id` / `vendor_id` / `rfp_id` / `doc_id` but **no `setup_id`**, so a single expired setup wipes the org's *other, still-live* setups too. This is a **pre-existing** behaviour (the old code did the same via `startswith("platform_{org_id}_")`), faithfully preserved by #215 (per-org collection) — NOT introduced by it. **Fix (when picked up):** stamp `setup_id` on chunk payloads at ingestion, then have cleanup delete points by `setup_id` (precise) and drop the collection only when it is empty. Until then the org-coarse delete is bounded by the 90-day retention. **Provenance.** Tracing #215 (E215).
+
 ---
 
 ## ⚪ P3 — Polish

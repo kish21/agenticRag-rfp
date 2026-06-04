@@ -125,15 +125,19 @@ def c_critic_flag_count():
 
 # ── CONTRACT 2: Qdrant tenant isolation ──────────────────────────────
 
-@contract("Qdrant collection naming enforces tenant isolation")
+@contract("Qdrant collection naming enforces cross-org (tenant) isolation")
 def c_qdrant_naming():
-    from app.retrieval.qdrant import collection_name, rfp_collection_name
-    c1 = collection_name("org-meridian", "vendor-alpha")
-    c2 = collection_name("org-meridian", "vendor-beta")
-    c3 = collection_name("org-acme", "vendor-alpha")
-    assert c1 != c2, "Same org, different vendors must differ"
-    assert c1 != c3, "Different orgs must differ even with same vendor"
-    for n in [c1,c2,c3]:
+    # E215: one collection per ORG. Cross-org isolation stays a physical
+    # collection boundary; WITHIN-org vendor scoping is the org_id+vendor_id
+    # payload filter (asserted by c_qdrant_search_filters), not a separate
+    # collection. So same-org/different-vendor now share one collection.
+    from app.retrieval.qdrant import org_collection_name
+    a = org_collection_name("org-meridian")
+    b = org_collection_name("org-meridian")  # vendor is no longer part of the name
+    c = org_collection_name("org-acme")
+    assert a == b, "Same org must map to the same collection"
+    assert a != c, "Different orgs must map to different collections (tenant boundary)"
+    for n in [a, c]:
         assert " " not in n and "/" not in n, f"Invalid chars in: {n}"
 
 @contract("search_dense requires org_id and vendor_id parameters")

@@ -2,7 +2,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance, VectorParams, SparseVectorParams,
     PointStruct, Filter, FieldCondition, MatchValue,
-    SparseIndexParams, Modifier
+    SparseIndexParams, Modifier, FilterSelector
 )
 from app.config import settings
 import uuid
@@ -20,13 +20,17 @@ def get_qdrant_client() -> QdrantClient:
     return _client
 
 
-def collection_name(org_id: str, vendor_id: str) -> str:
+def org_collection_name(org_id: str) -> str:
     """
-    Naming convention: {prefix}_{org_id}_{vendor_id}
-    Enforces tenant isolation at collection level.
+    Naming convention: {prefix}_{org_id}  — one collection per org (tenant).
+
+    The org collection is the physical cross-tenant boundary. Vendor scoping
+    WITHIN an org is enforced by the mandatory `org_id` + `vendor_id` payload
+    filters applied on every query (see search_dense / search_hybrid), not by a
+    separate collection per vendor. See docs/dev/E215_QDRANT_PER_ORG_COLLECTION.md.
     """
     prefix = settings.qdrant_collection_prefix
-    return f"{prefix}_{org_id}_{vendor_id}".replace("-", "_").lower()
+    return f"{prefix}_{org_id}".replace("-", "_").lower()
 
 
 def rfp_collection_name(org_id: str, rfp_id: str) -> str:
@@ -239,13 +243,31 @@ def search_hybrid(
     ]
 
 
-def delete_vendor_collection(org_id: str, vendor_id: str):
+def delete_vendor_data(org_id: str, vendor_id: str) -> int:
     """
-    Deletes all data for a vendor (GDPR / data retention).
-    Called by the cleanup job.
+    Deletes one vendor's points from the org collection (GDPR / data retention),
+    WITHOUT dropping the collection — other vendors of the same org share it.
+
+    Returns the number of points matched for deletion (0 if the collection does
+    not exist). Isolation: filters on org_id AND vendor_id so it can never touch
+    another tenant's data.
     """
     client = get_qdrant_client()
-    name = collection_name(org_id, vendor_id)
+    name = org_collection_name(org_id)
     existing = [c.name for c in client.get_collections().collections]
-    if name in existing:
-        client.delete_collection(name)
+    if name not in existing:
+        return 0
+
+    selector = Filter(must=[
+        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
+        FieldCondition(key="vendor_id", match=MatchValue(value=vendor_id)),
+    ])
+    # count before delete so callers/audit can see how much was removed
+    matched = client.count(
+        collection_name=name, count_filter=selector, exact=True
+    ).count
+    client.delete(
+        collection_name=name,
+        points_selector=FilterSelector(filter=selector),
+    )
+    return matched

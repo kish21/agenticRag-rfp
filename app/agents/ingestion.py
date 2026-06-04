@@ -18,7 +18,7 @@ from app.validators.ingestion import (
 )
 from app.retrieval.qdrant import (
     get_qdrant_client,
-    collection_name,
+    org_collection_name,
     create_collection,
     upsert_chunk,
 )
@@ -192,7 +192,7 @@ async def _ingest_single_file(
         + 0.2 * (1.0 if is_valid else 0.3)
     ))
 
-    coll_name = collection_name(org_id, vendor_id)
+    coll_name = org_collection_name(org_id)
     create_collection(coll_name)
 
     for chunk in chunks:

@@ -2,7 +2,9 @@ import datetime
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
-from app.retrieval.qdrant import get_qdrant_client
+from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
+
+from app.retrieval.qdrant import get_qdrant_client, org_collection_name
 from app.providers.observability import log_evaluation_run
 
 
@@ -34,15 +36,31 @@ async def run_cleanup(engine: Engine, retention_days: int = _DEFAULT_RETENTION_D
         for row in rows:
             setup_id, org_id = row.setup_id, row.org_id
 
-            # Delete matching Qdrant collections (named <org_id>_<vendor_id>)
-            all_cols = qdrant.get_collections().collections
-            for col in all_cols:
-                if col.name.startswith(f"platform_{org_id}_"):
-                    try:
-                        qdrant.delete_collection(col.name)
-                        deleted_collections.append(col.name)
-                    except Exception:
-                        pass
+            # One collection per org (E215): delete the org's points by filter
+            # rather than dropping the whole collection, then drop it if it is
+            # now empty. NOTE: granularity is org-level (a point carries no
+            # setup_id), matching the previous prefix-delete semantics — see the
+            # BACKLOG note on multi-setup-per-org precision.
+            name = org_collection_name(str(org_id))
+            existing = [c.name for c in qdrant.get_collections().collections]
+            if name in existing:
+                try:
+                    qdrant.delete(
+                        collection_name=name,
+                        points_selector=FilterSelector(
+                            filter=Filter(must=[
+                                FieldCondition(
+                                    key="org_id",
+                                    match=MatchValue(value=str(org_id)),
+                                )
+                            ])
+                        ),
+                    )
+                    if qdrant.count(collection_name=name, exact=True).count == 0:
+                        qdrant.delete_collection(name)
+                        deleted_collections.append(name)
+                except Exception:
+                    pass
 
             # Delete PostgreSQL rows (cascade deletes facts/docs via FK)
             result = conn.execute(

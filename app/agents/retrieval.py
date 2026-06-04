@@ -16,7 +16,7 @@ import uuid
 from app.providers.llm import call_llm
 from app.prompts.registry import get_prompt
 from app.schemas.output_models import RetrievalOutput, RetrievedChunk
-from app.retrieval.qdrant import collection_name, search_dense, search_hybrid
+from app.retrieval.qdrant import org_collection_name, search_dense, search_hybrid
 from app.retrieval.pipeline import get_dense_embedding
 from app.providers.reranker import rerank as rerank_candidates
 from app.agents.critic import critic_after_retrieval
@@ -167,7 +167,7 @@ async def run_retrieval_agent(
     # Step 2: Retrieval — hybrid (dense+sparse RRF) or dense-only. The Qdrant
     # client calls are synchronous network I/O — offload to a thread for the
     # same reason as the embedding above.
-    coll = collection_name(org_id, vendor_id)
+    coll = org_collection_name(org_id)
     if use_hybrid_search:
         raw_results = await asyncio.to_thread(
             search_hybrid,
