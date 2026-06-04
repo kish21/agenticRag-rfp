@@ -58,4 +58,7 @@ class RetrievalOutput(BaseModel):
     total_candidates_before_rerank: int
     confidence: float = Field(ge=0.0, le=1.0)
     empty_retrieval: bool
+    # True when the configured reranker failed/was unavailable and retrieval
+    # fell back to vector-score order (fail-open but LOUD — see issue #212).
+    reranking_degraded: bool = False
     warnings: List[str] = []

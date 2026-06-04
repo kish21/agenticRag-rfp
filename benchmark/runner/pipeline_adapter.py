@@ -181,9 +181,10 @@ def _seed_org_settings(org_id: str, reranker_provider: str) -> None:
     honours the configured reranker (E3.e).
 
     Reuses the one org_settings write path (`upsert_org_settings`) with
-    `apply_preset=False`: the tier preset hardcodes reranker_provider='bge' and
-    would otherwise re-drop our value. Scoped to the benchmark org only —
-    real-tenant precedence (preset wins) is untouched.
+    `apply_preset=False` to write exactly this field. Scoped to the benchmark org
+    only. (Since #212 a defaulted org already resolves reranker_provider from
+    .env via `_defaults_for`, so this explicit seed is now belt-and-braces — it
+    pins the value on a real row regardless of default-resolution changes.)
     """
     from app.domain.org_settings import upsert_org_settings
     upsert_org_settings(org_id, updated_by="benchmark", apply_preset=False,

@@ -65,6 +65,7 @@ def rerank(
     candidates: list[dict],
     top_n: int = 5,
     provider: str | None = None,
+    warnings: list[str] | None = None,
 ) -> list[dict]:
     """
     Reranks candidates using the configured provider.
@@ -73,12 +74,26 @@ def rerank(
 
     candidates: list of dicts with 'text' and 'score' keys
     provider: override global RERANKER_PROVIDER (e.g. from org_settings)
+    warnings: optional mutable list. When a NON-'none' provider fails or is
+              unknown and we fail-open to vector-score order, an operator-facing
+              degradation message is appended so the caller can surface it
+              (fail-open but LOUD — air-gapped boxes silently degrading is the
+              exact failure #212 addresses). 'none' is an intentional choice and
+              is never reported as degraded.
     returns: top_n candidates sorted by rerank_score descending
     """
     if not candidates:
         return candidates
 
     provider = (provider or settings.reranker_provider).lower()
+
+    def _degraded(detail: str) -> list[dict]:
+        if warnings is not None and provider != "none":
+            warnings.append(
+                f"Reranking degraded: provider '{provider}' {detail}; "
+                f"results fell back to vector-score order."
+            )
+        return _rerank_none(candidates, top_n)
 
     try:
         if provider == "cohere":
@@ -93,7 +108,7 @@ def rerank(
             return _rerank_none(candidates, top_n)
         else:
             logger.warning("Unknown reranker provider %r — falling back to no-rerank.", provider)
-            return _rerank_none(candidates, top_n)
+            return _degraded("is not a recognised reranker")
     except Exception as e:
         # Surface via the structured logger (not print) so a misconfigured or
         # broken reranker fail-open to vector-score order is visible to operators.
@@ -101,7 +116,7 @@ def rerank(
             "Reranker %r failed (%s) — falling back to vector-score order.",
             provider, e,
         )
-        return _rerank_none(candidates, top_n)
+        return _degraded(f"is unavailable ({e})")
 
 
 def _rerank_cohere(
