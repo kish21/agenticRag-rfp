@@ -38,6 +38,19 @@ def rfp_collection_name(org_id: str, rfp_id: str) -> str:
     return f"{prefix}_{org_id}_rfp_{rfp_id}".replace("-", "_").lower()
 
 
+def _tenant_must(org_id: str, vendor_id: str) -> list[FieldCondition]:
+    """
+    The mandatory tenant-isolation predicate, single-sourced. Since E215 moved
+    to one collection per org, vendor scoping lives ENTIRELY in this payload
+    filter — every read/delete that touches vendor data must use it, so it is
+    defined once here rather than re-built per call site.
+    """
+    return [
+        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
+        FieldCondition(key="vendor_id", match=MatchValue(value=vendor_id)),
+    ]
+
+
 def create_collection(name: str, vector_size: int | None = None, client: QdrantClient | None = None):
     """
     Creates a Qdrant collection with both dense and sparse vectors.
@@ -119,10 +132,7 @@ def search_dense(
     """
     client = get_qdrant_client()
 
-    must_conditions = [
-        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
-        FieldCondition(key="vendor_id", match=MatchValue(value=vendor_id)),
-    ]
+    must_conditions = _tenant_must(org_id, vendor_id)
 
     if section_type_filter:
         must_conditions.append(
@@ -186,10 +196,7 @@ def search_hybrid(
     dense_vec = dense_vector if dense_vector is not None else embed_text(query_text)
     sparse_indices, sparse_values = get_sparse_query_embedding(query_text)
 
-    must_conditions = [
-        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
-        FieldCondition(key="vendor_id", match=MatchValue(value=vendor_id)),
-    ]
+    must_conditions = _tenant_must(org_id, vendor_id)
     if section_type_filter:
         must_conditions.append(
             FieldCondition(
@@ -258,10 +265,7 @@ def delete_vendor_data(org_id: str, vendor_id: str) -> int:
     if name not in existing:
         return 0
 
-    selector = Filter(must=[
-        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
-        FieldCondition(key="vendor_id", match=MatchValue(value=vendor_id)),
-    ])
+    selector = Filter(must=_tenant_must(org_id, vendor_id))
     # count before delete so callers/audit can see how much was removed
     matched = client.count(
         collection_name=name, count_filter=selector, exact=True
@@ -271,3 +275,36 @@ def delete_vendor_data(org_id: str, vendor_id: str) -> int:
         points_selector=FilterSelector(filter=selector),
     )
     return matched
+
+
+def delete_org_data(org_id: str) -> tuple[int, bool]:
+    """
+    Deletes ALL of an org's points from its collection (data retention / GDPR
+    erasure for a whole tenant), then drops the collection if it is now empty.
+
+    Returns (points_matched, collection_dropped). 0 / False if the collection
+    does not exist. This is the org-level wrapper the cleanup job uses so the
+    Qdrant SDK stays confined to this module (ADR-001: app/retrieval/qdrant.py
+    wraps all Qdrant operations).
+    """
+    client = get_qdrant_client()
+    name = org_collection_name(org_id)
+    existing = [c.name for c in client.get_collections().collections]
+    if name not in existing:
+        return 0, False
+
+    selector = Filter(must=[
+        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
+    ])
+    matched = client.count(
+        collection_name=name, count_filter=selector, exact=True
+    ).count
+    client.delete(
+        collection_name=name,
+        points_selector=FilterSelector(filter=selector),
+    )
+    dropped = False
+    if client.count(collection_name=name, exact=True).count == 0:
+        client.delete_collection(name)
+        dropped = True
+    return matched, dropped

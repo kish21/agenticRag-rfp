@@ -2,9 +2,7 @@ import datetime
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
-from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
-
-from app.retrieval.qdrant import get_qdrant_client, org_collection_name
+from app.retrieval.qdrant import delete_org_data
 from app.providers.observability import log_evaluation_run
 
 
@@ -20,8 +18,7 @@ async def run_cleanup(engine: Engine, retention_days: int = _DEFAULT_RETENTION_D
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
     deleted_collections: list[str] = []
     deleted_pg_rows: int = 0
-
-    qdrant = get_qdrant_client()
+    purged_orgs: set[str] = set()
 
     with engine.connect() as conn:
         # Find expired setups
@@ -36,29 +33,19 @@ async def run_cleanup(engine: Engine, retention_days: int = _DEFAULT_RETENTION_D
         for row in rows:
             setup_id, org_id = row.setup_id, row.org_id
 
-            # One collection per org (E215): delete the org's points by filter
-            # rather than dropping the whole collection, then drop it if it is
-            # now empty. NOTE: granularity is org-level (a point carries no
-            # setup_id), matching the previous prefix-delete semantics — see the
-            # BACKLOG note on multi-setup-per-org precision.
-            name = org_collection_name(str(org_id))
-            existing = [c.name for c in qdrant.get_collections().collections]
-            if name in existing:
+            # One collection per org (E215): purge the org's vectors via the
+            # qdrant wrapper (which deletes points by org_id and drops the now-
+            # empty collection) — keeping the Qdrant SDK out of this job module
+            # (ADR-001). Done once per org. NOTE: granularity is org-level (a
+            # point carries no setup_id), matching the previous prefix-delete
+            # semantics — see BACKLOG P2.27 on multi-setup-per-org precision.
+            org_key = str(org_id)
+            if org_key not in purged_orgs:
+                purged_orgs.add(org_key)
                 try:
-                    qdrant.delete(
-                        collection_name=name,
-                        points_selector=FilterSelector(
-                            filter=Filter(must=[
-                                FieldCondition(
-                                    key="org_id",
-                                    match=MatchValue(value=str(org_id)),
-                                )
-                            ])
-                        ),
-                    )
-                    if qdrant.count(collection_name=name, exact=True).count == 0:
-                        qdrant.delete_collection(name)
-                        deleted_collections.append(name)
+                    _, dropped = delete_org_data(org_key)
+                    if dropped:
+                        deleted_collections.append(org_key)
                 except Exception:
                     pass
 
