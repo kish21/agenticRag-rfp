@@ -1,5 +1,13 @@
 # ADR-001: Qdrant over ChromaDB as Vector Store
-*Date: 2026-03-15 | Status: Accepted*
+*Date: 2026-03-15 | Status: Accepted (naming convention SUPERSEDED-PENDING — see note)*
+
+> **2026-06-04 (#215 / E215):** The "Collection naming convention: `{org_id}__{vendor_id}`"
+> consequence below is **superseded** — collections are now **one per org**
+> (`{prefix}_{org_id}`), with vendor scoping handled by the `org_id` + `vendor_id`
+> payload filters that already run on every query. The core decision (Qdrant over
+> ChromaDB) stands; only the per-vendor collection grain changed, to avoid a
+> per-vendor collection-count scaling wall. Cross-org isolation remains a physical
+> collection boundary. See `docs/dev/E215_QDRANT_PER_ORG_COLLECTION.md`.
 
 ## Context
 
@@ -31,10 +39,10 @@ Hybrid search (dense + sparse) is a hard requirement — Cohere and other benchm
 
 ## Consequences
 
-- `app/core/qdrant_client.py` wraps all Qdrant operations
+- `app/retrieval/qdrant.py` wraps all Qdrant operations
 - All queries use `client.query_points()` — not deprecated `client.search()`
-- Collection naming convention: `{org_id}__{vendor_id}`
-- Switching to another vector store would require rewriting `qdrant_client.py` only — agents are isolated from the storage choice
+- ~~Collection naming convention: `{org_id}__{vendor_id}`~~ → **superseded by #215**: one collection per org `{prefix}_{org_id}`; vendor scoping via payload filter
+- Switching to another vector store would require rewriting `app/retrieval/qdrant.py` only — agents are isolated from the storage choice
 
 ## Rejected Alternatives
 

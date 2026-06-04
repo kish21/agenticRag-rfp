@@ -216,7 +216,7 @@ print(asyncio.run(test()))
 
 def SK02_CP03():
     c, o = _run("""python -c "
-from app.retrieval.qdrant import get_qdrant_client, collection_name
+from app.retrieval.qdrant import get_qdrant_client, org_collection_name
 client = get_qdrant_client()
 cols = client.get_collections()
 print('qdrant ok, collections:', len(cols.collections))

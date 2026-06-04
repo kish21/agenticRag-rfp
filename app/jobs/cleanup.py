@@ -2,7 +2,7 @@ import datetime
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
-from app.retrieval.qdrant import get_qdrant_client
+from app.retrieval.qdrant import delete_org_data
 from app.providers.observability import log_evaluation_run
 
 
@@ -18,8 +18,7 @@ async def run_cleanup(engine: Engine, retention_days: int = _DEFAULT_RETENTION_D
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
     deleted_collections: list[str] = []
     deleted_pg_rows: int = 0
-
-    qdrant = get_qdrant_client()
+    purged_orgs: set[str] = set()
 
     with engine.connect() as conn:
         # Find expired setups
@@ -34,15 +33,21 @@ async def run_cleanup(engine: Engine, retention_days: int = _DEFAULT_RETENTION_D
         for row in rows:
             setup_id, org_id = row.setup_id, row.org_id
 
-            # Delete matching Qdrant collections (named <org_id>_<vendor_id>)
-            all_cols = qdrant.get_collections().collections
-            for col in all_cols:
-                if col.name.startswith(f"platform_{org_id}_"):
-                    try:
-                        qdrant.delete_collection(col.name)
-                        deleted_collections.append(col.name)
-                    except Exception:
-                        pass
+            # One collection per org (E215): purge the org's vectors via the
+            # qdrant wrapper (which deletes points by org_id and drops the now-
+            # empty collection) — keeping the Qdrant SDK out of this job module
+            # (ADR-001). Done once per org. NOTE: granularity is org-level (a
+            # point carries no setup_id), matching the previous prefix-delete
+            # semantics — see BACKLOG P2.27 on multi-setup-per-org precision.
+            org_key = str(org_id)
+            if org_key not in purged_orgs:
+                purged_orgs.add(org_key)
+                try:
+                    _, dropped = delete_org_data(org_key)
+                    if dropped:
+                        deleted_collections.append(org_key)
+                except Exception:
+                    pass
 
             # Delete PostgreSQL rows (cascade deletes facts/docs via FK)
             result = conn.execute(
