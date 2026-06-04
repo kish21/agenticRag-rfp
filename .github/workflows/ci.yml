@@ -51,6 +51,27 @@ jobs:
         uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           inputs: requirements.txt requirements-dev.txt
+          # Justified ignores — the only CVEs with no actionable fix in our context.
+          # Each is tracked; revisit when a fix ships / pytest is upgraded / we leave python-jose.
+          #  PYSEC-2025-185  python-jose JWE-bomb DoS — no fix; we use HS256 JWS only,
+          #                  never jwe.decrypt, so it is not reachable.
+          #  CVE-2026-30922  pyasn1 BER-decoder recursion DoS — fix (0.6.3) blocked by
+          #                  python-jose's pyasn1<0.5.0 cap. Not reachable: HS256 (HMAC)
+          #                  never parses ASN.1; pyasn1 is only used by the rsa/asymmetric
+          #                  path we don't exercise. (Real fix = migrate off python-jose.)
+          #  PYSEC-2025-217  transformers — transitive via sentence-transformers
+          #                  (caps transformers<5.0.0); no fixed version exists; used
+          #                  only for local model loading, not a request-exposed path.
+          #  CVE-2026-1839   transformers — fix only in 5.0.0rc3 (pre-release), blocked by
+          #                  the same sentence-transformers<5.0.0 cap; same non-exposed path.
+          #  CVE-2025-71176  pytest — dev/test-only, never in the production image;
+          #                  fix needs the deferred pytest 9 bump (tracked by an issue).
+          extra-args: >-
+            --ignore-vuln PYSEC-2025-185
+            --ignore-vuln CVE-2026-30922
+            --ignore-vuln PYSEC-2025-217
+            --ignore-vuln CVE-2026-1839
+            --ignore-vuln CVE-2025-71176
 
   # ── Job 1: Frontend build ────────────────────────────────────────────────
   frontend-build:

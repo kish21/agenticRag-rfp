@@ -33,4 +33,12 @@ Until the first tagged release, all changes are tracked under **[Unreleased]**.
 - Vendors that never demonstrate a mandatory requirement are now rejected.
 - Tenant isolation enforced via PostgreSQL row-level security.
 
+### Security
+
+- Remediated dependency CVEs surfaced by the new pip-audit gate: pypdf 5.4.0→6.11.0,
+  python-multipart 0.0.18→0.0.27, weasyprint 63.1→68.0, python-jose 3.3.0→3.4.0,
+  python-dotenv 1.1.0→1.2.2, pinned starlette 1.0.1 (instrumentator 8.0.0). Five
+  unfixable-in-context CVEs are ignored with written justification in CI. pytest 8→9 and a
+  python-jose→PyJWT migration are tracked as follow-ups.
+
 [Unreleased]: https://github.com/kish21/agenticRag-rfp/commits/master

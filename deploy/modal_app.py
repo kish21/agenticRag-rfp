@@ -29,7 +29,7 @@ platform_secrets = Secret.from_name("agentic-platform-secrets", environment_name
 pdf_image = (
     Image.debian_slim(python_version="3.11")
     .pip_install(
-        "pypdf==5.4.0",
+        "pypdf==6.11.0",
         "python-docx==1.1.2",
         "python-magic==0.4.27",
         "llama-index-core==0.14.21",
