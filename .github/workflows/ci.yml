@@ -35,9 +35,10 @@ jobs:
   # Scans the pinned Python dependencies for known CVEs on every push/PR via
   # pip-audit (PyPA's Advisory Database). Fail-closed: any known vulnerability
   # fails the job, matching the project's security baseline. If a transitive
-  # vuln with no available fix appears, triage it and add an explicit
-  # `--ignore-vuln GHSA-xxxx` to `extra-args` below (config in source, never a
-  # silent skip). Least-privilege token: this job only reads code.
+  # vuln with no available fix appears, triage it and add its ID to the
+  # `ignore-vulns` list below (config in source, never a silent skip).
+  # NOTE: the action reads its own `ignore-vulns:` input — passing --ignore-vuln
+  # via extra-args is NOT honoured. Least-privilege token: this job only reads code.
   dependency-audit:
     name: Dependency CVE scan (pip-audit)
     runs-on: ubuntu-latest
@@ -63,10 +64,10 @@ jobs:
           #                  path we don't exercise. (Real fix = migrate off python-jose, #222.)
           #  CVE-2025-71176  pytest — dev/test-only, never in the production image;
           #                  fix needs the deferred pytest 9 bump (#221).
-          extra-args: >-
-            --ignore-vuln PYSEC-2025-185
-            --ignore-vuln CVE-2026-30922
-            --ignore-vuln CVE-2025-71176
+          ignore-vulns: |
+            PYSEC-2025-185
+            CVE-2026-30922
+            CVE-2025-71176
 
   # ── Job 1: Frontend build ────────────────────────────────────────────────
   frontend-build:
