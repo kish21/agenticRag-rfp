@@ -26,6 +26,7 @@ from .schema_planner_critic import (
 
 from .schema_ingestion_retrieval import (
     ChunkRecord,
+    InjectionFinding,
     IngestionOutput,
     RetrievedChunk,
     RetrievalOutput,

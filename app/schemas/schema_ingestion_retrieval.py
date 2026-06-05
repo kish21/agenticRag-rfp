@@ -18,6 +18,18 @@ class ChunkRecord(BaseModel):
     page_number: int
     qdrant_point_id: str
 
+class InjectionFinding(BaseModel):
+    """
+    A prompt-injection pattern matched in untrusted vendor chunk text
+    (issue #133). Carried as typed data on IngestionOutput so the Critic can
+    raise a HARD flag and the finding is auditable. matched_text is truncated —
+    we record enough to identify the attack, not the whole chunk.
+    """
+    chunk_id: str
+    pattern_name: str
+    matched_text: str
+    page_number: int
+
 class IngestionOutput(BaseModel):
     doc_id: str
     vendor_id: str
@@ -31,6 +43,8 @@ class IngestionOutput(BaseModel):
     content_hash: str
     warnings: List[str] = []
     status: Literal["success", "partial", "failed", "duplicate"]
+    # issue #133 — prompt-injection scan results. Empty when clean.
+    injection_findings: List[InjectionFinding] = []
 
 
 class RetrievedChunk(BaseModel):
