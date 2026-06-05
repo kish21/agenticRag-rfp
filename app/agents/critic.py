@@ -99,6 +99,36 @@ def critic_after_planner(
 def critic_after_ingestion(output: IngestionOutput) -> CriticOutput:
     flags = []
 
+    # issue #133 — prompt-injection defence (fail-CLOSED). A malicious vendor
+    # may embed instructions in their PDF to manipulate the downstream LLM. The
+    # Ingestion Agent scanned every chunk; if matches reach the configured
+    # block_threshold we HARD-block here so poisoned text never reaches the
+    # Extraction/Explanation LLM. The threshold is config-driven (no hardcoding).
+    if output.injection_findings:
+        from app.config import settings
+        threshold = settings.platform.injection_defence.block_threshold
+        # Count DISTINCT poisoned chunks, not raw match count — one crafted
+        # sentence can trip several patterns, which would otherwise inflate the
+        # count and make block_threshold mean "matches" instead of "attacks".
+        poisoned_chunks = {f.chunk_id for f in output.injection_findings}
+        if len(poisoned_chunks) >= threshold:
+            patterns_hit = sorted({f.pattern_name for f in output.injection_findings})
+            sample = output.injection_findings[0]
+            flags.append(_make_flag(
+                CriticSeverity.HARD, "ingestion_agent",
+                "prompt_injection_detected",
+                f"Vendor document contains text engineered to manipulate the LLM "
+                f"({len(poisoned_chunks)} chunk(s); patterns: {', '.join(patterns_hit)})",
+                f"pattern='{sample.pattern_name}' chunk={sample.chunk_id} "
+                f"page={sample.page_number} text='{sample.matched_text[:80]}'",
+                # NB: wording must NOT contain 'escalate' — _verdict() upgrades a
+                # HARD flag with 'escalate' in its recommendation to ESCALATED,
+                # which _hard_block_if() lets through. We need a true BLOCKED here.
+                "Quarantine this document and require human security review before "
+                "any further processing. Do NOT evaluate — the proposal contains "
+                "prompt-injection content. Confirm with the vendor before proceeding."
+            ))
+
     if output.quality_score < 0.4:
         flags.append(_make_flag(
             CriticSeverity.HARD, "ingestion_agent",

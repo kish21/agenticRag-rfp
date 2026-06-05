@@ -196,7 +196,10 @@ async def ingestion_node(state: PipelineState) -> dict:
         _, rfp_critics = await run_ingestion_agent(
             content=state["rfp_bytes"], filename=state["rfp_filename"],
             vendor_id="rfp", org_id=org_id, rfp_id=rfp_id,
-            evaluation_setup=evaluation_setup)
+            evaluation_setup=evaluation_setup,
+            # The RFP is the customer's own first-party document; the #133
+            # injection scan targets untrusted vendor proposals only.
+            trusted_source=True)
         for c in rfp_critics:
             _hard_block_if(c, f"ingestion/{state['rfp_filename']}")
 

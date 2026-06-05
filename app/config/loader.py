@@ -51,6 +51,21 @@ class PlatformIngestion(BaseModel):
     safe_id_pattern: str
     llm_attribution_confidence_floor: float = Field(ge=0.0, le=1.0)
 
+class PlatformInjectionPattern(BaseModel):
+    name: str
+    regex: str
+
+class PlatformInjectionDefence(BaseModel):
+    # issue #133 — prompt-injection detection at ingestion. Defaulted so an older
+    # platform.yaml without this block still loads. Note the absence-of-config
+    # behaviour: with no `patterns`, scan_chunks is a no-op, so detection is
+    # effectively DISABLED (the scan cannot fail-closed on rules it doesn't have).
+    # When patterns ARE present, a match is fail-CLOSED (HARD block). The shipped
+    # platform.yaml ships patterns, so the live default is detection-ON.
+    enabled: bool = True
+    block_threshold: int = Field(default=1, ge=1)
+    patterns: list[PlatformInjectionPattern] = []
+
 class PlatformRetrieval(BaseModel):
     embedding_model: str
     embedding_dimensions: int
@@ -100,6 +115,7 @@ class PlatformRanking(BaseModel):
 class PlatformConfig(BaseModel):
     embedding: PlatformEmbedding
     ingestion: PlatformIngestion
+    injection_defence: PlatformInjectionDefence = PlatformInjectionDefence()
     retrieval: PlatformRetrieval
     llm: PlatformLLM
     infrastructure: PlatformInfra

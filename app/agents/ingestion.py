@@ -23,6 +23,8 @@ from app.retrieval.qdrant import (
     upsert_chunk,
 )
 from app.agents.critic import critic_after_ingestion
+from app.validators.injection import scan_chunks
+from app.config import settings
 
 
 async def run_ingestion_agent(
@@ -32,6 +34,7 @@ async def run_ingestion_agent(
     org_id: str,
     rfp_id: str,
     evaluation_setup: EvaluationSetup,
+    trusted_source: bool = False,
 ) -> tuple[IngestionOutput, list]:
     """
     Main ingestion entry point.
@@ -40,13 +43,21 @@ async def run_ingestion_agent(
     Handles both single files and ZIP archives.
     Accepts EvaluationSetup so section classification uses
     the customer-confirmed criteria, not a generic config dict.
+
+    trusted_source: the prompt-injection scan (#133) targets UNTRUSTED vendor
+    proposals. The RFP is the customer's own first-party document — scanning it
+    is a category error (legitimate RFP language like "the evaluator must
+    approve…" would false-positive and HARD-block the whole run). Pass True only
+    for the RFP. Defaults False so every vendor path is scanned by default.
     """
     if filename.lower().endswith(".zip"):
         return await _ingest_zip(
-            content, filename, vendor_id, org_id, rfp_id, evaluation_setup
+            content, filename, vendor_id, org_id, rfp_id, evaluation_setup,
+            trusted_source=trusted_source,
         )
     return await _ingest_single_file(
-        content, filename, vendor_id, org_id, rfp_id, evaluation_setup
+        content, filename, vendor_id, org_id, rfp_id, evaluation_setup,
+        trusted_source=trusted_source,
     )
 
 
@@ -57,6 +68,7 @@ async def _ingest_zip(
     org_id: str,
     rfp_id: str,
     evaluation_setup: EvaluationSetup,
+    trusted_source: bool = False,
 ) -> tuple[IngestionOutput, list]:
     """Unpacks ZIP and processes each file as part of the same vendor."""
     try:
@@ -90,7 +102,8 @@ async def _ingest_zip(
             for fname in accepted:
                 file_bytes = zf.read(fname)
                 output, critics = await _ingest_single_file(
-                    file_bytes, fname, vendor_id, org_id, rfp_id, evaluation_setup
+                    file_bytes, fname, vendor_id, org_id, rfp_id, evaluation_setup,
+                    trusted_source=trusted_source,
                 )
                 all_outputs.append(output)
                 all_critics.extend(critics)
@@ -119,6 +132,12 @@ async def _ingest_zip(
                 content_hash=compute_content_hash(content),
                 warnings=[warning] if warning else [],
                 status="success" if total_chunks > 0 else "partial",
+                # Aggregate per-file injection findings so the summary's typed
+                # audit field is truthful (blocking happens via all_critics, but
+                # a serialized summary must not under-report packed-file attacks).
+                injection_findings=[
+                    f for o in all_outputs for f in o.injection_findings
+                ],
             )
             return summary, all_critics
 
@@ -146,6 +165,7 @@ async def _ingest_single_file(
     org_id: str,
     rfp_id: str,
     evaluation_setup: EvaluationSetup,
+    trusted_source: bool = False,
 ) -> tuple[IngestionOutput, list]:
     """Processes a single document file."""
     doc_id = str(uuid.uuid4())
@@ -183,6 +203,18 @@ async def _ingest_single_file(
     for chunk in chunks:
         st = chunk["section_type"]
         chunks_by_type[st] = chunks_by_type.get(st, 0) + 1
+
+    # issue #133 — scan UNTRUSTED vendor text for prompt-injection patterns
+    # BEFORE any LLM (Extraction/Explanation) consumes these chunks. Findings
+    # are recorded as typed data; the Critic turns them into a HARD, pipeline-
+    # blocking flag (fail-CLOSED). Config-gated and config-driven patterns.
+    # The trusted first-party RFP is exempt (trusted_source=True) — see
+    # run_ingestion_agent: scanning it would false-positive on legitimate
+    # RFP-evaluation directive language.
+    injection_findings = []
+    _inj = settings.platform.injection_defence
+    if not trusted_source and _inj.enabled and _inj.patterns:
+        injection_findings = scan_chunks(chunks, _inj.patterns)
 
     req_resp = chunks_by_type.get("requirement_response", 0)
     total = len(chunks)
@@ -238,6 +270,7 @@ async def _ingest_single_file(
         content_hash=content_hash,
         warnings=warnings,
         status="success",
+        injection_findings=injection_findings,
     )
 
     critic = critic_after_ingestion(output)
