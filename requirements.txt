@@ -68,7 +68,7 @@ alembic==1.14.1
 # ── HTTP and utilities ────────────────────────────────────
 httpx==0.28.1
 python-dotenv==1.2.2        # 1.2.2 fixes CVE-2026-28684
-pydantic-settings==2.14.0   # updated: langchain-community 0.4.1 requires >=2.10.1
+pydantic-settings==2.14.1   # updated: langchain-community 0.4.1 requires >=2.10.1
 pydantic==2.13.3            # updated: latest; use @field_validator in all new code (v2 style)
 tenacity==9.0.0
 
