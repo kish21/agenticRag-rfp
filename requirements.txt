@@ -8,7 +8,7 @@
 openai==2.41.0              # used by OpenAI + OpenRouter providers
 anthropic==0.97.0           # updated: langchain-anthropic 1.4.2 requires >=0.96.0
 langchain==1.2.16           # langchain 1.x — new import paths vs 0.x
-langchain-openai==1.2.1     # updated: 1.x required for langchain-core 1.x
+langchain-openai==1.2.2     # updated: 1.x required for langchain-core 1.x
 langchain-anthropic==1.4.2  # updated: 1.x required for langchain-core 1.x
 langchain-community==0.4.2  # updated: 0.4.x compatible with langchain-core 1.x
 langgraph==1.1.10           # updated: langchain 1.2.16 requires >=1.1.10,<1.2.0
