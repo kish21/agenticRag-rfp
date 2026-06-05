@@ -88,6 +88,14 @@ in the shared helper).
 
 - New tests: 7 passed. Full suite **312 passed, 3 skipped**; contracts 14/14; drift OK.
 - Tenant isolation: `delete_setup_data` filters on `org_id`+`setup_id`; cross-org is the unchanged physical collection boundary (E215) — no cross-tenant deletion surface.
+- **LIVE check against the real Qdrant container (2026-06-05)** — the one piece the
+  in-memory tests couldn't cover. A throwaway org (`p227-live-<uuid>`, isolated and
+  self-dropping — no existing data touched) was seeded with 3 points across two
+  setups (A: 2, B: 1). `delete_setup_data(org, "setup-A")` → `matched=2`,
+  `dropped=False`, setup-B's point and the collection **survived**;
+  `delete_setup_data(org, "setup-B")` (last setup) → `matched=1`, `dropped=True`,
+  collection gone; zero leftover. Confirms the precise per-setup delete behaves
+  identically on the real Qdrant, not just the in-memory client.
 
 ## Follow-up
 
