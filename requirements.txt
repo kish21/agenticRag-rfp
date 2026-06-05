@@ -73,7 +73,7 @@ pydantic==2.13.3            # updated: latest; use @field_validator in all new c
 tenacity==9.0.0
 
 # ── Output generation ─────────────────────────────────────
-reportlab==4.2.5
+reportlab==4.5.1
 weasyprint==68.0            # 68.0 fixes CVE-2025-68616; we use only HTML(string=).write_pdf() (stable)
 
 # ── Deployment ────────────────────────────────────────────
