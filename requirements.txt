@@ -54,7 +54,7 @@ python-multipart==0.0.27    # required by fastapi for file uploads; 0.0.27 fixes
 prometheus-fastapi-instrumentator==8.0.0  # exposes /metrics; 8.0.0 required to allow starlette>=1.0 (7.1.0 capped <1.0.0)
 
 # ── Document parsing ──────────────────────────────────────
-pypdf==6.11.0               # 6.x fixes 24 CVEs; we use only PdfReader/.pages/.extract_text (stable across v6)
+pypdf==6.13.0               # 6.x fixes 24 CVEs; we use only PdfReader/.pages/.extract_text (stable across v6)
 python-docx==1.1.2
 pandas==3.0.3
 openpyxl==3.1.5
