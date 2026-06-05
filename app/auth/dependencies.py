@@ -14,8 +14,7 @@ import logging
 from typing import Generator
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError
-from app.auth.jwt import decode_token, TokenData
+from app.auth.jwt import decode_token, TokenData, TokenError
 from app.auth.sessions import session_is_active
 from app.db.fact_store import get_engine, get_admin_engine
 
@@ -76,7 +75,7 @@ async def get_current_user(
 
     try:
         token_data = decode_token(token)
-    except JWTError:
+    except TokenError:
         raise credentials_exception
 
     if not _token_not_revoked(token_data):
@@ -124,7 +123,7 @@ async def get_current_user_optional(
         return None
     try:
         token_data = decode_token(token)
-    except JWTError:
+    except TokenError:
         return None
     if not _token_not_revoked(token_data):
         return None

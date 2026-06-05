@@ -17,11 +17,10 @@ propagates to both async and threadpool-run sync handlers.
 The org_id always comes from the cryptographically verified token — never from
 the request body or a header the client controls directly.
 """
-from jose import JWTError
 from starlette.requests import HTTPConnection
 
 from app.auth.dependencies import COOKIE_NAME
-from app.auth.jwt import decode_token
+from app.auth.jwt import decode_token, TokenError
 from app.db.session import _current_org_id
 
 # Routes that do not require auth and carry no tenant context.
@@ -51,7 +50,7 @@ def _extract_org_id(scope) -> str | None:
         return None
     try:
         return decode_token(token).org_id
-    except JWTError:
+    except TokenError:
         return None
 
 

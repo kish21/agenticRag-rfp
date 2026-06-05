@@ -17,12 +17,21 @@ Token payload:
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
+import jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from app.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+class TokenError(Exception):
+    """Raised when a JWT cannot be decoded or fails validation.
+
+    App-level exception so callers (dependencies, middleware) never import the
+    underlying JWT library's error type — this module is the ONLY place that
+    knows we use PyJWT, so swapping libraries again stays a one-file change."""
+
 
 VALID_ROLES = {
     "platform_admin",
@@ -112,7 +121,7 @@ def create_access_token(
 def decode_token(token: str) -> TokenData:
     """
     Decodes and validates a JWT token.
-    Raises JWTError if token is invalid or expired.
+    Raises TokenError if the token is invalid, expired, or missing fields.
     """
     try:
         payload = jwt.decode(
@@ -120,27 +129,30 @@ def decode_token(token: str) -> TokenData:
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm]
         )
-        email = payload.get("sub")
-        org_id = payload.get("org_id")
-        role = payload.get("role")
-        dept_id = payload.get("dept_id")
-        jti = payload.get("jti")
+    except jwt.PyJWTError as exc:
+        # Signature/expiry/format failures (incl. ExpiredSignatureError) all
+        # subclass PyJWTError — surface them as our app-level TokenError.
+        raise TokenError(str(exc)) from exc
 
-        if not email or not org_id or not role:
-            raise JWTError("Missing required fields in token")
+    email = payload.get("sub")
+    org_id = payload.get("org_id")
+    role = payload.get("role")
+    dept_id = payload.get("dept_id")
+    jti = payload.get("jti")
 
-        if role not in VALID_ROLES:
-            raise JWTError(f"Invalid role in token: {role}")
+    if not email or not org_id or not role:
+        raise TokenError("Missing required fields in token")
 
-        return TokenData(
-            email=email,
-            org_id=org_id,
-            role=role,
-            dept_id=dept_id,
-            jti=jti,
-        )
-    except JWTError:
-        raise
+    if role not in VALID_ROLES:
+        raise TokenError(f"Invalid role in token: {role}")
+
+    return TokenData(
+        email=email,
+        org_id=org_id,
+        role=role,
+        dept_id=dept_id,
+        jti=jti,
+    )
 
 
 def require_role(*allowed_roles: str):
