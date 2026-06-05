@@ -56,7 +56,7 @@ prometheus-fastapi-instrumentator==8.0.0  # exposes /metrics; 8.0.0 required to 
 # ── Document parsing ──────────────────────────────────────
 pypdf==6.11.0               # 6.x fixes 24 CVEs; we use only PdfReader/.pages/.extract_text (stable across v6)
 python-docx==1.1.2
-pandas==2.2.3
+pandas==3.0.3
 openpyxl==3.1.5
 python-magic==0.4.27
 
