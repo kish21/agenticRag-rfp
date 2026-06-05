@@ -209,6 +209,10 @@ async def _ingest_single_file(
             "org_id": org_id,
             "rfp_id": rfp_id,
             "doc_id": doc_id,
+            # Stamp the setup this chunk belongs to so retention (the cleanup
+            # job) can delete one expired setup's vectors precisely, without
+            # wiping the org's other live setups (BACKLOG P2.27).
+            "setup_id": evaluation_setup.setup_id,
         }
         upsert_chunk(
             collection=coll_name,

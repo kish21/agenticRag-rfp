@@ -32,6 +32,9 @@ Until the first tagged release, all changes are tracked under **[Unreleased]**.
 - Resolved contradictions are surfaced for human review instead of dropping the vendor.
 - Vendors that never demonstrate a mandatory requirement are now rejected.
 - Tenant isolation enforced via PostgreSQL row-level security.
+- Retention cleanup now deletes one expired evaluation setup's vectors precisely
+  (chunks are stamped with `setup_id` at ingestion) instead of wiping the whole
+  org's vectors — an expired setup no longer removes the org's other live setups.
 
 ### Security
 

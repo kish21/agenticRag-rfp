@@ -277,15 +277,18 @@ def delete_vendor_data(org_id: str, vendor_id: str) -> int:
     return matched
 
 
-def delete_org_data(org_id: str) -> tuple[int, bool]:
+def _delete_by_filter_and_maybe_drop(
+    org_id: str, must: list[FieldCondition]
+) -> tuple[int, bool]:
     """
-    Deletes ALL of an org's points from its collection (data retention / GDPR
-    erasure for a whole tenant), then drops the collection if it is now empty.
+    Delete the points of the org collection matching `must`, then drop the
+    collection if it is now empty. Returns (points_matched, collection_dropped);
+    (0, False) if the collection does not exist.
 
-    Returns (points_matched, collection_dropped). 0 / False if the collection
-    does not exist. This is the org-level wrapper the cleanup job uses so the
-    Qdrant SDK stays confined to this module (ADR-001: app/retrieval/qdrant.py
-    wraps all Qdrant operations).
+    Single-sources the count -> delete-by-filter -> drop-if-empty sequence shared
+    by delete_setup_data (org+setup filter) and delete_org_data (org-only) so a
+    change to the drop semantics is made once (mirrors _tenant_must on the read
+    path). Keeps the Qdrant SDK confined to this module (ADR-001).
     """
     client = get_qdrant_client()
     name = org_collection_name(org_id)
@@ -293,9 +296,7 @@ def delete_org_data(org_id: str) -> tuple[int, bool]:
     if name not in existing:
         return 0, False
 
-    selector = Filter(must=[
-        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
-    ])
+    selector = Filter(must=must)
     matched = client.count(
         collection_name=name, count_filter=selector, exact=True
     ).count
@@ -308,3 +309,41 @@ def delete_org_data(org_id: str) -> tuple[int, bool]:
         client.delete_collection(name)
         dropped = True
     return matched, dropped
+
+
+def delete_setup_data(org_id: str, setup_id: str) -> tuple[int, bool]:
+    """
+    Deletes the points of ONE evaluation setup from the org collection, then
+    drops the collection only if it is now empty (i.e. that was the org's last
+    setup). Returns (points_matched, collection_dropped); (0, False) if the
+    collection does not exist.
+
+    This is the precise retention path the cleanup job uses (BACKLOG P2.27): a
+    point is stamped with `setup_id` at ingestion, so an expired setup removes
+    only its OWN vectors and leaves the org's other, still-live setups intact —
+    unlike delete_org_data, which wipes the whole tenant. Filtering on org_id
+    AND setup_id keeps the tenant boundary explicit (defence in depth).
+
+    NOTE: points ingested before P2.27 carry no `setup_id` and so are not matched
+    here (they are pre-fix disposable test data, bounded by 90-day retention).
+    """
+    return _delete_by_filter_and_maybe_drop(org_id, [
+        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
+        FieldCondition(key="setup_id", match=MatchValue(value=setup_id)),
+    ])
+
+
+def delete_org_data(org_id: str) -> tuple[int, bool]:
+    """
+    Deletes ALL of an org's points from its collection (whole-tenant GDPR
+    erasure — "delete this customer"), then drops the collection if it is now
+    empty. The retention/cleanup job no longer uses this; it deletes per-setup
+    via delete_setup_data (P2.27) so one expired setup does not wipe the tenant.
+
+    Returns (points_matched, collection_dropped). 0 / False if the collection
+    does not exist. Keeps the Qdrant SDK confined to this module (ADR-001:
+    app/retrieval/qdrant.py wraps all Qdrant operations).
+    """
+    return _delete_by_filter_and_maybe_drop(org_id, [
+        FieldCondition(key="org_id", match=MatchValue(value=org_id)),
+    ])
