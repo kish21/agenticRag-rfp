@@ -91,11 +91,12 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Last updated:** 2026-06-05 · **Branch:** master (clean, synced with origin) · **HEAD:** `5523206`
+**Last updated:** 2026-06-05 · **Branch:** master (clean, synced with origin) · **HEAD:** `f23b3bb`
 
 **On master — all merged.** Phases 1, 2, 2c, 4, 5, 7, 9 + Phase 8 module foundation. Enterprise-readiness E1–E3 + E3.a–e done. Working tree clean; nothing pending to push.
 
 Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not re-paste it here):
+- **#256 (#133)** — prompt-injection defence at ingestion (OWASP LLM01). Config-driven scanner (`app/validators/injection.py`, patterns in `platform.yaml injection_defence`) scans untrusted vendor chunks before any LLM; a match → HARD Critic flag `prompt_injection_detected` → pipeline BLOCKED (fail-CLOSED). Trusted first-party RFP exempt (`trusted_source`). Verified 3 levels incl. live graph halt (only planner+ingestion ran, no report). Deeper `_verdict()` 'escalate' string-coupling refactor logged as BACKLOG **P2.28**. Toolkit patched: `enterprise-ai-audit` Cat-3 + `new-project` AI scaffold now cover injection (product-toolkit `fe4aec8`).
 - **#239 (#215)** — Qdrant one collection per org (was per `(org,vendor)`). Cross-org isolation = physical collection boundary (security-critical, unchanged); within-org vendor separation = the `vendor_id` payload filter that already ran on every query. Live end-to-end verified.
 - **#241 security-baseline finish** — #222 jose→PyJWT (PyJWT 2.13, HS256-only), #221 pytest 8→9, P2.27 per-setup retention precision. `pip-audit` gate now runs with **zero ignores**. (#242 = BACKLOG doc follow-up.)
 - **#220 security baseline** — `pip-audit` CVE-scan job + dependabot + SECURITY.md + CHANGELOG; 33 pinned-dep CVEs remediated; `sentence-transformers` moved to optional `requirements-local.txt` (prod image slimmed, `bge`/`local` providers fail loud).
@@ -105,10 +106,13 @@ Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not r
 Latest benchmark baseline (`benchmark/results/`): grounding 1.00, 0 fabricated, 0 op-failures.
 
 **Next action (next session) — pick ONE, one subtask per session:**
+- **#128 DX-001** — OpenAPI/Swagger route annotations (response_model/summary/examples); metadata already set, mechanical, customer-facing, low-risk
+- **#59 P1.8** — verify-and-close: post-synthesis verification largely exists (`explanation.py verify_grounding` + grounding-completeness hard-block); confirm it satisfies the issue or scope the LLM-claim-check upgrade
+- **#124 OR-001** — Grafana dashboard JSON (Prometheus/Grafana already in docker-compose; just author panels)
 - **E3.f (#209)** — scanned/OCR document support (P4)
-- **E3.g** — regression-gate follow-ups
-- **E2 auth follow-ups**
 - **8b** — delivery completion hook + Mode C auto-trigger (engine/channels done #179/#181; needs live infra + Mailtrap/Resend SMTP creds)
+
+P1 GitHub issues reviewed this session (2026-06-05): 11 open. #133 ✅ shipped. Quick wins next: #128, #59 (mostly built), #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
 
 De-prioritised: **E3.b.1** cert-status contradiction = **#210** (closed / won't-do — domain over-fitting; the generic value-contradiction path #198 already covers the real case. See [[generic_platform_no_domain_special_case]]).
 
