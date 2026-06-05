@@ -44,10 +44,12 @@ Until the first tagged release, all changes are tracked under **[Unreleased]**.
   The `bge`/`local` providers now fail loud with an install hint if selected without it;
   the default `modal`+`openai` path is unaffected.
 - Migrated JWT auth from `python-jose` to `PyJWT 2.13.0` (HS256 only, no crypto extra),
-  dropping the `jose`/`ecdsa`/`pyasn1`/`rsa` dependency chain. This **removes the last two
-  CVE ignores** (PYSEC-2025-185 jose JWE-bomb, CVE-2026-30922 pyasn1 DoS) with no code-
-  reachability caveat — they are gone from the audited set. The only remaining `pip-audit`
-  ignore is the dev-only pytest CVE (cleared by the deferred pytest 9 bump, #221).
+  dropping the `jose`/`ecdsa`/`pyasn1`/`rsa` dependency chain. This **removes two CVE
+  ignores** (PYSEC-2025-185 jose JWE-bomb, CVE-2026-30922 pyasn1 DoS) with no code-
+  reachability caveat — they are gone from the audited set.
+- Bumped `pytest` 8.3.5→9.0.3 (with `pytest-asyncio` 0.25.3→1.4.0, required for pytest 9),
+  clearing CVE-2025-71176. **The `pip-audit` gate now runs with ZERO ignores** — every
+  previously-ignored CVE has been resolved at the source.
 
 ### Changed
 
