@@ -52,22 +52,13 @@ jobs:
         uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           inputs: requirements.txt requirements-dev.txt
-          # Justified ignores — the only CVEs with no actionable fix in our context.
-          # Each is tracked; revisit when a fix ships / pytest is upgraded / we leave python-jose.
-          # (The two transformers CVEs are GONE: sentence-transformers moved to the optional
-          #  requirements-local.txt, so transformers/torch no longer ship in the audited set.)
-          #  PYSEC-2025-185  python-jose JWE-bomb DoS — no fix; we use HS256 JWS only,
-          #                  never jwe.decrypt, so it is not reachable.
-          #  CVE-2026-30922  pyasn1 BER-decoder recursion DoS — fix (0.6.3) blocked by
-          #                  python-jose's pyasn1<0.5.0 cap. Not reachable: HS256 (HMAC)
-          #                  never parses ASN.1; pyasn1 is only used by the rsa/asymmetric
-          #                  path we don't exercise. (Real fix = migrate off python-jose, #222.)
-          #  CVE-2025-71176  pytest — dev/test-only, never in the production image;
-          #                  fix needs the deferred pytest 9 bump (#221).
-          ignore-vulns: |
-            PYSEC-2025-185
-            CVE-2026-30922
-            CVE-2025-71176
+          # ZERO ignores — every previously-ignored CVE has been resolved at the source:
+          #   - both transformers CVEs: sentence-transformers moved to the optional
+          #     requirements-local.txt (transformers/torch out of the audited set);
+          #   - PYSEC-2025-185 (jose JWE-bomb) + CVE-2026-30922 (pyasn1 DoS): #222 migrated
+          #     python-jose -> PyJWT (HS256 only), dropping the jose/ecdsa/pyasn1/rsa chain;
+          #   - CVE-2025-71176 (pytest): #221 bumped pytest 8.3.5 -> 9.0.3 (+ pytest-asyncio 1.4.0).
+          # If a new CVE appears, FIX it (bump/replace) rather than re-adding an ignore.
 
   # ── Job 1: Frontend build ────────────────────────────────────────────────
   frontend-build:

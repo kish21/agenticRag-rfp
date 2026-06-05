@@ -10,8 +10,8 @@
 -r requirements.txt
 
 # ── Test framework ────────────────────────────────────────
-pytest==8.3.5
-pytest-asyncio==0.25.3
+pytest==9.0.3                # 9.0.3 fixes CVE-2025-71176 (#221); clears the last pip-audit ignore
+pytest-asyncio==1.4.0        # required for pytest 9 (0.25.x capped pytest<9); allows pytest<10,>=8.4
 faker==37.0.0
 
 # ── Dev tooling ───────────────────────────────────────────

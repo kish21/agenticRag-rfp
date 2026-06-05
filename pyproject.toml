@@ -18,6 +18,9 @@ known-first-party = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Pin the fixture event-loop scope explicitly rather than relying on the
+# pytest-asyncio default (which it warns about and may change across majors).
+asyncio_default_fixture_loop_scope = "function"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
