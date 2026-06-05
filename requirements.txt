@@ -23,7 +23,7 @@ llama-index-retrievers-bm25==0.7.1        # updated: latest
 # NOTE: in llama-index 0.12.x, install core + integrations separately
 
 # ── Vector database ───────────────────────────────────────
-qdrant-client==1.17.1       # updated: llama-index-vector-stores-qdrant 0.10.0 requires >=1.16.0
+qdrant-client==1.18.0       # updated: llama-index-vector-stores-qdrant 0.10.0 requires >=1.16.0
 
 # ── Reranking ─────────────────────────────────────────────
 cohere==5.21.1              # use cohere.ClientV2() not cohere.Client()
