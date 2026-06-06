@@ -6,6 +6,13 @@ rfp_defaults:
   allowed_autonomy_modes: [manual, auto_to_evaluate, auto_to_report]
   write_roles: [platform_admin, company_admin, department_admin, department_user]
 
+# RBAC — #55. Roles permitted to read the org-wide audit trail
+# (GET /api/v1/audit/access-log + /events). Read-only compliance surface;
+# the `auditor` role is read-only and deliberately NOT in write_roles above.
+# Product can widen/narrow this set without an engineering change.
+rbac:
+  audit_read_roles: [auditor, company_admin, platform_admin]
+
 # Defaults applied to brand-new orgs. Existing orgs keep their
 # org_settings row unchanged.
 new_org_defaults:

@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 import sqlalchemy as sa
 from app.auth.dependencies import get_current_user, get_db
-from app.auth.jwt import TokenData
+from app.auth.jwt import TokenData, VALID_ROLES
 from app.api.openapi_responses import (
     responses, UNAUTHORIZED, FORBIDDEN, NOT_FOUND,
 )
@@ -139,9 +139,10 @@ async def update_role(
     if current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient role")
 
-    valid_roles = {"platform_admin","company_admin","department_admin","department_user"}
-    if req.role not in valid_roles:
-        raise HTTPException(status_code=422, detail=f"Invalid role. Must be one of {valid_roles}")
+    # Single source of truth for the role set — see app/auth/jwt.py VALID_ROLES
+    # (includes 'auditor' from #55). Avoids a 4th hardcoded copy drifting.
+    if req.role not in VALID_ROLES:
+        raise HTTPException(status_code=422, detail=f"Invalid role. Must be one of {sorted(VALID_ROLES)}")
 
     with db.begin():
         result = db.execute(

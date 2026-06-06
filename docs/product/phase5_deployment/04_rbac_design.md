@@ -1,20 +1,32 @@
 # RBAC Design — Role-Based Access Control
-*Version 1.0 — 2026-05-14*
+*Version 2.0 — 2026-06-06 (reconciled to the as-built implementation; #55)*
+
+> **Note:** v1.0 of this doc described an aspirational 8-role hierarchy
+> (superadmin / regional_director / department_head / procurement_manager /
+> legal_reviewer …) that was **never built**. This version documents what the
+> code actually enforces. The original vision is preserved in git history.
 
 ---
 
-## Role Hierarchy
+## Role Hierarchy (as built)
+
+Five JWT roles, validated in `app/auth/jwt.py :: VALID_ROLES` and constrained in
+`users.role` (`app/db/schema.sql`, CHECK incl. `auditor` via migration 0015):
 
 ```
-superadmin (platform team only)
-  └── admin (per-org admin)
-        ├── ceo / cfo (org-wide read, approval authority)
-        ├── regional_director (region-scoped)
-        │     └── department_head (dept-scoped, approval authority)
-        │           └── procurement_manager (full pipeline, dept-scoped)
-        │                 └── legal_reviewer (read-only, evaluation-scoped)
-        └── auditor (audit log read-only)
+platform_admin    — operator/platform team; cross-org; no customer data
+company_admin     — org-wide admin within one org
+department_admin  — manages criteria templates + approvals; org-wide run visibility
+department_user   — runs evaluations; can override with documented reason
+auditor           — READ-ONLY compliance; sees the org audit trail, NOT run content
 ```
+
+Two finer-grained dimensions sit *alongside* (not inside) the JWT role:
+- **Ownership / collaboration / approval** — `created_by_email`, `user_departments`,
+  `rfp_collaborators`, `approval_assignments` (the "owner / dept-member / approver"
+  concepts from issue #55). These drive per-run visibility, not the JWT role.
+- **Approver label** — `approval_assignments.approver_role` is a free-text label
+  (`cfo` / `cto` / `legal` / …) used for approval routing; it is **not** a JWT role.
 
 ---
 
@@ -22,142 +34,91 @@ superadmin (platform team only)
 
 ```json
 {
-  "sub": "user-uuid",
-  "org_id": "acme-corp",
-  "role": "procurement_manager",
-  "department_id": "it-dept",
-  "region_id": "uk-south",
+  "sub": "user@org.com",
+  "org_id": "<uuid>",
+  "role": "department_user",
+  "dept_id": "it-dept",
+  "jti": "<uuid>",
   "exp": 1748000000
 }
 ```
 
-All scoping (`org_id`, `department_id`, `region_id`) is extracted from the JWT server-side. It is never accepted from request body or query parameters.
+`org_id` / `role` / `dept_id` are extracted server-side from the signed JWT — never
+accepted from request body or query parameters. `jti` keys the `auth_sessions`
+allowlist for server-side revocation (E2 auth hardening).
 
 ---
 
-## Role Definitions
+## Authorisation model — two enforcement layers
 
-### superadmin
-- **Scope:** Entire platform (all orgs)
-- **Who:** Platform engineering team only — never given to customers
-- **Can:** Create/delete orgs, view any org's data, rotate master JWT key
-- **Cannot:** Override audit records
+### 1. Tenant isolation (Postgres RLS) — the hard boundary
+Every org-scoped table has `ROW LEVEL SECURITY` **enabled and FORCED** (migration
+0011). The app connects as the non-superuser role `platform_app`
+(`NOBYPASSRLS`); `OrgContextMiddleware` stamps `app.current_org_id` on the
+connection, and each RLS policy is `org_id = current_setting('app.current_org_id')`.
+Result: **cross-org data leakage is physically impossible**, independent of any
+application bug.
 
-### admin
-- **Scope:** Their org_id only
-- **Who:** IT Admin at the customer organisation
-- **Can:** Create/deactivate users, configure org settings, onboard departments, rotate org API keys, export audit log, delete org data (GDPR)
-- **Cannot:** See other orgs' data
+### 2. Within-org visibility (default-deny) — `runs_visible_to()`
+A user may see a run **iff** any predicate holds (else: nothing, same org or not):
+1. wide role — `platform_admin` or `company_admin`,
+2. they created it (`created_by_email`),
+3. they belong to the run's department (`user_departments`),
+4. they were explicitly invited (`rfp_collaborators`),
+5. they are an assigned approver (`approval_assignments`).
 
-### ceo / cfo
-- **Scope:** All departments + all regions within their org
-- **Who:** C-suite executives
-- **Can:** View CEO dashboard (all metrics), drill into any evaluation, approve contracts (CFO: >$500K), download PDF reports
-- **Cannot:** Trigger evaluations, apply score overrides, manage users
-
-### regional_director
-- **Scope:** Their region_id only
-- **Who:** Regional Managing Directors, Regional CFOs
-- **Can:** View all evaluations in their region, approve contracts $100K–$500K, view regional spend dashboard
-- **Cannot:** See other regions' data
-
-### department_head
-- **Scope:** Their department_id only
-- **Who:** Director of IT, Director of HR, etc.
-- **Can:** View their department's evaluations, approve contracts <$100K, view department spend
-- **Cannot:** See other departments' data, trigger evaluations, apply score overrides
-
-### procurement_manager
-- **Scope:** Their department_id (same region)
-- **Who:** Procurement analysts, senior procurement managers
-- **Can:** Upload vendor documents, trigger evaluations, view extraction results, apply overrides (with mandatory justification), generate PDF reports
-- **Cannot:** Approve contracts (approval is a separate role), see other departments
-
-### legal_reviewer
-- **Scope:** Evaluations explicitly shared with them
-- **Who:** In-house legal team, external solicitors
-- **Can:** Read evaluation reports, view extracted contract clauses, add review comments
-- **Cannot:** Change scores, approve evaluations, see evaluations not shared with them
-
-### auditor
-- **Scope:** Audit log for their org
-- **Who:** External auditors, internal compliance team
-- **Can:** Export audit log (all decisions, all overrides, all critic flags) for their org
-- **Cannot:** See evaluation content, vendor documents, or scores
+Canonical SQL: `runs_visible_to()` in `schema.sql`; Python wrapper:
+`app/domain/visibility.py`. Per-run endpoints enforce it via
+`app/auth/rbac.py :: require_run_access` (403 otherwise). `department_admin` is
+treated as wide for visibility in the Python wrapper (`rbac.py :: _WIDE_ROLES`).
 
 ---
 
-## API Endpoint Access Matrix
+## API Endpoint Access Matrix (as built)
 
-| Endpoint | super | admin | ceo/cfo | reg_dir | dept_head | procurement | legal | auditor |
-|---|---|---|---|---|---|---|---|---|
-| `POST /evaluations` (trigger) | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| `GET /evaluations` (list) | ✓ | ✓ | All | Region | Dept | Dept | Assigned | ✗ |
-| `GET /evaluations/{id}` (detail) | ✓ | ✓ | ✓ | Region | Dept | Dept | Assigned | ✗ |
-| `POST /evaluations/{id}/override` | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| `POST /evaluations/{id}/approve` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ |
-| `GET /dashboard/ceo` | ✓ | ✓ | ✓ | Partial | Partial | ✗ | ✗ | ✗ |
-| `POST /upload` | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| `GET /audit/export` | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `GET /admin/orgs` | ✓ | Own org | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| `POST /admin/orgs` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| `PUT /admin/orgs/{id}/settings` | ✓ | Own org | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| `DELETE /admin/orgs/{id}/data` | ✓ | Own org | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Endpoint | platform_admin | company_admin | department_admin | department_user | auditor |
+|---|---|---|---|---|---|
+| `POST /evaluate/start` | ✓ | ✓ | ✓ | ✓ | ✗ (403) |
+| `GET /evaluate/list` | all org | all org | all org | own | ∅ (empty) |
+| `GET /evaluate/{id}/*` (setup/results/decision/cost/audit/export) | ✓ | ✓ | ✓ | if visible | ✗ (403) |
+| `POST /evaluate/{id}/override` | ✓ | ✓ | ✓ | ✗ (403)¹ | ✗ (403) |
+| `POST /evaluate/{id}/{confirm,re-evaluate,cancel}`, `DELETE` | ✓ | ✓ | ✓ | if visible | ✗ (403) |
+| `GET /api/v1/audit/access-log` | ✓ | ✓ | ✗² | ✗² | ✓ |
+| `GET /api/v1/audit/events` | ✓ | ✓ | ✗² | ✗² | ✓ |
+| `POST /api/v1/rfps`, admin attribution writes | ✓ | ✓ | ✓ | ✓ | ✗ (write_roles) |
+| `DELETE /admin/org/{id}/data` (GDPR) | ✓ | own org | ✗ | ✗ | ✗ |
+
+¹ override requires `department_admin` or above (`rbac.py :: require_admin_role`).
+² audit-read roles are **config-driven** — `product.yaml rbac.audit_read_roles`
+  (default `[auditor, company_admin, platform_admin]`). Widen/narrow without a code change.
 
 ---
 
-## Data Scoping Rules (Enforced Server-Side)
+## The `auditor` role (#55)
 
-| Role | `evaluation_runs` filter | `extracted_*` filter | Dashboard filter |
-|---|---|---|---|
-| superadmin | None (all orgs) | None | None |
-| admin | `org_id = JWT.org_id` | Same | Same |
-| ceo/cfo | `org_id = JWT.org_id` | Same | Same |
-| regional_director | `org_id = JWT.org_id AND region_id = JWT.region_id` | Same | Same |
-| department_head | `org_id = JWT.org_id AND department_id = JWT.department_id` | Same | Same |
-| procurement_manager | Same as department_head | Same | Same |
-| legal_reviewer | `evaluation_id IN shared_evaluations(user_id)` | Same | None |
-| auditor | N/A (audit log only) | N/A | None |
+- **Who:** external auditors / internal compliance.
+- **Can:** read the org-wide audit trail — `access_audit_log` (who viewed which run,
+  when) and `audit_log` (overrides, state-change events) — via `GET /api/v1/audit/*`.
+- **Cannot:** start/confirm/override/cancel/delete runs; see run setup, results,
+  decisions, costs, or vendor content (`/list` returns empty; every per-run endpoint
+  403s via default-deny). Not in `write_roles`, so all write surfaces 403.
+- **Enforcement:** `app/auth/rbac.py :: require_audit_read` (config-driven).
 
 ---
 
 ## Approval Tier vs. RBAC
 
-The approval tier (contract value routing) is separate from RBAC role:
-
-| Contract Value | Required Approver Role | Configured In |
-|---|---|---|
-| < $100K | `department_head` | `org_settings.approval_tier_1_threshold` |
-| $100K – $500K | `regional_director` | `org_settings.approval_tier_2_threshold` |
-| $500K – $1M | `cfo` | `org_settings.approval_tier_3_threshold` |
-| > $1M | `board` | `org_settings.approval_tier_4_threshold` |
-
-These thresholds are configurable per org via admin API. They are not hardcoded.
+Approval routing (by contract value) is separate from the JWT role and configured
+per org in `org_settings` (thresholds are not hardcoded). The required approver is
+recorded as `approval_assignments.approver_role` (free-text: `cfo` / `cto` / …) and
+the assignee is a real user; being an assignee grants visibility of that run only.
 
 ---
 
-## User Management
+## Audit & revocation
 
-### Create User
-```bash
-curl -X POST https://<api>/admin/users \
-  -H "Authorization: Bearer <admin-token>" \
-  -d '{
-    "email": "james.okafor@acme.com",
-    "role": "procurement_manager",
-    "department_id": "it-dept",
-    "region_id": "uk-south"
-  }'
-```
-
-### Deactivate User
-```bash
-curl -X PUT https://<api>/admin/users/{user_id} \
-  -H "Authorization: Bearer <admin-token>" \
-  -d '{"active": false}'
-```
-
-Deactivated users' JWTs are rejected immediately (user lookup happens on each request).
-
-### Role Change
-Role changes require creating a new JWT. Existing tokens with old role remain valid until expiry (max 24h). For immediate role revocation: deactivate user, recreate with new role.
+- Every sensitive read is logged fire-and-forget by `rbac.py :: log_access`
+  → `access_audit_log`. State changes are logged by `app.infra.audit` → `audit_log`.
+- Deactivated users / revoked tokens are rejected per-request via the
+  `auth_sessions` allowlist (E2). Role change → mint a new JWT; old tokens remain
+  valid until expiry unless the session is revoked.

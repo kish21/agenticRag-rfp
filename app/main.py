@@ -12,6 +12,7 @@ from app.api.org_settings_routes import router as org_settings_router
 from app.api.chat_routes import router as chat_router
 from app.api.log_routes import router as log_router
 from app.api.rfp_routes import router as rfp_router
+from app.api.audit_routes import router as audit_router
 from app.api.middleware import OrgContextMiddleware
 
 
@@ -228,6 +229,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(log_router)
     app.include_router(rfp_router)
+    app.include_router(audit_router)
 
     Info("fastapi_app", "FastAPI application info").info({"app_name": "platform_api"})
     # /metrics is a Prometheus scrape endpoint, not part of the customer-facing

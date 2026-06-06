@@ -1,16 +1,19 @@
 """
 JWT authentication and user role management.
 
-Four roles:
+Five roles:
   platform_admin   — operator level, cross-org visibility, no customer data
   company_admin    — all departments within their org
   department_admin — sets criteria templates, sees all evals in their dept
   department_user  — runs evaluations, can override with documented reason
+  auditor          — read-only compliance persona (#55). Sees the org's audit
+                     trail (who-accessed-what + override/state-change events) but
+                     NOT evaluation content, and cannot run/override evaluations.
 
 Token payload:
   sub          — user email
   org_id       — organisation identifier
-  role         — one of the four roles above
+  role         — one of the five roles above
   dept_id      — department identifier (optional, for dept-scoped roles)
   exp          — expiry timestamp
 """
@@ -37,7 +40,8 @@ VALID_ROLES = {
     "platform_admin",
     "company_admin",
     "department_admin",
-    "department_user"
+    "department_user",
+    "auditor",
 }
 
 
