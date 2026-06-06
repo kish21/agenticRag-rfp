@@ -70,6 +70,30 @@ class SystemFact(BaseModel):
     origin_id: str = ""  # check_id | criterion_id | vendor rank as string | etc.
 
 
+class ClaimVerification(BaseModel):
+    """P1.8 — one factual claim extracted from the narrative PROSE, fact-checked
+    by the second-pass verifier against the retrieved evidence. Unlike
+    GroundedClaim (which the synthesis LLM emits and we quote-verify), this is the
+    verifier's verdict on a prose sentence: is it supported by the evidence?"""
+    claim_text: str
+    supported: bool
+    supporting_chunk_id: str = ""   # chunk that supports it (when supported)
+    reason: str = ""                # why unsupported (when not)
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
+class NarrativeVerificationLLMResponse(BaseModel):
+    """Validates the raw JSON from the P1.8 prose-verification LLM call."""
+    claims: List[ClaimVerification] = []
+
+    @field_validator("claims", mode="before")
+    @classmethod
+    def _coerce_claims(cls, v: object) -> object:
+        if not isinstance(v, list):
+            return []
+        return v
+
+
 class SynthesisLLMResponse(BaseModel):
     """Validates the raw LLM JSON output from the synthesis/explanation step."""
     executive_summary: str = ""
@@ -111,6 +135,13 @@ class VendorNarrative(BaseModel):
     # LLM-supplied quote next to a slice of the actual source chunk so the
     # drift pattern (unicode, paraphrase, wrong chunk) can be inspected.
     ungrounded_examples: List[dict] = []
+    # P1.8 — second-pass verification of the FREE-TEXT prose fields above. Each
+    # entry is the verifier's verdict on one prose claim. Defaulted/optional so
+    # pre-P1.8 data and the verification-disabled path validate unchanged.
+    # prose_verification_score = supported / total prose claims (1.0 when the
+    # pass is disabled or there were no prose claims to check).
+    prose_verification: List[ClaimVerification] = []
+    prose_verification_score: float = 1.0
 
 # ── Phase 7 — customer-grade PDF report models ───────────────────────────────
 

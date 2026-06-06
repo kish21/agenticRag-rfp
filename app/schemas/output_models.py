@@ -58,6 +58,8 @@ from .schema_decision import (
     DecisionOutput,
     GroundedClaim,
     SystemFact,
+    ClaimVerification,
+    NarrativeVerificationLLMResponse,
     SynthesisLLMResponse,
     VendorNarrative,
     ExplanationOutput,

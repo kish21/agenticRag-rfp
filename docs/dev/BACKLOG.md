@@ -233,13 +233,15 @@ Things that make the product usable rather than demoable.
 
 ---
 
-### P1.8 — Verification step after synthesis
+### P1.8 — Verification step after synthesis ✅ DONE 2026-06-06 (feat/p1.8-synthesis-verification)
 
-**Problem.** Synthesis step generates narrative claims. Without a verification pass, the report can contain claims not strictly supported by retrieved context.
+**Problem.** The structured `grounded_claims` were already quote-verified, but the Explanation Agent's FREE-TEXT prose (executive_summary / compliance_narrative / scoring_narrative / recommendation_rationale) was never claim-checked — a plausible-but-unsupported sentence could reach the report.
 
-**Fix.** Second LLM call after synthesis checks every claim against retrieved chunks. Add as optional guardrail node before PDF report.
+**Resolution.** `verify_narrative_claims()` (a second, temperature-0 LLM call via `call_llm`, new prompt `explanation/verify_claims.yaml`) fact-checks each prose claim against the SAME evidence the writer had: source chunks + already-verified `grounded_claims` + trusted `system_facts`. Per-claim verdicts (`ClaimVerification`) + a `prose_verification_score` (supported/total; a "supported" verdict below `confidence_floor` is not trusted) are attached to each `VendorNarrative`. `critic_after_explanation` gates the score like grounding_completeness — `< block_below` → HARD (existing explanation retry loop regenerates; `_build_critic_feedback` lists the unsupported sentences), `< warn_below` → SOFT. Config-driven + on by default: `platform.yaml synthesis_verification {enabled, confidence_floor, block_below, warn_below}` (`PlatformSynthesisVerification`). A vacuous 1.0 (disabled / no prose claim) never trips a band.
 
-**Effort.** Half a day.
+**Verified.** 10 new unit+integration tests (`tests/test_synthesis_verification.py`); 41 explanation/critic regression tests + 347 broad suite green; contract_tests 14/14; drift OK; benchmark unchanged — grounding 1.0, 0 fabricated, 0 failures, no verifier false-positives (every scenario approved on attempt 1).
+
+**Effort.** Half a day (actual ~half day).
 
 ---
 

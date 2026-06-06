@@ -59,6 +59,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
 
     # ── Explanation (Agent 07) ────────────────────────────────────────────────
     "explanation/generate_narrative": ("explanation-generate-narrative", "explanation/generate_narrative.yaml"),
+    "explanation/verify_claims":      ("explanation-verify-claims",      "explanation/verify_claims.yaml"),
 
     # ── Critic-as-controller (Phase 2c) ────────────────────────────────────────
     "critic/retry_feedback":          ("critic-retry-feedback",          "critic/retry_feedback.yaml"),
