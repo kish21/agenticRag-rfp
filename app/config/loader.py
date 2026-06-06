@@ -66,6 +66,23 @@ class PlatformInjectionDefence(BaseModel):
     block_threshold: int = Field(default=1, ge=1)
     patterns: list[PlatformInjectionPattern] = []
 
+class PlatformSynthesisVerification(BaseModel):
+    # P1.8 — second-pass verification of the Explanation Agent's FREE-TEXT prose
+    # (executive_summary / compliance_narrative / scoring_narrative /
+    # recommendation_rationale). The structured grounded_claims list is already
+    # quote-verified upstream; the prose was not. A "second LLM call" fact-checks
+    # each prose claim against the SAME retrieved evidence and the trusted
+    # grounded_claims/system_facts. Defaulted so an older platform.yaml still
+    # loads. enabled=True → grounding is core; one extra temperature-0 call/run.
+    # The verified-claim ratio is gated like grounding_completeness:
+    #   ratio < block_below → HARD (Critic blocks → existing retry loop regenerates)
+    #   ratio < warn_below  → SOFT (flag for human review, no block)
+    enabled: bool = True
+    confidence_floor: float = Field(default=0.7, ge=0.0, le=1.0)
+    block_below: float = Field(default=0.7, ge=0.0, le=1.0)
+    warn_below: float = Field(default=0.9, ge=0.0, le=1.0)
+
+
 class PlatformRetrieval(BaseModel):
     embedding_model: str
     embedding_dimensions: int
@@ -116,6 +133,7 @@ class PlatformConfig(BaseModel):
     embedding: PlatformEmbedding
     ingestion: PlatformIngestion
     injection_defence: PlatformInjectionDefence = PlatformInjectionDefence()
+    synthesis_verification: PlatformSynthesisVerification = PlatformSynthesisVerification()
     retrieval: PlatformRetrieval
     llm: PlatformLLM
     infrastructure: PlatformInfra

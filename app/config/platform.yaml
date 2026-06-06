@@ -46,6 +46,20 @@ injection_defence:
     - name: prompt_exfiltration
       regex: '(?i)\b(reveal|print|repeat|output|disclose|show)\b[^.\n]{0,30}\b(system prompt|your instructions|the prompt|previous instructions|above text)\b'
 
+# P1.8 — verify the Explanation Agent's free-text prose against retrieved
+# evidence with a second LLM call. The structured grounded_claims list is already
+# quote-verified upstream; this catches plausible-but-unsupported sentences in
+# the narrative prose before the report is finalised. Thresholds mirror the
+# grounding-completeness gate so behaviour is consistent.
+synthesis_verification:
+  enabled: true
+  # Per-claim: minimum model confidence to TRUST a "supported" verdict.
+  confidence_floor: 0.7
+  # Verified-prose-claim ratio below which the Critic HARD-blocks (→ retry loop).
+  block_below: 0.7
+  # ...and below which it raises a SOFT warning (no block).
+  warn_below: 0.9
+
 embedding:
   # Active model is chosen by EMBEDDING_PROVIDER in .env:
   #   openai / azure  → openai_model

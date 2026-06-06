@@ -571,6 +571,43 @@ def critic_after_explanation(
                 "High hallucination in explanation. Check source data quality."
             ))
 
+    # P1.8 — second-pass prose verification. The structured grounded_claims are
+    # already quote-verified above; this gate covers the FREE-TEXT narrative prose
+    # that verify_narrative_claims() fact-checked. The verified-claim ratio is
+    # gated exactly like grounding_completeness, thresholds from config. A vacuous
+    # 1.0 (verification disabled, or no prose claim to check) carries no
+    # prose_verification entries and never trips these bands.
+    from app.config import settings as _settings
+    _sv = _settings.platform.synthesis_verification
+    if _sv.enabled:
+        for narrative in output.vendor_narratives:
+            verifications = getattr(narrative, "prose_verification", []) or []
+            if not verifications:
+                continue
+            score = getattr(narrative, "prose_verification_score", 1.0)
+            unsupported = [v.claim_text for v in verifications if not v.supported]
+            if score < _sv.block_below:
+                flags.append(_make_flag(
+                    CriticSeverity.HARD, "explanation_agent",
+                    "unsupported_prose_claims",
+                    f"Only {score:.0%} of {narrative.vendor_id}'s narrative prose claims "
+                    f"are supported by evidence — {len(unsupported)} unsupported",
+                    f"vendor={narrative.vendor_id}, score={score}, "
+                    f"unsupported={unsupported[:5]}",
+                    "Narrative prose contains claims not backed by source evidence. "
+                    "Do not send to customer — regenerate the narrative."
+                ))
+            elif score < _sv.warn_below:
+                flags.append(_make_flag(
+                    CriticSeverity.SOFT, "explanation_agent",
+                    "weak_prose_support",
+                    f"{narrative.vendor_id}'s narrative prose is {score:.0%} supported — "
+                    f"{len(unsupported)} claim(s) lack evidence",
+                    f"vendor={narrative.vendor_id}, score={score}, "
+                    f"unsupported={unsupported[:5]}",
+                    "Some narrative prose claims are unsupported. Review before sending."
+                ))
+
     import re as _re
     for narrative in output.vendor_narratives:
         for claim in narrative.grounded_claims[:5]:

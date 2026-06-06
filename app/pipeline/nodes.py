@@ -843,12 +843,33 @@ def _build_critic_feedback(exp_out, exp_critic) -> str:
             parts.append("Examples of claims that were rejected:")
             parts.extend(samples)
 
+    # P1.8 — unsupported narrative-prose claims flagged by the second-pass
+    # verifier. Surfacing the exact sentences lets the retry drop or correct
+    # them rather than re-emitting the same unsupported prose.
+    if exp_out:
+        prose_samples = []
+        for narrative in (exp_out.vendor_narratives or [])[:3]:
+            for v in (getattr(narrative, "prose_verification", []) or []):
+                if not v.supported:
+                    reason = (v.reason or "no supporting evidence")[:120]
+                    prose_samples.append(
+                        f"  - vendor={narrative.vendor_id}: unsupported prose claim "
+                        f"{v.claim_text[:100]!r} ({reason})"
+                    )
+        if prose_samples:
+            parts.append(
+                "Narrative PROSE claims that are NOT backed by evidence — remove "
+                "them or restate only what the source chunks/system facts support:"
+            )
+            parts.extend(prose_samples[:6])
+
     # General rule reminder — most failures are metadata-as-grounded-claim
     parts.append(
         "RULES:\n"
         "  • PDF-content claims (vendor proposal text)  → grounded_claims, with verbatim quote.\n"
         "  • System metadata (decision rank, scores, MC-* check IDs)  → system_facts, NO quote, NO chunk_id.\n"
         "  • The grounding_quote MUST be a copy-paste verbatim substring of one source chunk.\n"
+        "  • Every sentence in the narrative prose must be supported by the evidence above.\n"
     )
     return "\n".join(parts)
 

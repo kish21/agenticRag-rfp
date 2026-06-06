@@ -18,10 +18,12 @@ from pydantic import ValidationError
 from app.schemas.output_models import (
     ExplanationOutput, VendorNarrative, GroundedClaim,
     SynthesisLLMResponse, SystemFact,
+    ClaimVerification, NarrativeVerificationLLMResponse,
     DecisionOutput, EvaluationOutput, ExtractionOutput,
 )
 from app.agents.critic import critic_after_explanation
 from app.infra.cost_tracker import mark_agent
+from app.config import settings
 
 
 def verify_grounding(
@@ -42,6 +44,88 @@ def verify_grounding(
         return re.sub(r"\s+", " ", t).strip()
 
     return _ws(grounding_quote) in _ws(source)
+
+
+def _format_verified_claims(claims: list[GroundedClaim]) -> str:
+    parts = [f"- {c.claim_text} (quote: \"{c.grounding_quote}\")" for c in claims]
+    return "\n".join(parts) if parts else "None."
+
+
+def _format_system_facts(facts: list[SystemFact]) -> str:
+    parts = [f"- {f.fact_text}" for f in facts]
+    return "\n".join(parts) if parts else "None."
+
+
+async def verify_narrative_claims(
+    narrative: VendorNarrative,
+    source_chunks: dict[str, str],
+) -> tuple[list[ClaimVerification], float]:
+    """P1.8 — second LLM pass that fact-checks the narrative's FREE-TEXT prose
+    against the SAME evidence the writer was given (source chunks + the already
+    grounding-verified claims + trusted system facts).
+
+    Returns ``(verifications, score)`` where score = supported_claims / total
+    prose claims. A "supported" verdict below the configured ``confidence_floor``
+    is NOT trusted and counts as unsupported (fail-toward-flagging). When the
+    pass is disabled, or the prose carries no factual claim, score is a vacuous
+    1.0 (nothing to verify) and ``verifications`` is empty — mirroring how
+    ``compute_grounding`` treats a claim-free narrative.
+    """
+    cfg = settings.platform.synthesis_verification
+    if not cfg.enabled:
+        return [], 1.0
+
+    prose = "\n".join([
+        narrative.executive_summary or "",
+        narrative.compliance_narrative or "",
+        narrative.scoring_narrative or "",
+        narrative.recommendation_rationale or "",
+    ]).strip()
+    if not prose:
+        return [], 1.0
+
+    messages = [
+        {"role": "system", "content": get_prompt("explanation/verify_claims")},
+        {
+            "role": "user",
+            "content": (
+                f"Executive summary: {narrative.executive_summary}\n"
+                f"Compliance narrative: {narrative.compliance_narrative}\n"
+                f"Scoring narrative: {narrative.scoring_narrative}\n"
+                f"Recommendation rationale: {narrative.recommendation_rationale}\n\n"
+                f"SOURCE CHUNKS:\n{_format_chunks(source_chunks)}\n\n"
+                f"VERIFIED CLAIMS:\n{_format_verified_claims(narrative.grounded_claims)}\n\n"
+                f"SYSTEM FACTS:\n{_format_system_facts(narrative.system_facts)}"
+            ),
+        },
+    ]
+
+    raw = await call_llm(messages, temperature=0.0,
+                         response_format={"type": "json_object"})
+    try:
+        raw_dict = json.loads(raw)
+    except json.JSONDecodeError:
+        raw_dict = {}
+    try:
+        parsed = NarrativeVerificationLLMResponse.model_validate(raw_dict)
+    except ValidationError:
+        parsed = NarrativeVerificationLLMResponse()
+
+    verifications = parsed.claims
+    if not verifications:
+        # The verifier returned nothing parseable. Treat as a vacuous pass rather
+        # than a false HARD block — the upstream grounding gate still guards the
+        # structured claims, and the critic's claim_free/empty checks still fire.
+        return [], 1.0
+
+    # A "supported" verdict the model is not confident about does not count as
+    # support — bias toward flagging so the critic can route to human review.
+    def _trusted_support(v: ClaimVerification) -> bool:
+        return v.supported and v.confidence >= cfg.confidence_floor
+
+    supported = sum(1 for v in verifications if _trusted_support(v))
+    score = supported / len(verifications)
+    return verifications, round(score, 3)
 
 
 async def _generate_vendor_narrative(
@@ -170,7 +254,7 @@ async def _generate_vendor_narrative(
             origin="decision", origin_id=vendor_id,
         ))
 
-    return VendorNarrative(
+    narrative = VendorNarrative(
         vendor_id=vendor_id,
         vendor_name=vendor_name,
         executive_summary=synthesis.executive_summary,
@@ -184,6 +268,18 @@ async def _generate_vendor_narrative(
         system_facts=system_facts,
         ungrounded_examples=ungrounded_examples,
     )
+
+    # P1.8 — second-pass verification of the FREE-TEXT prose against the same
+    # evidence. The structured grounded_claims above are already quote-verified;
+    # this catches plausible-but-unsupported sentences in the narrative prose.
+    # Config-gated (settings.platform.synthesis_verification.enabled); the Critic
+    # turns a low prose_verification_score into a HARD/SOFT flag.
+    prose_verification, prose_score = await verify_narrative_claims(
+        narrative, source_chunks
+    )
+    narrative.prose_verification = prose_verification
+    narrative.prose_verification_score = prose_score
+    return narrative
 
 
 def _fmt_currency(value: float | None, currency: str) -> str:
