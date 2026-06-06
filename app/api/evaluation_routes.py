@@ -39,6 +39,10 @@ from app.schemas.output_models import (
     ScoringCriterion, ExtractionTarget,
 )
 from app.db.fact_store import get_engine, save_evaluation_setup
+from app.api.openapi_responses import (
+    responses, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, BAD_REQUEST,
+    SERVICE_UNAVAILABLE,
+)
 
 from app.api._evaluation.db import (
     _db_get_run, _db_update_status, _db_get_setup,
@@ -52,7 +56,11 @@ router = APIRouter(prefix="/api/v1/evaluate", tags=["evaluate"])
 
 # ── POST /start ────────────────────────────────────────────────────────────────
 
-@router.post("/start")
+@router.post(
+    "/start",
+    summary="Start an evaluation run (upload RFP + vendor docs)",
+    responses=responses(UNAUTHORIZED),
+)
 async def start_evaluation(
     background_tasks: BackgroundTasks,
     rfp_title: str = Form(...),
@@ -267,7 +275,11 @@ async def start_evaluation(
 
 # ── GET /list ──────────────────────────────────────────────────────────────────
 
-@router.get("/list")
+@router.get(
+    "/list",
+    summary="List evaluation runs for the dashboard",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, BAD_REQUEST),
+)
 async def list_runs(
     user: TokenData = Depends(get_current_user),
     scope: str = "auto",
@@ -383,7 +395,11 @@ async def list_runs(
 
 # ── GET /{runId}/setup ─────────────────────────────────────────────────────────
 
-@router.get("/{run_id}/setup")
+@router.get(
+    "/{run_id}/setup",
+    summary="Get the evaluation setup for a run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def get_setup(run_id: str, user: TokenData = Depends(get_current_user)):
     """Confirm page: returns the EvaluationSetup for this run."""
     run = _db_get_run(run_id, user.org_id)
@@ -414,7 +430,11 @@ class UpdateSetupRequest(BaseModel):
     extraction_targets: list[dict] | None = None
 
 
-@router.put("/{run_id}/setup")
+@router.put(
+    "/{run_id}/setup",
+    summary="Edit a run's criteria before it starts",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def update_setup(
     run_id: str,
     body: UpdateSetupRequest,
@@ -473,7 +493,11 @@ async def update_setup(
 
 # ── POST /{runId}/confirm ──────────────────────────────────────────────────────
 
-@router.post("/{run_id}/confirm")
+@router.post(
+    "/{run_id}/confirm",
+    summary="Confirm a run and start the pipeline",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def confirm_run(
     run_id: str,
     background_tasks: BackgroundTasks,
@@ -495,7 +519,11 @@ async def confirm_run(
 # ── Phase 3 PR-B — bypass-cache rerun (3.14 + 3.16) ──────────────────
 
 
-@router.post("/{run_id}/rerun")
+@router.post(
+    "/{run_id}/rerun",
+    summary="Re-run a completed evaluation (optionally bypassing cache)",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def rerun_evaluation(
     run_id: str,
     background_tasks: BackgroundTasks,
@@ -667,8 +695,14 @@ async def _compute_divergence(
 
 # ── SSE streams ────────────────────────────────────────────────────────────────
 
-@router.get("/{run_id}/status")
+@router.get(
+    "/{run_id}/status",
+    summary="Stream agent status for a run (SSE)",
+    responses=responses(UNAUTHORIZED, NOT_FOUND),
+)
 async def run_status_stream(run_id: str, user: TokenData = Depends(get_current_user)):
+    """Server-sent events stream of the pipeline's per-agent progress for a run.
+    Authenticates via Bearer token or session cookie."""
     _db_get_run(run_id, user.org_id)
     return StreamingResponse(
         _event_stream(run_id, user.org_id),
@@ -677,7 +711,11 @@ async def run_status_stream(run_id: str, user: TokenData = Depends(get_current_u
     )
 
 
-@router.get("/{run_id}/stream")
+@router.get(
+    "/{run_id}/stream",
+    summary="Stream run progress (SSE, cookie auth)",
+    responses=responses(UNAUTHORIZED, NOT_FOUND),
+)
 async def run_stream_alias(run_id: str, request: Request):
     """SSE alias for run progress. Auth is cookie-only.
 
@@ -722,7 +760,12 @@ def _run_report_or_404(run_id: str, user: TokenData, action: str) -> dict:
     return run
 
 
-@router.get("/{run_id}/report.html", response_class=HTMLResponse)
+@router.get(
+    "/{run_id}/report.html",
+    response_class=HTMLResponse,
+    summary="View the evaluation report (HTML)",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def get_report_html(run_id: str, user: TokenData = Depends(get_current_user)):
     """In-app report view: the customer logs in and reads the report as HTML."""
     from app.output.pdf_report import build_report_html_for_run
@@ -730,7 +773,11 @@ async def get_report_html(run_id: str, user: TokenData = Depends(get_current_use
     return HTMLResponse(content=build_report_html_for_run(run))
 
 
-@router.get("/{run_id}/report.pdf")
+@router.get(
+    "/{run_id}/report.pdf",
+    summary="Download the evaluation report (PDF)",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, SERVICE_UNAVAILABLE),
+)
 async def get_report_pdf(run_id: str, user: TokenData = Depends(get_current_user)):
     """Download the report as a PDF (same template as the HTML view)."""
     from app.output.pdf_report import render_report_pdf_for_run
@@ -750,8 +797,14 @@ async def get_report_pdf(run_id: str, user: TokenData = Depends(get_current_user
 
 # ── GET /{runId}/results ───────────────────────────────────────────────────────
 
-@router.get("/{run_id}/results")
+@router.get(
+    "/{run_id}/results",
+    summary="Get a run's evaluation results",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def get_results(run_id: str, user: TokenData = Depends(get_current_user)):
+    """Return the decision output for a run — shortlisted and rejected vendors
+    with scores, recommendations, approval routing and review flags."""
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
     log_access(run_id, user.org_id, user.email, "view_results")
@@ -801,9 +854,15 @@ async def get_results(run_id: str, user: TokenData = Depends(get_current_user)):
 
 # ── GET /{runId}/decision ──────────────────────────────────────────────────────
 
-@router.get("/{run_id}/decision")
+@router.get(
+    "/{run_id}/decision",
+    summary="Get a single vendor's decision",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def get_vendor_decision(run_id: str, vendor: str,
                                user: TokenData = Depends(get_current_user)):
+    """Return the shortlist/reject decision for one vendor in a run, including
+    rank and rejection reasons. 404 if the vendor is not part of the run."""
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
     decision = run.get("decision_output") or {}
@@ -831,9 +890,16 @@ class OverrideRequest(BaseModel):
     reason: str
 
 
-@router.post("/{run_id}/override")
+@router.post(
+    "/{run_id}/override",
+    summary="Submit a human override of a vendor decision",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def submit_override(run_id: str, body: OverrideRequest,
                            user: TokenData = Depends(get_current_user)):
+    """Record an admin override of a vendor's decision, writing an immutable
+    AuditOverride record. Admin-only (403 otherwise); 404 if the vendor is not
+    part of the run."""
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
     require_admin_role(user)
@@ -891,7 +957,11 @@ async def submit_override(run_id: str, body: OverrideRequest,
 
 # ── POST /{runId}/re-evaluate ──────────────────────────────────────────────────
 
-@router.post("/{run_id}/re-evaluate")
+@router.post(
+    "/{run_id}/re-evaluate",
+    summary="Re-evaluate a completed or failed run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def re_evaluate(
     run_id: str,
     background_tasks: BackgroundTasks,
@@ -926,7 +996,11 @@ async def re_evaluate(
 
 # ── GET /{runId}/audit ─────────────────────────────────────────────────────────
 
-@router.get("/{run_id}/audit")
+@router.get(
+    "/{run_id}/audit",
+    summary="Get the full audit trail for a run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def get_audit_trail(run_id: str, user: TokenData = Depends(get_current_user)):
     """Return the full append-only audit trail for a run, ordered by time."""
     run = _db_get_run(run_id, user.org_id)
@@ -961,7 +1035,11 @@ async def get_audit_trail(run_id: str, user: TokenData = Depends(get_current_use
 
 # ── GET /{runId}/export ────────────────────────────────────────────────────────
 
-@router.get("/{run_id}/export")
+@router.get(
+    "/{run_id}/export",
+    summary="Export run results as CSV",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def export_run_csv(run_id: str, user: TokenData = Depends(get_current_user)):
     """Download evaluation results as CSV with criterion-level scores and grounding quotes."""
     import csv
@@ -1037,7 +1115,11 @@ async def export_run_csv(run_id: str, user: TokenData = Depends(get_current_user
 
 # ── GET /{runId}/cost ──────────────────────────────────────────────────────────
 
-@router.get("/{run_id}/cost")
+@router.get(
+    "/{run_id}/cost",
+    summary="Get LLM cost and token usage for a run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_current_user)):
     """Return LLM cost and token usage for a run (live if in-progress, persisted if completed)."""
     run = _db_get_run(run_id, user.org_id)
@@ -1070,7 +1152,11 @@ async def get_run_cost_endpoint(run_id: str, user: TokenData = Depends(get_curre
 
 # ── GET /{runId}/cost-estimate ─────────────────────────────────────────────────
 
-@router.get("/{run_id}/cost-estimate")
+@router.get(
+    "/{run_id}/cost-estimate",
+    summary="Estimate the cost of running an evaluation",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def get_cost_estimate(run_id: str, user: TokenData = Depends(get_current_user)):
     """Pre-run cost estimate based on vendor count and configured LLM model."""
     run = _db_get_run(run_id, user.org_id)
@@ -1101,7 +1187,11 @@ async def get_cost_estimate(run_id: str, user: TokenData = Depends(get_current_u
 
 # ── POST /{runId}/cancel ───────────────────────────────────────────────────────
 
-@router.post("/{run_id}/cancel")
+@router.post(
+    "/{run_id}/cancel",
+    summary="Cancel a running evaluation",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def cancel_run(run_id: str, user: TokenData = Depends(get_current_user)):
     """Mark a running evaluation as interrupted so the SSE stream terminates."""
     run = _db_get_run(run_id, user.org_id)
@@ -1130,7 +1220,11 @@ async def cancel_run(run_id: str, user: TokenData = Depends(get_current_user)):
 
 # ── DELETE /{runId} ────────────────────────────────────────────────────────────
 
-@router.delete("/{run_id}")
+@router.delete(
+    "/{run_id}",
+    summary="Permanently delete an evaluation run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def delete_run(run_id: str, user: TokenData = Depends(get_current_user)):
     """
     Permanently delete an evaluation run.
@@ -1186,7 +1280,11 @@ class CollaboratorRequest(BaseModel):
     role: str = "viewer"  # 'viewer' | 'reviewer' | 'editor'
 
 
-@router.post("/{run_id}/collaborators")
+@router.post(
+    "/{run_id}/collaborators",
+    summary="Add a collaborator to a run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BAD_REQUEST),
+)
 async def add_run_collaborator(
     run_id: str,
     body: CollaboratorRequest,
@@ -1221,7 +1319,11 @@ async def add_run_collaborator(
     return {"status": "ok", "run_id": run_id, "user_id": body.user_id, "role": body.role}
 
 
-@router.delete("/{run_id}/collaborators/{user_id}")
+@router.delete(
+    "/{run_id}/collaborators/{user_id}",
+    summary="Remove a collaborator from a run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def remove_run_collaborator(
     run_id: str,
     user_id: str,

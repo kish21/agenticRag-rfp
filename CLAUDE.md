@@ -91,9 +91,11 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Last updated:** 2026-06-06 · **Branch:** master (clean, synced with origin) · **HEAD:** `450fc04`
+**Last updated:** 2026-06-06 · **Branch:** master (clean, synced with origin) · **HEAD:** `450fc04` (+ DX-001 #128 PR pending)
 
 **On master — all merged.** Phases 1, 2, 2c, 4, 5, 7, 9 + Phase 8 module foundation. Enterprise-readiness E1–E3 + E3.a–e done. Working tree clean; nothing pending to push.
+
+**#128 (DX-001) OpenAPI/Swagger annotations — BUILT (PR pending).** All 58 routes + `/health` now declare a `summary` + description; authenticated routes document 401, path-param routes 404/409, role-gated routes 403; app-level OpenAPI metadata (description/contact/license) + 9 per-tag descriptions are config-driven (`platform.yaml api_docs` → `PlatformApiDocs` in `loader.py`, read by `main.py _openapi_metadata()`). New reusable `app/api/openapi_responses.py` (error-spec constants + `responses()` merge) keeps the decorators DRY. **Conservative — zero new `response_model`** (the 13 existing reformatted only; snapshot guard pins all 19 model-bound routes), so no JSON body can be filtered. `/metrics` moved to `include_in_schema=False`. New tests: `tests/test_openapi_annotations.py` (hard-fail completeness + 401/404 + app-info meta-tests over `app.openapi()`) and `tests/test_openapi_response_snapshot.py` (live body snapshot, no DB). Verified: 11 new tests pass + full non-live suite **366 passed, 1 skipped**, 0 failures. Benchmark not re-run (no agent/pipeline code touched). Full detail in `docs/dev/128.md`.
 
 **#267 (P1.7) self-consistency voting — MERGED.** Borderline mandatory checks (primary confidence in `[confidence_min, confidence_max]`, default `[0.5, 0.75]`) are resampled `samples`× (default 3) at non-zero temperature with distinct seeds; the STRICT majority wins, no-majority → fail-safe `insufficient_evidence`. Clear-cut checks (confidence outside the band) stay single-call → no added cost. New `_decide_check_with_voting` helper in `app/agents/evaluation.py` returns ONE representative parsed dict (so E3.b contradiction override + chunk fallback + `ComplianceDecision` construction are all untouched) plus a `vote_breakdown` audit dict (new defaulted field on `ComplianceDecision`). Baseline call keeps today's auto-derived seed (deliberate — see `docs/dev/P1.7.md`); only resamples take explicit seeds. Config-driven, ON by default: `platform.yaml self_consistency` (`PlatformSelfConsistency` in `loader.py`). Verified: 8 unit/integration tests + full non-live suite (336 passed) + benchmark unchanged (grounding 1.0, 0 fabricated, 0 failures, no scenario flips, $0.43).
 
@@ -109,14 +111,13 @@ Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not r
 Latest benchmark baseline (`benchmark/results/`): grounding 1.00, 0 fabricated, 0 op-failures.
 
 **Next action (next session) — pick ONE, one subtask per session:**
-- **#128 DX-001** — OpenAPI/Swagger route annotations (response_model/summary/examples); metadata already set, mechanical, customer-facing, low-risk. Recommended next.
-- **#124 OR-001** — Grafana dashboard JSON (Prometheus/Grafana already in docker-compose; just author panels)
+- **#124 OR-001** — Grafana dashboard JSON (Prometheus/Grafana already in docker-compose; just author panels). Recommended next quick win.
 - **P1.4** — cancel running pipeline (1–2 days, full-stack — larger than one session)
 - **P1.9 (#60)** — human feedback capture for score overrides → few-shot bank (1 day, full-stack)
 - **E3.f (#209)** — scanned/OCR document support (P4 — parked; vendors send digital PDFs today, revisit when a customer submits scanned docs; the present-day safety fix = make scanned PDFs fail with a clear message instead of "No usable chunks")
 - **8b** — delivery completion hook + Mode C auto-trigger (engine/channels done #179/#181; needs live infra + Mailtrap/Resend SMTP creds)
 
-P1 GitHub issues: #133 ✅ (#256), #59 P1.8 ✅ (#265) shipped; P1.7 ✅ built (pending merge). Quick wins next: #128, #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
+P1 GitHub issues: #133 ✅ (#256), #59 P1.8 ✅ (#265), P1.7 ✅ (#267) shipped; #128 DX-001 ✅ built (PR pending). Quick wins next: #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
 
 De-prioritised: **E3.b.1** cert-status contradiction = **#210** (closed / won't-do — domain over-fitting; the generic value-contradiction path #198 already covers the real case. See [[generic_platform_no_domain_special_case]]).
 

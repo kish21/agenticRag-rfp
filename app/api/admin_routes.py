@@ -4,6 +4,9 @@ from pydantic import BaseModel
 from app.domain.agent_registry import register_agent, get_agent_config, list_agents
 from app.auth.dependencies import get_current_user
 from app.auth.jwt import require_role, TokenData
+from app.api.openapi_responses import (
+    responses, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, BAD_REQUEST,
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -17,7 +20,12 @@ class RegisterAgentResponse(BaseModel):
     message: str
 
 
-@router.post("/agents", response_model=RegisterAgentResponse)
+@router.post(
+    "/agents",
+    response_model=RegisterAgentResponse,
+    summary="Register a new agent config",
+    responses=responses(UNAUTHORIZED, FORBIDDEN),
+)
 async def register_new_agent(
     body: RegisterAgentRequest,
     user: TokenData = Depends(get_current_user),
@@ -31,7 +39,11 @@ async def register_new_agent(
     return RegisterAgentResponse(agent_id=agent_id, message="Agent registered successfully")
 
 
-@router.get("/agents")
+@router.get(
+    "/agents",
+    summary="List agents for the caller's org",
+    responses=responses(UNAUTHORIZED, FORBIDDEN),
+)
 async def list_org_agents(
     user: TokenData = Depends(get_current_user),
     _: None = Depends(require_role("platform_admin", "company_admin", "department_admin")),
@@ -40,7 +52,11 @@ async def list_org_agents(
     return {"agents": list_agents(org_id=user.org_id)}
 
 
-@router.get("/agents/{agent_id}")
+@router.get(
+    "/agents/{agent_id}",
+    summary="Get an agent's config",
+    responses=responses(UNAUTHORIZED, NOT_FOUND),
+)
 async def get_agent(
     agent_id: str,
     user: TokenData = Depends(get_current_user),
@@ -71,7 +87,11 @@ class UserDeptAssignment(BaseModel):
     role_in_dept: str = "member"   # 'member' | 'lead' | 'observer'
 
 
-@router.post("/user-departments")
+@router.post(
+    "/user-departments",
+    summary="Add a user to a department",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, BAD_REQUEST),
+)
 async def add_user_department(
     body: UserDeptAssignment,
     user: TokenData = Depends(get_current_user),
@@ -92,7 +112,11 @@ class ApprovalAssignmentRequest(BaseModel):
     approver_role: str  # 'cfo' | 'cto' | 'cpo' | 'legal' | etc.
 
 
-@router.post("/approval-assignments")
+@router.post(
+    "/approval-assignments",
+    summary="Assign an approver to a run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, BAD_REQUEST),
+)
 async def add_approval_assignment(
     body: ApprovalAssignmentRequest,
     user: TokenData = Depends(get_current_user),
@@ -137,7 +161,11 @@ class AssignVendorRequest(BaseModel):
     invite_if_missing: bool = True
 
 
-@router.get("/attribution-queue")
+@router.get(
+    "/attribution-queue",
+    summary="List ingestion jobs needing attribution",
+    responses=responses(UNAUTHORIZED, FORBIDDEN),
+)
 async def list_attribution_queue(
     user: TokenData = Depends(_require_admin_attribution_role),
 ) -> dict:
@@ -162,7 +190,11 @@ async def list_attribution_queue(
     return {"jobs": [dict(r._mapping) for r in rows]}
 
 
-@router.post("/attribution-queue/{job_id}/assign")
+@router.post(
+    "/attribution-queue/{job_id}/assign",
+    summary="Assign a vendor to an attribution job",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def assign_attribution(
     job_id: str,
     body: AssignVendorRequest,
@@ -229,7 +261,11 @@ async def assign_attribution(
     return {"job_id": job_id, "vendor_id": body.vendor_id, "status": new_status}
 
 
-@router.post("/late-addendum/{job_id}/accept")
+@router.post(
+    "/late-addendum/{job_id}/accept",
+    summary="Accept a late vendor addendum",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, CONFLICT),
+)
 async def accept_late_addendum(
     job_id: str,
     user: TokenData = Depends(_require_admin_attribution_role),
@@ -260,7 +296,11 @@ async def accept_late_addendum(
 # ── Phase 3 PR-B: LLM cache admin invalidation (3.15) ────────────────
 
 
-@router.delete("/llm-cache")
+@router.delete(
+    "/llm-cache",
+    summary="Purge cached LLM responses",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, BAD_REQUEST),
+)
 async def purge_llm_cache(
     model: Optional[str] = None,
     before: Optional[str] = None,    # ISO timestamp string

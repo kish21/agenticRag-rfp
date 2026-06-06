@@ -12,6 +12,9 @@ from pydantic import BaseModel
 import sqlalchemy as sa
 from app.auth.dependencies import get_current_user, get_db
 from app.auth.jwt import TokenData
+from app.api.openapi_responses import (
+    responses, UNAUTHORIZED, FORBIDDEN, NOT_FOUND,
+)
 
 router = APIRouter(prefix="/api/v1/tenant", tags=["tenant"])
 
@@ -29,11 +32,17 @@ class RoleUpdate(BaseModel):
 
 # ── Profile ────────────────────────────────────────────────────────────────────
 
-@router.get("/profile")
+@router.get(
+    "/profile",
+    summary="Get the organisation profile",
+    responses=responses(UNAUTHORIZED, NOT_FOUND),
+)
 async def get_profile(
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_db),
 ):
+    """Return the caller's organisation profile — name, industry, subscription
+    tier, and billing plan/modules."""
     row = db.execute(
         sa.text("""
             SELECT o.org_id::text, o.org_name, o.industry, o.subscription_tier,
@@ -51,12 +60,18 @@ async def get_profile(
     return dict(zip(keys, row))
 
 
-@router.put("/profile")
+@router.put(
+    "/profile",
+    summary="Update the organisation profile",
+    responses=responses(UNAUTHORIZED, FORBIDDEN),
+)
 async def update_profile(
     req: ProfileUpdate,
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_db),
 ):
+    """Update the org name and/or industry. Requires a company/platform admin
+    role (403 otherwise)."""
     if current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient role")
 
@@ -80,11 +95,17 @@ async def update_profile(
 
 # ── Users ──────────────────────────────────────────────────────────────────────
 
-@router.get("/users")
+@router.get(
+    "/users",
+    summary="List users in the organisation",
+    responses=responses(UNAUTHORIZED, FORBIDDEN),
+)
 async def list_users(
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_db),
 ):
+    """List all users in the caller's org. Requires an admin role
+    (company/platform/department admin); 403 otherwise."""
     if current_user.role not in ADMIN_ROLES | {"department_admin"}:
         raise HTTPException(status_code=403, detail="Insufficient role")
 
@@ -102,13 +123,19 @@ async def list_users(
     return [dict(zip(keys, r)) for r in rows]
 
 
-@router.put("/users/{user_id}/role")
+@router.put(
+    "/users/{user_id}/role",
+    summary="Change a user's role",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def update_role(
     user_id: str,
     req: RoleUpdate,
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_db),
 ):
+    """Set a user's role (admin-only). 422 if the role is not a recognised
+    value; 404 if no such user exists in this org."""
     if current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient role")
 
@@ -130,12 +157,19 @@ async def update_role(
     return {"message": "Role updated"}
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Deactivate a user",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
 async def deactivate_user(
     user_id: str,
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_db),
 ):
+    """Soft-delete (deactivate) a user in the caller's org. Admin-only; 404 if
+    no such user exists. Returns 204 No Content on success."""
     if current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient role")
 

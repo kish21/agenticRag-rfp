@@ -225,6 +225,46 @@ governance:
 ranking:
   min_coverage_for_trust: 0.5
 
+# DX-001 (#128) — public OpenAPI/Swagger metadata. Pure documentation surfaced
+# at /docs, /redoc and /openapi.json; no runtime behaviour. Edit these strings
+# to rebrand the API docs without touching app/main.py.
+api_docs:
+  description: |
+    REST API for the **Meridian AI Platform** — the Enterprise Agentic RFP
+    Evaluation service. Upload an RFP and competing vendor proposals, and a
+    governed nine-agent pipeline (planning, ingestion, retrieval, extraction,
+    evaluation, comparison, decision, explanation, and a guardrail critic)
+    produces a grounded, fully cited shortlist with an auditable decision trail.
+
+    **Authentication** — obtain a JWT from `POST /api/v1/auth/token`, then send
+    it either as a `Bearer` token in the `Authorization` header or via the
+    `meridian_session` HttpOnly cookie. All endpoints are tenant-isolated:
+    every request is scoped to the caller's organisation.
+  contact_name: Meridian AI Platform Support
+  contact_email: support@meridianai.com
+  contact_url: https://meridianai.com
+  license_name: Proprietary
+  license_url: ""
+  tags:
+    - name: auth
+      description: Sign-up, login, session/JWT lifecycle, invites and password reset.
+    - name: admin
+      description: Org administration — agent registry, department membership, approval assignments, attribution queue and LLM-cache maintenance.
+    - name: evaluate
+      description: The core RFP-evaluation lifecycle — start a run, confirm criteria, stream progress, and read the decision, report, audit trail and cost.
+    - name: tenant
+      description: Organisation profile and user/role management within a tenant.
+    - name: org-settings
+      description: Per-organisation evaluation settings and presets.
+    - name: chat
+      description: Document Q&A and success-criteria capture for procurement managers.
+    - name: rfps
+      description: RFP lifecycle — create an RFP, invite vendors, and manage submission deadlines.
+    - name: logs
+      description: Live (SSE) and historical developer/agent log access for a run.
+    - name: system
+      description: Service health and operational endpoints.
+
 hyde_templates:
   vendor_response: |
     Write a 2-3 sentence passage from a vendor response document

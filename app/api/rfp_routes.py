@@ -28,6 +28,9 @@ from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user
 from app.auth.jwt import TokenData
+from app.api.openapi_responses import (
+    responses, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, BAD_REQUEST,
+)
 from app.config import settings
 from app.db.fact_store import (
     create_rfp,
@@ -135,7 +138,13 @@ def _load_rfp_or_404(rfp_id: str, org_id: str) -> dict:
 # ── Endpoints ────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=CreateRFPResponse, status_code=201)
+@router.post(
+    "",
+    response_model=CreateRFPResponse,
+    status_code=201,
+    summary="Create an RFP shell",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, BAD_REQUEST),
+)
 async def create_rfp_endpoint(
     body: CreateRFPRequest,
     user: TokenData = Depends(_require_rfp_write_role),
@@ -174,7 +183,11 @@ async def create_rfp_endpoint(
     )
 
 
-@router.get("/{rfp_id}")
+@router.get(
+    "/{rfp_id}",
+    summary="Get an RFP rollup",
+    responses=responses(UNAUTHORIZED, NOT_FOUND),
+)
 async def get_rfp_endpoint(
     rfp_id: str,
     user: TokenData = Depends(get_current_user),
@@ -185,7 +198,13 @@ async def get_rfp_endpoint(
     return rollup
 
 
-@router.post("/{rfp_id}/vendors", response_model=InviteVendorResponse, status_code=201)
+@router.post(
+    "/{rfp_id}/vendors",
+    response_model=InviteVendorResponse,
+    status_code=201,
+    summary="Invite a vendor to an RFP",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BAD_REQUEST),
+)
 async def invite_vendor_endpoint(
     rfp_id: str,
     body: InviteVendorRequest,
@@ -208,7 +227,12 @@ async def invite_vendor_endpoint(
     )
 
 
-@router.post("/{rfp_id}/deadline", status_code=200)
+@router.post(
+    "/{rfp_id}/deadline",
+    status_code=200,
+    summary="Set or extend an RFP deadline",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT),
+)
 async def set_deadline_endpoint(
     rfp_id: str,
     body: SetDeadlineRequest,

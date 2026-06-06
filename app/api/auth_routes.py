@@ -32,6 +32,9 @@ from app.auth.jwt import (
 from app.auth.dependencies import get_current_user, get_admin_db, COOKIE_NAME
 from app.auth.sessions import issue_session, revoke_session, revoke_user_sessions
 from app.auth import tokens
+from app.api.openapi_responses import (
+    responses, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, BAD_REQUEST,
+)
 from app.config import settings
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -154,7 +157,13 @@ def _email_taken(conn, email: str) -> bool:
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
-@router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/signup",
+    response_model=Token,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register a new organisation and owner",
+    responses=responses(CONFLICT),
+)
 async def signup(req: SignupRequest, response: Response, db=Depends(get_admin_db)):
     """
     Create a new organisation and its first owner user in one transaction.
@@ -223,9 +232,15 @@ async def signup(req: SignupRequest, response: Response, db=Depends(get_admin_db
     return token
 
 
-@router.post("/token", response_model=Token)
+@router.post(
+    "/token",
+    response_model=Token,
+    summary="Log in and obtain a JWT",
+    responses=responses(UNAUTHORIZED, FORBIDDEN),
+)
 async def login(req: LoginRequest, response: Response, db=Depends(get_admin_db)):
-    """Exchange email + password for a JWT token."""
+    """Exchange email + password for a JWT token. 401 on bad credentials,
+    403 if the account is inactive."""
     user = _get_user_by_email(db, req.email)
 
     if user is None:
@@ -303,7 +318,11 @@ def _ensure_dev_user(db) -> None:
     db.commit()
 
 
-@router.post("/logout")
+@router.post(
+    "/logout",
+    summary="Log out and revoke this session",
+    responses=responses(UNAUTHORIZED),
+)
 async def logout(
     response: Response,
     current_user: TokenData = Depends(get_current_user),
@@ -317,8 +336,14 @@ async def logout(
     return {"message": "Logged out"}
 
 
-@router.post("/verify")
+@router.post(
+    "/verify",
+    summary="Verify the current token",
+    responses=responses(UNAUTHORIZED),
+)
 async def verify_token(current_user: TokenData = Depends(get_current_user)):
+    """Validate the caller's token and echo back its core claims (email, org,
+    role). Used by the frontend to confirm a session is still live."""
     return {
         "valid": True,
         "email": current_user.email,
@@ -327,7 +352,12 @@ async def verify_token(current_user: TokenData = Depends(get_current_user)):
     }
 
 
-@router.get("/me", response_model=UserInfo)
+@router.get(
+    "/me",
+    response_model=UserInfo,
+    summary="Get the current user record",
+    responses=responses(UNAUTHORIZED, NOT_FOUND),
+)
 async def get_me(
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_admin_db),
@@ -339,7 +369,12 @@ async def get_me(
     return UserInfo(**user)
 
 
-@router.post("/invite", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/invite",
+    status_code=status.HTTP_201_CREATED,
+    summary="Invite a team member",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, CONFLICT),
+)
 async def invite_user(
     req: InviteRequest,
     current_user: TokenData = Depends(get_current_user),
@@ -380,9 +415,17 @@ async def invite_user(
     }
 
 
-@router.post("/invite/accept", response_model=Token, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/invite/accept",
+    response_model=Token,
+    status_code=status.HTTP_201_CREATED,
+    summary="Accept an invite and set a password",
+    responses=responses(BAD_REQUEST, CONFLICT),
+)
 async def accept_invite(req: InviteAcceptRequest, response: Response, db=Depends(get_admin_db)):
-    """Redeem a one-time invite token and set the invitee's own password."""
+    """Redeem a one-time invite token and set the invitee's own password.
+    400 if the token is invalid/expired, 409 if the email is already taken.
+    Returns a JWT for the new user."""
     _validate_password(req.password)
 
     with db.begin():
@@ -422,7 +465,11 @@ async def accept_invite(req: InviteAcceptRequest, response: Response, db=Depends
     return token
 
 
-@router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/password-reset/request",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request a password reset",
+)
 async def request_password_reset(req: PasswordResetRequest, db=Depends(get_admin_db)):
     """
     Begin a password reset. Always returns 202 with a generic message so the
@@ -448,9 +495,14 @@ async def request_password_reset(req: PasswordResetRequest, db=Depends(get_admin
     return {**generic, "reset_token": reset_token, "expires_in_hours": tokens.RESET_TTL_HOURS}
 
 
-@router.post("/password-reset/confirm")
+@router.post(
+    "/password-reset/confirm",
+    summary="Confirm a password reset",
+    responses=responses(BAD_REQUEST),
+)
 async def confirm_password_reset(req: PasswordResetConfirm, db=Depends(get_admin_db)):
-    """Set a new password with a one-time reset token, then revoke all sessions."""
+    """Set a new password with a one-time reset token, then revoke all sessions.
+    400 if the token is invalid or expired."""
     _validate_password(req.password)
     with db.begin():
         payload = tokens.consume_token(db, req.token, tokens.PASSWORD_RESET)

@@ -165,11 +165,47 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def _openapi_metadata() -> dict:
+    """Build the app-level OpenAPI metadata (description / contact / license /
+    tag descriptions) from config (platform.yaml `api_docs`). DX-001 (#128).
+
+    Pure documentation — feeds FastAPI's generated OpenAPI schema only. Empty
+    config values are omitted so an older platform.yaml still produces a valid
+    (if sparser) schema."""
+    docs = settings.platform.api_docs
+    meta: dict = {}
+    if docs.description:
+        meta["description"] = docs.description.strip()
+
+    contact = {}
+    if docs.contact_name:
+        contact["name"] = docs.contact_name
+    if docs.contact_url:
+        contact["url"] = docs.contact_url
+    if docs.contact_email:
+        contact["email"] = docs.contact_email
+    if contact:
+        meta["contact"] = contact
+
+    if docs.license_name:
+        license_info = {"name": docs.license_name}
+        if docs.license_url:
+            license_info["url"] = docs.license_url
+        meta["license_info"] = license_info
+
+    if docs.tags:
+        meta["openapi_tags"] = [
+            {"name": t.name, "description": t.description} for t in docs.tags
+        ]
+    return meta
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Enterprise Agentic AI Platform",
         version="1.0.0",
         lifespan=lifespan,
+        **_openapi_metadata(),
     )
 
     # OrgContextMiddleware must be added FIRST — before CORS — so the tenant
@@ -194,10 +230,21 @@ def create_app() -> FastAPI:
     app.include_router(rfp_router)
 
     Info("fastapi_app", "FastAPI application info").info({"app_name": "platform_api"})
-    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+    # /metrics is a Prometheus scrape endpoint, not part of the customer-facing
+    # API — keep it out of the OpenAPI schema (DX-001 #128) so it doesn't show
+    # up undocumented in /docs. The endpoint itself is unchanged.
+    Instrumentator().instrument(app).expose(
+        app, endpoint="/metrics", include_in_schema=False,
+    )
 
-    @app.get("/health")
+    @app.get(
+        "/health",
+        tags=["system"],
+        summary="Service health check",
+    )
     async def health():
+        """Liveness probe — returns the service status and API version. Public
+        (no authentication required); used by load balancers and uptime monitors."""
         return {"status": "healthy", "version": "1.0.0"}
 
     return app

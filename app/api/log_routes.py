@@ -20,11 +20,16 @@ from fastapi.responses import StreamingResponse
 from app.auth.dependencies import get_current_user
 from app.auth.jwt import TokenData
 from app.infra.logger import rfp_logger
+from app.api.openapi_responses import responses, UNAUTHORIZED
 
 router = APIRouter(prefix="/api/v1/logs", tags=["logs"])
 
 
-@router.get("/stream")
+@router.get(
+    "/stream",
+    summary="Stream dev + agent logs (SSE)",
+    responses=responses(UNAUTHORIZED),
+)
 async def stream_logs(
     request: Request,
     run_id: Optional[str] = None,
@@ -70,23 +75,35 @@ async def stream_logs(
     )
 
 
-@router.get("/dev")
+@router.get(
+    "/dev",
+    summary="Get recent developer log entries",
+    responses=responses(UNAUTHORIZED),
+)
 async def get_dev_log(
     run_id: Optional[str] = None,
     limit: int = 500,
     user: TokenData = Depends(get_current_user),
 ):
+    """Return the most recent developer log entries (optionally filtered by
+    run_id), scoped to the caller's org."""
     return {"entries": rfp_logger.get_dev_history(
         run_id=run_id, org_id=user.org_id, limit=limit
     )}
 
 
-@router.get("/agent")
+@router.get(
+    "/agent",
+    summary="Get recent agent log entries",
+    responses=responses(UNAUTHORIZED),
+)
 async def get_agent_log(
     run_id: Optional[str] = None,
     limit: int = 200,
     user: TokenData = Depends(get_current_user),
 ):
+    """Return the most recent agent log entries (optionally filtered by run_id),
+    scoped to the caller's org."""
     return {"entries": rfp_logger.get_agent_history(
         run_id=run_id, org_id=user.org_id, limit=limit
     )}
