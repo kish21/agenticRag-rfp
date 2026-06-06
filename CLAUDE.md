@@ -91,9 +91,11 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Last updated:** 2026-06-06 · **Branch:** master (clean, synced with origin) · **HEAD:** `18a37ea`
+**Last updated:** 2026-06-06 · **Branch:** master · **HEAD:** `18a37ea` · **Pending:** P1.7 built locally on a feature branch — awaiting evening push + PR.
 
-**On master — all merged.** Phases 1, 2, 2c, 4, 5, 7, 9 + Phase 8 module foundation. Enterprise-readiness E1–E3 + E3.a–e done. Working tree clean; nothing pending to push.
+**On master — all merged.** Phases 1, 2, 2c, 4, 5, 7, 9 + Phase 8 module foundation. Enterprise-readiness E1–E3 + E3.a–e done.
+
+**P1.7 (self-consistency voting) — BUILT locally, NOT yet merged.** Borderline mandatory checks (primary confidence in `[confidence_min, confidence_max]`, default `[0.5, 0.75]`) are resampled `samples`× (default 3) at non-zero temperature with distinct seeds; the STRICT majority wins, no-majority → fail-safe `insufficient_evidence`. Clear-cut checks (confidence outside the band) stay single-call → no added cost. New `_decide_check_with_voting` helper in `app/agents/evaluation.py` returns ONE representative parsed dict (so E3.b contradiction override + chunk fallback + `ComplianceDecision` construction are all untouched) plus a `vote_breakdown` audit dict (new defaulted field on `ComplianceDecision`). Baseline call keeps today's auto-derived seed (deliberate — see `docs/dev/P1.7.md`); only resamples take explicit seeds. Config-driven, ON by default: `platform.yaml self_consistency` (`PlatformSelfConsistency` in `loader.py`). Verified: 8 unit/integration tests + full non-live suite (336 passed) + benchmark unchanged (grounding 1.0, 0 fabricated, 0 failures, no scenario flips, $0.43).
 
 Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not re-paste it here):
 - **#265 (#59 P1.8)** — post-synthesis prose verification. The structured `grounded_claims` were already quote-verified; the Explanation Agent's FREE-TEXT prose was not. `explanation.py verify_narrative_claims()` (2nd temperature-0 `call_llm`, prompt `explanation/verify_claims.yaml`) fact-checks each prose claim vs the same evidence (chunks + verified claims + system_facts); per-claim `ClaimVerification` + `prose_verification_score` attach to each `VendorNarrative`. `critic_after_explanation` gates it like grounding-completeness — `< block_below` HARD (existing explanation retry loop regenerates; feedback lists the bad sentences), `< warn_below` SOFT. Config-driven, ON by default: `platform.yaml synthesis_verification`. Proven: 10 mocked unit tests + a `RUN_LIVE_LLM=1`-gated live planted-hallucination test (real model flags fabrications, blocks); benchmark unchanged.
@@ -107,15 +109,14 @@ Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not r
 Latest benchmark baseline (`benchmark/results/`): grounding 1.00, 0 fabricated, 0 op-failures.
 
 **Next action (next session) — pick ONE, one subtask per session:**
-- **P1.7** — self-consistency voting for borderline compliance checks (re-run a check 3× in the 0.5–0.75 confidence band, take majority); ½ day, backend, testable. Recommended next.
-- **#128 DX-001** — OpenAPI/Swagger route annotations (response_model/summary/examples); metadata already set, mechanical, customer-facing, low-risk
+- **#128 DX-001** — OpenAPI/Swagger route annotations (response_model/summary/examples); metadata already set, mechanical, customer-facing, low-risk. Recommended next.
 - **#124 OR-001** — Grafana dashboard JSON (Prometheus/Grafana already in docker-compose; just author panels)
 - **P1.4** — cancel running pipeline (1–2 days, full-stack — larger than one session)
 - **P1.9 (#60)** — human feedback capture for score overrides → few-shot bank (1 day, full-stack)
 - **E3.f (#209)** — scanned/OCR document support (P4 — parked; vendors send digital PDFs today, revisit when a customer submits scanned docs; the present-day safety fix = make scanned PDFs fail with a clear message instead of "No usable chunks")
 - **8b** — delivery completion hook + Mode C auto-trigger (engine/channels done #179/#181; needs live infra + Mailtrap/Resend SMTP creds)
 
-P1 GitHub issues: #133 ✅ (#256) and #59 P1.8 ✅ (#265) shipped. Quick wins next: P1.7, #128, #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
+P1 GitHub issues: #133 ✅ (#256), #59 P1.8 ✅ (#265) shipped; P1.7 ✅ built (pending merge). Quick wins next: #128, #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
 
 De-prioritised: **E3.b.1** cert-status contradiction = **#210** (closed / won't-do — domain over-fitting; the generic value-contradiction path #198 already covers the real case. See [[generic_platform_no_domain_special_case]]).
 

@@ -60,6 +60,23 @@ synthesis_verification:
   # ...and below which it raises a SOFT warning (no block).
   warn_below: 0.9
 
+# P1.7 — self-consistency voting for BORDERLINE mandatory compliance checks.
+# A mandatory check is normally ONE temperature-0 LLM call. When that first call's
+# confidence lands in [confidence_min, confidence_max] the verdict is fragile, so the
+# same decision is resampled `samples` times and the MAJORITY wins. Checks whose
+# confidence is outside the band stay single-call — no extra cost on clear-cut checks.
+self_consistency:
+  enabled: true
+  # Odd is recommended so a 2-way split always has a strict majority (3 = spec).
+  samples: 3
+  # Borderline band, evaluated on the FIRST (temperature-0) call's confidence.
+  confidence_min: 0.5
+  confidence_max: 0.75
+  # Resamples use THIS temperature for diversity. MUST be > 0 — at 0 the samples are
+  # identical and voting is a no-op. Do NOT "fix" this back to 0. The first call stays
+  # temperature 0 as the deterministic audit baseline.
+  temperature: 0.5
+
 embedding:
   # Active model is chosen by EMBEDDING_PROVIDER in .env:
   #   openai / azure  → openai_model

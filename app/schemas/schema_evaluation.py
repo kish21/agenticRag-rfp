@@ -13,6 +13,12 @@ class ComplianceDecision(BaseModel):
     evidence_used: List[str]
     contradictions_found: List[str] = []
     decision_basis: DecisionBasis
+    # P1.7 — self-consistency voting audit trail. Populated only for BORDERLINE checks
+    # that were resampled (primary confidence in the configured band): keys are
+    # {samples, tally, winner}. {"samples": 1} (or empty) means the check was decided by
+    # a single call (clear-cut, or voting disabled). Defaulted → older payloads stay valid;
+    # downstream consumers ignore it unless they want the breakdown.
+    vote_breakdown: Dict = {}
 
 class CriterionScore(BaseModel):
     criterion_id: str

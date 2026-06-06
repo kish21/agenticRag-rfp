@@ -83,6 +83,25 @@ class PlatformSynthesisVerification(BaseModel):
     warn_below: float = Field(default=0.9, ge=0.0, le=1.0)
 
 
+class PlatformSelfConsistency(BaseModel):
+    # P1.7 — self-consistency voting for BORDERLINE mandatory compliance checks.
+    # Each check is normally one temperature-0 LLM call (deterministic). For a check
+    # whose primary confidence falls in [confidence_min, confidence_max] the verdict is
+    # fragile, so we resample the SAME decision `samples` times and take the majority.
+    # Clear-cut checks (confidence outside the band) stay single-call → no added cost.
+    # Defaulted so an older platform.yaml still loads. enabled=True is the owner decision.
+    #   • Resamples MUST use temperature > 0 (diversity); at temp 0 the votes are identical
+    #     and voting is a no-op. The first call stays temperature 0 (audit baseline).
+    #   • No strict majority (e.g. a 1/1/1 three-way split) → fail-safe insufficient_evidence
+    #     (owner decision; matches E3.b "can't confirm → insufficient").
+    #   • An ODD `samples` is recommended so a 2-way split always resolves to a majority.
+    enabled: bool = True
+    samples: int = Field(default=3, ge=1)
+    confidence_min: float = Field(default=0.5, ge=0.0, le=1.0)
+    confidence_max: float = Field(default=0.75, ge=0.0, le=1.0)
+    temperature: float = Field(default=0.5, ge=0.0, le=2.0)
+
+
 class PlatformRetrieval(BaseModel):
     embedding_model: str
     embedding_dimensions: int
@@ -134,6 +153,7 @@ class PlatformConfig(BaseModel):
     ingestion: PlatformIngestion
     injection_defence: PlatformInjectionDefence = PlatformInjectionDefence()
     synthesis_verification: PlatformSynthesisVerification = PlatformSynthesisVerification()
+    self_consistency: PlatformSelfConsistency = PlatformSelfConsistency()
     retrieval: PlatformRetrieval
     llm: PlatformLLM
     infrastructure: PlatformInfra

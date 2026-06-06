@@ -213,6 +213,101 @@ def _get_facts_for_target(facts: dict, target: ExtractionTarget) -> list[dict]:
     return type_map.get(target.fact_type, [])
 
 
+def _parse_check_response(raw: str) -> dict:
+    """Parse one evaluate_check LLM response; fail-safe to insufficient_evidence on bad
+    JSON (mirrors the original single-call behaviour)."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "decision": "insufficient_evidence", "confidence": 0.0,
+            "reasoning": "LLM returned invalid JSON", "evidence_used": [],
+            "contradictions_found": [], "decision_basis": "not_addressed",
+        }
+
+
+def _normalise_decision(parsed: dict) -> str:
+    """Map a parsed.decision onto a valid ComplianceStatus value, defaulting to
+    insufficient_evidence — so an out-of-vocab vote can never escape the tally."""
+    try:
+        return ComplianceStatus(parsed.get("decision", "insufficient_evidence")).value
+    except ValueError:
+        return ComplianceStatus.INSUFFICIENT_EVIDENCE.value
+
+
+async def _decide_check_with_voting(messages: list[dict]) -> tuple[dict, dict]:
+    """P1.7 — decide ONE mandatory check, applying self-consistency voting ONLY when the
+    primary verdict is borderline.
+
+    Returns (representative_parsed, votes):
+      • representative_parsed — a single parsed dict carrying the winning decision and an
+        agreement-ratio confidence, so ALL downstream logic in _evaluate_mandatory_check
+        (E3.b contradiction override, chunk fallback, ComplianceDecision construction) is
+        untouched and operates on the voted result.
+      • votes — audit breakdown: {"samples": 1} for a single call, else
+        {"samples": N, "tally": {decision: count}, "winner": decision}.
+
+    The first call is identical to today's single call (temperature 0, no explicit seed →
+    deterministic auto-derived seed) so clear-cut checks and the whole non-borderline path
+    are byte-for-byte unchanged. When the primary confidence lands in the configured band
+    we resample at cfg.temperature with distinct seeds (the LLM cache keys on
+    temperature+seed, so the samples are genuinely different yet reproducible), tally the
+    decisions, and take the STRICT majority. No strict majority → fail-safe
+    insufficient_evidence (owner decision; matches E3.b "can't confirm → insufficient").
+    """
+    from app.config import settings as cfg
+    sc = cfg.platform.self_consistency
+
+    # Deterministic baseline — unchanged from the original single call.
+    raw_0 = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
+    parsed_0 = _parse_check_response(raw_0)
+    conf_0 = float(parsed_0.get("confidence", 0.5) or 0.0)
+
+    borderline = sc.confidence_min <= conf_0 <= sc.confidence_max
+    if not sc.enabled or sc.samples <= 1 or not borderline:
+        return parsed_0, {"samples": 1}
+
+    # Borderline → resample. Distinct non-zero seeds + non-zero temperature so the votes
+    # actually diverge (at temperature 0 every sample is identical and voting is a no-op).
+    samples = [parsed_0]
+    for i in range(1, sc.samples):
+        raw_i = await call_llm(
+            messages, temperature=sc.temperature, seed=i,
+            response_format={"type": "json_object"},
+        )
+        samples.append(_parse_check_response(raw_i))
+
+    decisions = [_normalise_decision(p) for p in samples]
+    tally: dict = {}
+    for d in decisions:
+        tally[d] = tally.get(d, 0) + 1
+
+    winner, winning_votes = max(tally.items(), key=lambda kv: kv[1])
+    if winning_votes * 2 <= len(samples):  # no STRICT majority (> half) → fail-safe
+        winner = ComplianceStatus.INSUFFICIENT_EVIDENCE.value
+        winning_votes = tally.get(winner, 0)
+
+    # Representative = the highest-confidence sample whose decision == winner, so the
+    # reasoning/evidence carried downstream belong to the winning verdict. If the winner
+    # came from the tie rule and no sample voted it, synthesise a minimal record.
+    matching = [p for p, d in zip(samples, decisions) if d == winner]
+    if matching:
+        representative = dict(max(
+            matching, key=lambda p: float(p.get("confidence", 0.0) or 0.0)
+        ))
+    else:
+        representative = {
+            "decision": winner, "reasoning": (
+                "No majority across self-consistency samples — fail-safe insufficient_evidence."
+            ),
+            "evidence_used": [], "contradictions_found": [], "decision_basis": "not_addressed",
+        }
+    representative["decision"] = winner
+    representative["confidence"] = winning_votes / len(samples)  # agreement ratio
+
+    return representative, {"samples": len(samples), "tally": tally, "winner": winner}
+
+
 async def _evaluate_mandatory_check(
     check: MandatoryCheck,
     target: ExtractionTarget,
@@ -250,11 +345,10 @@ async def _evaluate_mandatory_check(
             ),
         },
     ]
-    raw = await call_llm(messages, temperature=0.0, response_format={"type": "json_object"})
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        parsed = {"decision": "insufficient_evidence", "confidence": 0.0, "reasoning": "LLM returned invalid JSON", "evidence_used": [], "contradictions_found": [], "decision_basis": "not_addressed"}
+    # P1.7 — self-consistency voting (borderline checks only). Returns ONE representative
+    # parsed dict (so the contradiction override + fallback + construction below are
+    # untouched) plus a vote breakdown for audit.
+    parsed, vote_breakdown = await _decide_check_with_voting(messages)
 
     try:
         decision = ComplianceStatus(parsed.get("decision", "insufficient_evidence"))
@@ -317,6 +411,7 @@ async def _evaluate_mandatory_check(
         evidence_used=evidence,
         contradictions_found=parsed.get("contradictions_found", []),
         decision_basis=decision_basis,
+        vote_breakdown=vote_breakdown,
     )
 
 
@@ -436,6 +531,18 @@ async def run_evaluation_agent(
             compliance_decisions.append(decision)
         except Exception as e:
             warnings.append(f"Check {check.check_id} failed: {e}")
+
+    # P1.7 — surface how many checks were resampled by self-consistency voting this run
+    # (cost visibility: extra LLM calls fire only inside the borderline band).
+    voted_checks = sum(
+        1 for d in compliance_decisions if d.vote_breakdown.get("samples", 1) > 1
+    )
+    if voted_checks:
+        import logging
+        logging.getLogger(__name__).info(
+            "self_consistency: %d/%d mandatory checks resampled (vendor=%s)",
+            voted_checks, len(compliance_decisions), vendor_id,
+        )
 
     # Score every criterion
     criterion_scores: list[CriterionScore] = []
