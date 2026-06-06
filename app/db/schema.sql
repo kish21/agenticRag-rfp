@@ -411,7 +411,7 @@ CREATE TABLE IF NOT EXISTS users (
     email      TEXT NOT NULL,
     hashed_pw  TEXT NOT NULL,
     role       TEXT NOT NULL DEFAULT 'department_user'
-                   CHECK (role IN ('platform_admin','company_admin','department_admin','department_user')),
+                   CHECK (role IN ('platform_admin','company_admin','department_admin','department_user','auditor')),
     dept_id    UUID,
     is_active  BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

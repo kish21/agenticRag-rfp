@@ -589,6 +589,20 @@ v1 blocker (Mode B wipes the primary stores); revisit when a customer's DPA name
 
 ---
 
+### P2.30 — `/evaluate/list` `scope=auto` legacy path diverges from `runs_visible_to()` (code review 2026-06-06, #55)
+
+**Problem.** Two sources of truth for "who sees which runs" disagree. The `scope=auto` legacy branch in
+`list_runs` (`app/api/evaluation_routes.py`) returns the WHOLE org's runs for any role except
+`department_user`, i.e. it treats `department_admin` as wide. The canonical `runs_visible_to()` SQL
+function (`schema.sql`) only treats `platform_admin`/`company_admin` as wide. #55 added a config-driven
+read-only exclusion (`role not in write_roles → empty`) at the top of the auto path, which closes the
+auditor hole, but the underlying divergence for `department_admin` remains. **Fix:** collapse the legacy
+`scope=auto` path onto the `visible_runs()` wrapper so there is one authorization model. **Effort:** ~half
+a day + regression check on the dashboard. **Priority:** P2 — not a leak (both paths stay within-org), a
+consistency/maintainability issue.
+
+---
+
 ## ⚪ P3 — Polish
 
 | ID    | What                                                                                  | Effort     |

@@ -183,7 +183,7 @@ def test_every_router_tag_has_a_description():
     tag_desc = {t["name"]: t.get("description") for t in OPENAPI.get("tags", [])}
     required = {
         "auth", "admin", "evaluate", "tenant", "org-settings",
-        "chat", "rfps", "logs", "system",
+        "chat", "rfps", "logs", "audit", "system",
     }
     missing = [t for t in required if not tag_desc.get(t)]
     assert not missing, f"Tags missing a description in openapi_tags: {missing}"

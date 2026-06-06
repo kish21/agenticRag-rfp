@@ -212,6 +212,13 @@ class ProductRFPDefaults(BaseModel):
     write_roles: list[str]
 
 
+class ProductRBAC(BaseModel):
+    """RBAC tunables — #55. Which JWT roles may read the org-wide audit trail
+    (GET /api/v1/audit/*). Defaulted so a product.yaml without an `rbac:` block
+    still loads (auditor is the compliance persona; admins included by default)."""
+    audit_read_roles: list[str] = ["auditor", "company_admin", "platform_admin"]
+
+
 class ProductGDPR(BaseModel):
     """GDPR data-subject rights — Mode B tenant erasure (issue #119).
 
@@ -228,6 +235,7 @@ class ProductConfig(BaseModel):
     audit: ProductAudit
     rfp_defaults: ProductRFPDefaults
     gdpr: ProductGDPR = ProductGDPR()
+    rbac: ProductRBAC = ProductRBAC()
 
 
 # ─── Unified Settings (env secrets + YAML tunables) ───────────────────

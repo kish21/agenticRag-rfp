@@ -262,6 +262,8 @@ api_docs:
       description: RFP lifecycle — create an RFP, invite vendors, and manage submission deadlines.
     - name: logs
       description: Live (SSE) and historical developer/agent log access for a run.
+    - name: audit
+      description: Read-only org-wide compliance audit trail — who accessed which run, and override/state-change events (auditor / admin roles).
     - name: system
       description: Service health and operational endpoints.
 

@@ -55,6 +55,37 @@ def require_run_access(user: TokenData, run: dict) -> None:
         raise HTTPException(status_code=403, detail="You do not have access to this evaluation run")
 
 
+def require_audit_read(user: TokenData) -> None:
+    """Gate the org-wide audit-trail endpoints (#55).
+
+    Allowed roles are config-driven via `product.yaml rbac.audit_read_roles`
+    (default: auditor, company_admin, platform_admin) so product can widen or
+    narrow the compliance-read surface without an engineering change. The
+    `auditor` role is read-only — it reaches the audit trail through here, never
+    through the per-run endpoints (default-deny blocks it from run content)."""
+    from app.config import settings
+    allowed = set(settings.product.rbac.audit_read_roles)
+    if user.role not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="Reading the audit trail requires an audit-read role",
+        )
+
+
+def require_write_role(user: TokenData) -> None:
+    """Gate run-launching / write actions (start, confirm, re-evaluate, rerun).
+
+    Config-driven via `product.yaml rfp_defaults.write_roles` — the operational
+    roles permitted to create or mutate runs. Read-only roles (e.g. `auditor`,
+    or any future compliance role) are absent from that set and so are blocked
+    here, independently of whether they happen to have run *visibility*. This
+    keeps the 'a read-only role cannot launch evaluations' invariant enforced at
+    one place rather than re-derived per endpoint."""
+    from app.config import settings
+    if user.role not in set(settings.product.rfp_defaults.write_roles):
+        raise HTTPException(status_code=403, detail="Your role cannot perform this action")
+
+
 def require_admin_role(user: TokenData) -> None:
     if user.role not in _WIDE_ROLES:
         raise HTTPException(

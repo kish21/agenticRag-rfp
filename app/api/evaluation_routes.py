@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from app.auth.dependencies import get_current_user, COOKIE_NAME, _token_not_revoked
 from app.auth.jwt import TokenData, decode_token
 from app.infra.audit import audit
-from app.auth.rbac import require_run_access, require_admin_role, log_access
+from app.auth.rbac import require_run_access, require_admin_role, require_write_role, log_access
 from app.schemas.output_models import (
     AuditOverride, EvaluationSetup, MandatoryCheck,
     ScoringCriterion, ExtractionTarget,
@@ -78,6 +78,11 @@ async def start_evaluation(
     Upload RFP + vendor PDFs. Stores everything in PostgreSQL immediately.
     Returns run_id. No data is kept in memory.
     """
+    # RBAC (#55): starting a run is a write action. The default-deny visibility
+    # model guards every per-run endpoint, but /start *creates* a run and so
+    # bypasses it — gate it so a read-only role (e.g. auditor) cannot launch.
+    require_write_role(user)
+
     run_id   = str(uuid.uuid4())
     rfp_id   = f"rfp-{run_id[:8]}"
     setup_id = f"setup-{run_id[:8]}"
@@ -298,6 +303,15 @@ async def list_runs(
     Default-deny: a user who doesn't match any predicate sees an empty list,
     even within the same org.
     """
+    # RBAC (#55): read-only roles (auditor, and any future compliance role) have
+    # NO access to run content. The scope=auto else-branch below returns the whole
+    # org's runs (incl. decision_output) for any non-department_user role, so any
+    # role outside the operational write_roles is excluded here. Such roles review
+    # the trail via GET /api/v1/audit/* instead. Config-driven, not a role literal.
+    from app.config import settings
+    if user.role not in set(settings.product.rfp_defaults.write_roles):
+        return {"runs": []}
+
     engine = get_engine()
 
     # Legacy path — preserved exactly so existing frontend clients don't break.
@@ -506,6 +520,7 @@ async def confirm_run(
     """Confirm page: user approved. Updates status and starts the pipeline."""
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
+    require_write_role(user)  # #55: read-only roles cannot launch the pipeline
     if run["status"] not in ("pending_confirm",):
         raise HTTPException(status_code=409, detail=f"Run already in status: {run['status']}")
 
@@ -549,6 +564,7 @@ async def rerun_evaluation(
 
     original = _db_get_run(run_id, user.org_id)
     require_run_access(user, original)
+    require_write_role(user)  # #55: read-only roles cannot launch the pipeline
     if original["status"] not in ("complete", "blocked"):
         raise HTTPException(
             status_code=409,
@@ -698,12 +714,16 @@ async def _compute_divergence(
 @router.get(
     "/{run_id}/status",
     summary="Stream agent status for a run (SSE)",
-    responses=responses(UNAUTHORIZED, NOT_FOUND),
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
 )
 async def run_status_stream(run_id: str, user: TokenData = Depends(get_current_user)):
     """Server-sent events stream of the pipeline's per-agent progress for a run.
     Authenticates via Bearer token or session cookie."""
-    _db_get_run(run_id, user.org_id)
+    run = _db_get_run(run_id, user.org_id)
+    # #55: enforce within-org visibility — the SSE stream emits agent_events +
+    # status, so it must gate on run access like every other per-run endpoint
+    # (was org-scoped only; a same-org non-collaborator/auditor could subscribe).
+    require_run_access(user, run)
     return StreamingResponse(
         _event_stream(run_id, user.org_id),
         media_type="text/event-stream",
@@ -714,7 +734,7 @@ async def run_status_stream(run_id: str, user: TokenData = Depends(get_current_u
 @router.get(
     "/{run_id}/stream",
     summary="Stream run progress (SSE, cookie auth)",
-    responses=responses(UNAUTHORIZED, NOT_FOUND),
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
 )
 async def run_stream_alias(run_id: str, request: Request):
     """SSE alias for run progress. Auth is cookie-only.
@@ -737,7 +757,9 @@ async def run_stream_alias(run_id: str, request: Request):
     # or reset/revoked token could keep streaming until JWT exp (E2).
     if not _token_not_revoked(user):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    _db_get_run(run_id, user.org_id)
+    run = _db_get_run(run_id, user.org_id)
+    # #55: enforce within-org visibility on the cookie-auth SSE alias too.
+    require_run_access(user, run)
     return StreamingResponse(
         _event_stream(run_id, user.org_id),
         media_type="text/event-stream",
@@ -970,6 +992,7 @@ async def re_evaluate(
     """Re-run the pipeline for a completed/failed run (e.g. all scores were 0)."""
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
+    require_write_role(user)  # #55: read-only roles cannot launch the pipeline
     if run["status"] in ("running",):
         raise HTTPException(status_code=409, detail="Pipeline is still running")
 
