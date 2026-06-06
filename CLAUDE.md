@@ -91,11 +91,12 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Last updated:** 2026-06-05 · **Branch:** master (clean, synced with origin) · **HEAD:** `f23b3bb`
+**Last updated:** 2026-06-06 · **Branch:** master (clean, synced with origin) · **HEAD:** `18a37ea`
 
 **On master — all merged.** Phases 1, 2, 2c, 4, 5, 7, 9 + Phase 8 module foundation. Enterprise-readiness E1–E3 + E3.a–e done. Working tree clean; nothing pending to push.
 
 Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not re-paste it here):
+- **#265 (#59 P1.8)** — post-synthesis prose verification. The structured `grounded_claims` were already quote-verified; the Explanation Agent's FREE-TEXT prose was not. `explanation.py verify_narrative_claims()` (2nd temperature-0 `call_llm`, prompt `explanation/verify_claims.yaml`) fact-checks each prose claim vs the same evidence (chunks + verified claims + system_facts); per-claim `ClaimVerification` + `prose_verification_score` attach to each `VendorNarrative`. `critic_after_explanation` gates it like grounding-completeness — `< block_below` HARD (existing explanation retry loop regenerates; feedback lists the bad sentences), `< warn_below` SOFT. Config-driven, ON by default: `platform.yaml synthesis_verification`. Proven: 10 mocked unit tests + a `RUN_LIVE_LLM=1`-gated live planted-hallucination test (real model flags fabrications, blocks); benchmark unchanged.
 - **#256 (#133)** — prompt-injection defence at ingestion (OWASP LLM01). Config-driven scanner (`app/validators/injection.py`, patterns in `platform.yaml injection_defence`) scans untrusted vendor chunks before any LLM; a match → HARD Critic flag `prompt_injection_detected` → pipeline BLOCKED (fail-CLOSED). Trusted first-party RFP exempt (`trusted_source`). Verified 3 levels incl. live graph halt (only planner+ingestion ran, no report). Deeper `_verdict()` 'escalate' string-coupling refactor logged as BACKLOG **P2.28**. Toolkit patched: `enterprise-ai-audit` Cat-3 + `new-project` AI scaffold now cover injection (product-toolkit `fe4aec8`).
 - **#239 (#215)** — Qdrant one collection per org (was per `(org,vendor)`). Cross-org isolation = physical collection boundary (security-critical, unchanged); within-org vendor separation = the `vendor_id` payload filter that already ran on every query. Live end-to-end verified.
 - **#241 security-baseline finish** — #222 jose→PyJWT (PyJWT 2.13, HS256-only), #221 pytest 8→9, P2.27 per-setup retention precision. `pip-audit` gate now runs with **zero ignores**. (#242 = BACKLOG doc follow-up.)
@@ -106,13 +107,15 @@ Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not r
 Latest benchmark baseline (`benchmark/results/`): grounding 1.00, 0 fabricated, 0 op-failures.
 
 **Next action (next session) — pick ONE, one subtask per session:**
+- **P1.7** — self-consistency voting for borderline compliance checks (re-run a check 3× in the 0.5–0.75 confidence band, take majority); ½ day, backend, testable. Recommended next.
 - **#128 DX-001** — OpenAPI/Swagger route annotations (response_model/summary/examples); metadata already set, mechanical, customer-facing, low-risk
-- **#59 P1.8** — verify-and-close: post-synthesis verification largely exists (`explanation.py verify_grounding` + grounding-completeness hard-block); confirm it satisfies the issue or scope the LLM-claim-check upgrade
 - **#124 OR-001** — Grafana dashboard JSON (Prometheus/Grafana already in docker-compose; just author panels)
-- **E3.f (#209)** — scanned/OCR document support (P4)
+- **P1.4** — cancel running pipeline (1–2 days, full-stack — larger than one session)
+- **P1.9 (#60)** — human feedback capture for score overrides → few-shot bank (1 day, full-stack)
+- **E3.f (#209)** — scanned/OCR document support (P4 — parked; vendors send digital PDFs today, revisit when a customer submits scanned docs; the present-day safety fix = make scanned PDFs fail with a clear message instead of "No usable chunks")
 - **8b** — delivery completion hook + Mode C auto-trigger (engine/channels done #179/#181; needs live infra + Mailtrap/Resend SMTP creds)
 
-P1 GitHub issues reviewed this session (2026-06-05): 11 open. #133 ✅ shipped. Quick wins next: #128, #59 (mostly built), #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
+P1 GitHub issues: #133 ✅ (#256) and #59 P1.8 ✅ (#265) shipped. Quick wins next: P1.7, #128, #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
 
 De-prioritised: **E3.b.1** cert-status contradiction = **#210** (closed / won't-do — domain over-fitting; the generic value-contradiction path #198 already covers the real case. See [[generic_platform_no_domain_special_case]]).
 
