@@ -16,6 +16,9 @@ from pydantic import BaseModel
 from app.auth.dependencies import get_current_user, get_db
 from app.auth.jwt import TokenData
 from app.providers.llm import call_llm
+from app.api.openapi_responses import (
+    responses, UNAUTHORIZED, PAYLOAD_TOO_LARGE, UNPROCESSABLE,
+)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
@@ -95,7 +98,12 @@ class DocumentChatResponse(BaseModel):
     suggested_criteria: list[str]
 
 
-@router.post("/document", response_model=DocumentChatResponse)
+@router.post(
+    "/document",
+    response_model=DocumentChatResponse,
+    summary="Ask a question about an uploaded document",
+    responses=responses(UNAUTHORIZED, PAYLOAD_TOO_LARGE, UNPROCESSABLE),
+)
 async def chat_with_document(
     message: str = Form(...),
     file: Optional[UploadFile] = File(None),
@@ -158,7 +166,12 @@ class CriteriaResponse(BaseModel):
     criteria: list[str]
 
 
-@router.get("/criteria", response_model=CriteriaResponse)
+@router.get(
+    "/criteria",
+    response_model=CriteriaResponse,
+    summary="Get the user's saved success criteria",
+    responses=responses(UNAUTHORIZED),
+)
 async def get_criteria(
     current_user: TokenData = Depends(get_current_user),
     db=Depends(get_db),
@@ -174,7 +187,12 @@ async def get_criteria(
     return CriteriaResponse(criteria=row[0] if row else [])
 
 
-@router.post("/criteria", response_model=CriteriaResponse)
+@router.post(
+    "/criteria",
+    response_model=CriteriaResponse,
+    summary="Save the user's success criteria",
+    responses=responses(UNAUTHORIZED),
+)
 async def save_criteria(
     payload: CriteriaPayload,
     current_user: TokenData = Depends(get_current_user),

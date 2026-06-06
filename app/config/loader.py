@@ -148,6 +148,27 @@ class PlatformRanking(BaseModel):
     # flagged 'low coverage — human review' rather than trusted at face value.
     min_coverage_for_trust: float = 0.5
 
+
+class PlatformApiDocsTag(BaseModel):
+    # DX-001 (#128) — one OpenAPI tag-group description. `name` MUST match a
+    # router's `tags=[...]` value so Swagger/ReDoc attach the description.
+    name: str
+    description: str
+
+
+class PlatformApiDocs(BaseModel):
+    # DX-001 (#128) — public OpenAPI metadata surfaced at /docs, /redoc and
+    # /openapi.json. PURE documentation; no runtime behaviour. Defaulted so an
+    # older platform.yaml (without this block) still loads — with empty values
+    # main.py simply omits the corresponding OpenAPI fields.
+    description: str = ""
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_url: str = ""
+    license_name: str = ""
+    license_url: str = ""
+    tags: list[PlatformApiDocsTag] = []
+
 class PlatformConfig(BaseModel):
     embedding: PlatformEmbedding
     ingestion: PlatformIngestion
@@ -159,6 +180,7 @@ class PlatformConfig(BaseModel):
     infrastructure: PlatformInfra
     governance: PlatformGovernance
     ranking: PlatformRanking = PlatformRanking()
+    api_docs: PlatformApiDocs = PlatformApiDocs()
     hyde_templates: dict[str, str]    # doc_type -> template
     retrieval_critic_prompt: str
     extraction_critic_prompt: str

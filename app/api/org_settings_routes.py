@@ -5,6 +5,9 @@ from typing import Any
 from app.domain.org_settings import get_org_settings, upsert_org_settings, OrgSettings
 from app.auth.dependencies import get_current_user
 from app.auth.jwt import require_role, TokenData
+from app.api.openapi_responses import (
+    responses, UNAUTHORIZED, FORBIDDEN, BAD_REQUEST,
+)
 
 router = APIRouter(prefix="/api/v1/org", tags=["org-settings"])
 
@@ -13,7 +16,12 @@ class UpdateOrgSettingsRequest(BaseModel):
     fields: dict[str, Any]
 
 
-@router.get("/settings", response_model=OrgSettings)
+@router.get(
+    "/settings",
+    response_model=OrgSettings,
+    summary="Get the org's evaluation settings",
+    responses=responses(UNAUTHORIZED),
+)
 async def read_org_settings(
     user: TokenData = Depends(get_current_user),
 ):
@@ -21,7 +29,12 @@ async def read_org_settings(
     return get_org_settings(user.org_id)
 
 
-@router.patch("/settings", response_model=OrgSettings)
+@router.patch(
+    "/settings",
+    response_model=OrgSettings,
+    summary="Update the org's evaluation settings",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, BAD_REQUEST),
+)
 async def update_org_settings(
     body: UpdateOrgSettingsRequest,
     user: TokenData = Depends(get_current_user),
@@ -34,7 +47,12 @@ async def update_org_settings(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/settings/reset", response_model=OrgSettings)
+@router.post(
+    "/settings/reset",
+    response_model=OrgSettings,
+    summary="Reset the org settings to defaults",
+    responses=responses(UNAUTHORIZED, FORBIDDEN),
+)
 async def reset_org_settings(
     user: TokenData = Depends(get_current_user),
     _: None = Depends(require_role("platform_admin", "company_admin")),
