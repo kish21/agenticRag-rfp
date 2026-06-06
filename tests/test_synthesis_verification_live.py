@@ -7,10 +7,14 @@ not false-positive on genuinely-grounded prose. This test closes the remaining
 gap: does the REAL model + the verify_claims prompt actually FLAG a deliberately
 planted, unsupported prose claim — and does that drive the Critic to HARD-block?
 
-It calls the live LLM, so it is SKIPPED unless an OpenAI key is configured
-(CI has none → skipped; run locally with a key). It is intentionally the only
-live-LLM unit test; the benchmark is the other live exercise.
+It calls the live LLM, so it runs ONLY when explicitly opted in with
+``RUN_LIVE_LLM=1`` and a real OpenAI key. CI does NOT set RUN_LIVE_LLM (and seeds
+a dummy key for other tests), so this is skipped there; run it locally with a
+real key. It is intentionally the only live-LLM unit test; the benchmark is the
+other live exercise.
 """
+import os
+
 import pytest
 
 from app.config import settings
@@ -20,9 +24,16 @@ from app.schemas.output_models import (
     ExplanationOutput, VendorNarrative, GroundedClaim, CriticSeverity,
 )
 
+# Explicit opt-in only — presence of an API key is NOT a sufficient gate because
+# CI injects a dummy key (sk-fake-…) for the rest of the suite, which would make
+# a key-presence check run this test and 401.
 pytestmark = pytest.mark.skipif(
-    not (settings.llm_provider == "openai" and settings.openai_api_key),
-    reason="live LLM test — needs LLM_PROVIDER=openai + OPENAI_API_KEY",
+    not (
+        os.getenv("RUN_LIVE_LLM", "").lower() in ("1", "true", "yes")
+        and settings.llm_provider == "openai"
+        and settings.openai_api_key
+    ),
+    reason="live LLM test — set RUN_LIVE_LLM=1 with a real OPENAI_API_KEY to run",
 )
 
 
