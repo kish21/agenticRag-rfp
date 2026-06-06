@@ -40,6 +40,91 @@ def get_admin_engine() -> sa.Engine:
     return _admin_engine
 
 
+# ── GDPR Mode B — whole-tenant PostgreSQL purge (issue #119) ─────────────
+# FK-safe ordered deletes for one org, returning per-table counts. Children are
+# deleted before parents so no foreign-key constraint is ever violated; the
+# `organisations` row is removed last. Runs as ONE transaction on the RLS-EXEMPT
+# admin engine — this is a cross-cutting system operation (a customer leaving),
+# not a tenant request, and must reach rows the app-role/RLS would scope away.
+#
+# Ordering is validated against app/db/schema.sql. Most org-scoped tables carry a
+# UUID `org_id`; org_settings(+audit) use a TEXT org_id (compared without a cast);
+# a few child tables have no org_id and are scoped via a subquery on their parent.
+# `audit_log` rows for the org are removed here too — the leaving tenant's audit
+# history goes with them; the retained erasure RECEIPT is written separately,
+# after this purge (see app/domain/org_erasure.py), and survives because
+# audit_log has no FK to organisations.
+_PURGE_ORDER: list[tuple[str, str]] = [
+    # 1 ── extracted facts (FK → vendor_documents / evaluation_setups) ──────
+    ("extracted_certifications", "DELETE FROM extracted_certifications WHERE org_id = CAST(:oid AS uuid)"),
+    ("extracted_insurance",      "DELETE FROM extracted_insurance      WHERE org_id = CAST(:oid AS uuid)"),
+    ("extracted_slas",           "DELETE FROM extracted_slas           WHERE org_id = CAST(:oid AS uuid)"),
+    ("extracted_projects",       "DELETE FROM extracted_projects       WHERE org_id = CAST(:oid AS uuid)"),
+    ("extracted_pricing",        "DELETE FROM extracted_pricing        WHERE org_id = CAST(:oid AS uuid)"),
+    ("extracted_facts",          "DELETE FROM extracted_facts          WHERE org_id = CAST(:oid AS uuid)"),
+    # 2 ── run-scoped children (FK → evaluation_runs / users) ───────────────
+    ("decisions",                "DELETE FROM decisions                WHERE org_id = CAST(:oid AS uuid)"),
+    ("approvals",                "DELETE FROM approvals                WHERE org_id = CAST(:oid AS uuid)"),
+    ("approval_assignments",
+     "DELETE FROM approval_assignments WHERE run_id IN "
+     "(SELECT run_id FROM evaluation_runs WHERE org_id = CAST(:oid AS uuid))"),
+    ("rfp_collaborators",
+     "DELETE FROM rfp_collaborators WHERE run_id IN "
+     "(SELECT run_id FROM evaluation_runs WHERE org_id = CAST(:oid AS uuid))"),
+    ("access_audit_log",         "DELETE FROM access_audit_log         WHERE org_id = CAST(:oid AS uuid)"),
+    ("retrieval_log",            "DELETE FROM retrieval_log            WHERE org_id = CAST(:oid AS uuid)"),
+    ("audit_overrides",          "DELETE FROM audit_overrides          WHERE org_id = CAST(:oid AS uuid)"),
+    ("audit_log",                "DELETE FROM audit_log                WHERE org_id = CAST(:oid AS uuid)"),
+    ("ingestion_jobs",           "DELETE FROM ingestion_jobs           WHERE org_id = CAST(:oid AS uuid)"),
+    ("event_log",                "DELETE FROM event_log                WHERE org_id = CAST(:oid AS uuid)"),
+    # 3 ── documents + runs + setups (parents of the above) ─────────────────
+    ("invited_vendors",
+     "DELETE FROM invited_vendors WHERE rfp_id IN "
+     "(SELECT rfp_id FROM rfps WHERE org_id = CAST(:oid AS uuid))"),
+    ("vendor_documents",         "DELETE FROM vendor_documents         WHERE org_id = CAST(:oid AS uuid)"),
+    ("evaluation_runs",          "DELETE FROM evaluation_runs          WHERE org_id = CAST(:oid AS uuid)"),
+    ("evaluation_setups",        "DELETE FROM evaluation_setups        WHERE org_id = CAST(:oid AS uuid)"),
+    ("rfps",                     "DELETE FROM rfps                     WHERE org_id = CAST(:oid AS uuid)"),
+    ("agent_registry",           "DELETE FROM agent_registry           WHERE org_id = CAST(:oid AS uuid)"),
+    # 4 ── org-level config / billing / templates (FK → organisations) ──────
+    ("org_criteria_templates",   "DELETE FROM org_criteria_templates   WHERE org_id = CAST(:oid AS uuid)"),
+    ("dept_criteria_templates",  "DELETE FROM dept_criteria_templates  WHERE org_id = CAST(:oid AS uuid)"),
+    ("tenant_modules",           "DELETE FROM tenant_modules           WHERE org_id = CAST(:oid AS uuid)"),
+    ("tenant_billing",           "DELETE FROM tenant_billing           WHERE org_id = CAST(:oid AS uuid)"),
+    ("org_settings",             "DELETE FROM org_settings             WHERE org_id = :oid"),        # TEXT org_id
+    ("org_settings_audit",       "DELETE FROM org_settings_audit       WHERE org_id = :oid"),        # TEXT org_id
+    # 5 ── users + their auth artefacts (FK → users / organisations) ────────
+    ("user_departments",
+     "DELETE FROM user_departments WHERE user_id IN "
+     "(SELECT user_id FROM users WHERE org_id = CAST(:oid AS uuid))"),
+    ("auth_sessions",            "DELETE FROM auth_sessions            WHERE org_id = CAST(:oid AS uuid)"),
+    ("auth_onetime_tokens",      "DELETE FROM auth_onetime_tokens      WHERE org_id = CAST(:oid AS uuid)"),
+    ("users",                    "DELETE FROM users                    WHERE org_id = CAST(:oid AS uuid)"),
+    # 6 ── the tenant row itself, last ──────────────────────────────────────
+    ("organisations",            "DELETE FROM organisations            WHERE org_id = CAST(:oid AS uuid)"),
+]
+
+
+def purge_org_postgres(org_id: str) -> dict[str, int]:
+    """Delete EVERY PostgreSQL row for one org, FK-safe, in one transaction.
+
+    Returns a per-table count of rows deleted (table name → rowcount). The
+    leaving tenant's own audit/decision history is removed too; the retained,
+    anonymized erasure receipt is written by the caller AFTER this returns.
+
+    Uses the RLS-exempt admin engine — this is a system offboarding operation,
+    not a tenant request. Does NOT touch the tenant-blind `llm_response_cache`
+    (no org_id column — documented residual gap, see docs/dev/119.md).
+    """
+    counts: dict[str, int] = {}
+    engine = get_admin_engine()
+    with engine.begin() as conn:
+        for table, sql in _PURGE_ORDER:
+            result = conn.execute(sa.text(sql), {"oid": str(org_id)})
+            counts[table] = result.rowcount or 0
+    return counts
+
+
 def _safe_uuid(value) -> str | None:
     """Return value as UUID string if valid, else None (avoids FK cast errors)."""
     if value is None:

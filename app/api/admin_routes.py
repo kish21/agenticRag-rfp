@@ -364,3 +364,91 @@ async def purge_llm_cache(
     return {"deleted": deleted, "filters": {
         "cache_key": cache_key, "model": model, "before": before,
     }}
+
+
+# ── SC-001 (#119): GDPR Mode B — whole-tenant erasure (offboarding) ───────
+
+
+class EraseOrgRequest(BaseModel):
+    confirm_org_name: str   # must match the org's org_name exactly — no bare wipe
+    reason: str             # recorded on the retained erasure receipt
+
+
+def _admin_engine_org(org_id: str):
+    """(org_name, has_running_run) for an org via the RLS-exempt admin engine, or
+    (None, False) if the org does not exist. Cross-org system read — a
+    platform_admin may target an org outside their own RLS scope."""
+    from app.db.fact_store import get_admin_engine
+
+    engine = get_admin_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text("SELECT org_name FROM organisations WHERE org_id = CAST(:o AS uuid)"),
+            {"o": org_id},
+        ).fetchone()
+        if row is None:
+            return None, False
+        running = conn.execute(
+            sa.text(
+                "SELECT EXISTS (SELECT 1 FROM evaluation_runs "
+                "WHERE org_id = CAST(:o AS uuid) AND status = 'running')"
+            ),
+            {"o": org_id},
+        ).scalar()
+    return row[0], bool(running)
+
+
+@router.delete(
+    "/org/{org_id}/data",
+    summary="Erase ALL data for one tenant (GDPR offboarding)",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, BAD_REQUEST),
+)
+async def erase_org_data(
+    org_id: str,
+    body: EraseOrgRequest,
+    user: TokenData = Depends(get_current_user),
+) -> dict:
+    """SC-001 (#119) — GDPR Mode B: permanently erase a departing customer's
+    entire tenant in one audited call (PostgreSQL rows → Qdrant vectors →
+    on-disk files → caches), leaving only a retained, anonymized erasure receipt.
+
+    RBAC: platform_admin (any org) or company_admin (their OWN org only).
+    Safety: `confirm_org_name` must match the org's name exactly; refused (409)
+    while any of the org's runs is still 'running'.
+    """
+    from app.domain.org_erasure import erase_org
+    from app.infra.audit import audit
+
+    # RBAC — role gate + ownership (company_admin confined to its own tenant).
+    if user.role not in ("platform_admin", "company_admin"):
+        raise HTTPException(status_code=403, detail="Insufficient role")
+    if user.role == "company_admin" and str(user.org_id) != str(org_id):
+        raise HTTPException(
+            status_code=403, detail="company_admin may only erase their own org.",
+        )
+
+    org_name, has_running = _admin_engine_org(org_id)
+    if org_name is None:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    # Safety — explicit name confirmation, no bare "delete everything".
+    if body.confirm_org_name != org_name:
+        raise HTTPException(
+            status_code=400,
+            detail="confirm_org_name does not match the organisation's name.",
+        )
+    if settings.product.gdpr.block_if_runs_in_flight and has_running:
+        raise HTTPException(
+            status_code=409,
+            detail="Org has a run currently in progress; cannot erase mid-pipeline.",
+        )
+
+    # Pre-op audit while the org still exists (its own history goes with the
+    # tenant; the final org.erased receipt is what survives).
+    audit(
+        org_id=org_id, run_id=None, event_type="org.erasure_requested",
+        actor=user.email, detail={"reason": body.reason, "org_name": org_name},
+    )
+
+    receipt = erase_org(org_id, requested_by=user.email, reason=body.reason)
+    return receipt.model_dump()

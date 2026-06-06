@@ -361,6 +361,23 @@ Submit multiple RFPs in a single job. Currently one RFP per run. Large procureme
 
 ---
 
+### PF-009 — GDPR Mode A: individual subject anonymization (#119 follow-up)
+**Summary:** Mode B (whole-tenant offboarding wipe) shipped (SC-001, #119). Mode A is the everyday
+GDPR Art. 17 request: scrub ONE person's personal identifiers while KEEPING the business/audit records
+(now linked to a "redacted" subject). This is a separate, clean subtask — do NOT fold into Mode B.
+
+**Where it lands:**
+- New `app/domain/subject_anonymization.py` — `anonymize_subject(org_id, email) -> AnonymizationReceipt`
+- Scrub `users.email` / `users.full_name` + identifier references in `created_by_email` / `actor` /
+  `accessed_by` / `invited_by` (replace with a stable pseudonym, not delete) across the org's rows
+- New endpoint under `admin_routes.py` (RBAC: company_admin own-org / platform_admin)
+- **Hard part / limitation:** vendor-contact PII embedded inside document text + extracted facts needs
+  content redaction — note as a known limitation for v1.
+
+**Priority:** Medium-High — the routine GDPR request enterprises actually file; Mode B only covers leaving.
+
+---
+
 ## Documentation
 *Often skipped. Always noticed.*
 
