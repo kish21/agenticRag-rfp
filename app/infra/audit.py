@@ -42,6 +42,8 @@ EVENTS = {
     "approval.responded",# approver accepted or rejected
     "retrieval_critic.verdict",  # retrieval critic judged chunk adequacy
     "extraction_critic.verdict", # extraction critic judged a single extracted fact
+    "org.erasure_requested",     # GDPR Mode B — tenant wipe requested (pre-op, #119)
+    "org.erased",                # GDPR Mode B — retained, anonymized erasure receipt (#119)
 }
 
 

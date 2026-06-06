@@ -37,6 +37,13 @@ import pytest
 # this module so authorisation rules are enforced in exactly one place.
 _ALLOWED_WRITERS = {
     "app/domain/visibility.py",
+    # SC-001 (#119) GDPR Mode B tenant erasure: purge_org_postgres() DELETEs the
+    # departing org's rows from every table, including the access tables. This is
+    # a deletion (never an INSERT that could grant access), and the only caller —
+    # DELETE /api/v1/admin/org/{org_id}/data — is gated by require platform_admin/
+    # company_admin + org-ownership. It does not violate the Phase 9 invariant
+    # (access is still decided by humans at RFP creation; this only removes it).
+    "app/db/fact_store.py",
 }
 
 _PROTECTED_TABLES = ("user_departments", "rfp_collaborators", "approval_assignments")

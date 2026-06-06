@@ -87,6 +87,7 @@ RESPONSE_MODEL_BASELINE = {
     ("post", "/api/v1/admin/attribution-queue/{job_id}/assign"),
     ("post", "/api/v1/admin/late-addendum/{job_id}/accept"),
     ("delete", "/api/v1/admin/llm-cache"),
+    ("delete", "/api/v1/admin/org/{org_id}/data"),  # SC-001 #119 — returns erasure-receipt dict
 }
 
 

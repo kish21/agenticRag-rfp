@@ -571,6 +571,24 @@ E3.b changed the no-claims default from `0.0` to `1.0` and filters to `claim_bea
 
 ---
 
+### P2.29 — GDPR Mode B residual erasure gaps (SC-001 #119, 2026-06-06)
+
+**Problem.** `erase_org()` (Mode B tenant wipe) honestly does NOT reach two stores; both are surfaced
+in the returned `ErasureReceipt.residual_gaps` and documented in `docs/dev/119.md`:
+1. **`llm_response_cache` is tenant-blind** — no `org_id` column (deliberate, content-addressed; see
+   PRODUCTION_READINESS_PLAN Phase 3). A departing org's prompt/response text can linger there until
+   TTL/eviction. **Fix option:** per-org cache keying (add an org dimension to the cache key) so a
+   tenant's entries become selectively purgeable, then call it from `erase_org`. Weigh against the
+   cross-tenant cache-hit benefit the blindness buys.
+2. **LangSmith traces** — external API; deletion is a best-effort follow-up via the LangSmith SDK,
+   not part of the local transaction. **Fix:** add a best-effort `delete_project_runs(org tag)` call,
+   logged, non-fatal.
+
+**Effort:** ~1 day for (1) if per-org keying is accepted; ~half a day for (2). **Priority:** P2 — not a
+v1 blocker (Mode B wipes the primary stores); revisit when a customer's DPA names these systems.
+
+---
+
 ## ⚪ P3 — Polish
 
 | ID    | What                                                                                  | Effort     |

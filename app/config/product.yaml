@@ -71,3 +71,15 @@ audit:
   retain_decisions_years: 7
   require_human_signoff: true
   citation_required: true
+
+# GDPR data-subject rights (issue #119)
+# Mode B — tenant erasure (offboarding wipe). All values defaulted so older
+# product.yaml files keep loading.
+gdpr:
+  # Keep a retained, anonymized erasure receipt (org_id + requester + counts,
+  # no PII) as proof the wipe happened. Survives the org delete (audit_log has
+  # no FK to organisations). Art. 17(3) — proof of compliant erasure.
+  keep_erasure_receipt: true
+  # Refuse a tenant wipe while any of the org's runs is still 'running' — a
+  # wipe mid-pipeline would orphan an in-flight evaluation. 409 if violated.
+  block_if_runs_in_flight: true

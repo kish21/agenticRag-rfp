@@ -212,12 +212,22 @@ class ProductRFPDefaults(BaseModel):
     write_roles: list[str]
 
 
+class ProductGDPR(BaseModel):
+    """GDPR data-subject rights — Mode B tenant erasure (issue #119).
+
+    Defaulted so a product.yaml without a `gdpr:` block still loads.
+    """
+    keep_erasure_receipt: bool = True
+    block_if_runs_in_flight: bool = True
+
+
 class ProductConfig(BaseModel):
     new_org_defaults: dict      # see OrgSettings model for keys
     presets: dict[str, Preset]
     score_bands: ProductScoreBands
     audit: ProductAudit
     rfp_defaults: ProductRFPDefaults
+    gdpr: ProductGDPR = ProductGDPR()
 
 
 # ─── Unified Settings (env secrets + YAML tunables) ───────────────────
