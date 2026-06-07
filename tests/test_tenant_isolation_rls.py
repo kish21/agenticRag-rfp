@@ -220,6 +220,39 @@ def test_write_isolation_cannot_update_other_org(app_engine):
     assert updated == 0, "org A modified org B's rows — RLS UPDATE not enforced"
 
 
+def test_run_insert_without_org_context_is_blocked():
+    """Regression for the /start 500: an evaluation_runs INSERT with NO org
+    context on the connection is rejected by RLS WITH CHECK — which is why
+    /start (and every writer) must SET LOCAL app.current_org_id explicitly
+    rather than rely on the pooled-connection listener alone. The same insert
+    succeeds once the context is set. Dedicated engine to avoid pool-state
+    bleed from sibling tests."""
+    eng = sa.create_engine(app_engine_url())
+    install_org_listener(eng)
+    try:
+        # No context → blocked.
+        with pytest.raises(Exception) as exc:
+            with org_context(None), eng.begin() as c:
+                c.execute(sa.text(
+                    "INSERT INTO evaluation_runs (org_id, rfp_id, status) "
+                    "VALUES (CAST(:o AS uuid), 'rfp-rls-z', 'pending_confirm')"
+                ), {"o": ORG_A})
+        assert "row-level security" in str(exc.value).lower()
+
+        # Context set explicitly (what the fix does) → succeeds.
+        with org_context(None), eng.begin() as c:
+            c.execute(sa.text("SET LOCAL app.current_org_id = :o"), {"o": ORG_A})
+            rid = c.execute(sa.text(
+                "INSERT INTO evaluation_runs (org_id, rfp_id, status) "
+                "VALUES (CAST(:o AS uuid), 'rfp-rls-z2', 'pending_confirm') RETURNING run_id"
+            ), {"o": ORG_A}).scalar()
+        assert rid is not None
+    finally:
+        with get_admin_engine().begin() as c:
+            c.execute(sa.text("DELETE FROM evaluation_runs WHERE rfp_id IN ('rfp-rls-z','rfp-rls-z2')"))
+        eng.dispose()
+
+
 def test_write_isolation_cannot_insert_for_other_org(app_engine):
     """org A cannot INSERT a row stamped with org B (WITH CHECK rejects it)."""
     with pytest.raises(Exception) as exc:
