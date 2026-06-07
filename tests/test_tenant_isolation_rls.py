@@ -220,6 +220,21 @@ def test_write_isolation_cannot_update_other_org(app_engine):
     assert updated == 0, "org A modified org B's rows — RLS UPDATE not enforced"
 
 
+def test_db_get_run_sets_own_org_context(admin_engine):
+    """Regression for 'Run not found' on click: _db_get_run must stamp the tenant
+    on its own connection, so an existing run is found even with NO ambient
+    request context (an unstamped pooled connection otherwise makes RLS hide it)."""
+    from app.api._evaluation.db import _db_get_run
+    with admin_engine.connect() as c:
+        rid = c.execute(sa.text(
+            "SELECT run_id::text FROM evaluation_runs WHERE org_id = CAST(:o AS uuid) LIMIT 1"
+        ), {"o": ORG_A}).scalar()
+    assert rid, "seed did not create an ORG_A run"
+    with org_context(None):  # simulate an unstamped connection
+        run = _db_get_run(rid, ORG_A)
+    assert run["run_id"] == rid
+
+
 def test_run_insert_without_org_context_is_blocked():
     """Regression for the /start 500: an evaluation_runs INSERT with NO org
     context on the connection is rejected by RLS WITH CHECK — which is why

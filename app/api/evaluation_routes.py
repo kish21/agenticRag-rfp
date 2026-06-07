@@ -432,7 +432,7 @@ async def get_setup(run_id: str, user: TokenData = Depends(get_current_user)):
     run = _db_get_run(run_id, user.org_id)
     require_run_access(user, run)
     log_access(run_id, user.org_id, user.email, "view_setup")
-    setup = _db_get_setup(run["setup_id"])
+    setup = _db_get_setup(run["setup_id"], user.org_id)
     if not setup:
         raise HTTPException(status_code=404, detail="Setup not found")
     setup["currency"] = run.get("currency") or "GBP"
@@ -473,7 +473,7 @@ async def update_setup(
     if run["status"] not in ("pending", "pending_confirm"):
         raise HTTPException(409, "Cannot edit setup after pipeline has started")
 
-    existing = _db_get_setup(run["setup_id"])
+    existing = _db_get_setup(run["setup_id"], user.org_id)
 
     extraction_targets: list[dict] = list(
         body.extraction_targets if body.extraction_targets
