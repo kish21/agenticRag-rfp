@@ -91,7 +91,7 @@ Before anything else in Skill 04:
 
 ## CURRENT BUILD STATE
 
-**Last updated:** 2026-06-06 · **Branch:** master (clean, synced with origin) · **HEAD:** `91646dc` (RBAC #55 merged; + DX-001 #128, SC-001 #119 PRs pending)
+**Last updated:** 2026-06-07 · **Branch:** master (clean, synced with origin) · **HEAD:** `99059c8` (RBAC #55, GDPR #119, OpenAPI #128 all MERGED; dependency cleanup done — see below)
 
 **On master — all merged.** Phases 1, 2, 2c, 4, 5, 7, 9 + Phase 8 module foundation. Enterprise-readiness E1–E3 + E3.a–e done. Working tree clean; nothing pending to push.
 
@@ -112,16 +112,15 @@ Recent merges (full per-PR detail in git history + `docs/dev/E*.md` — do not r
 - **#219 (#212)** — reranker backend follows `.env RERANKER_PROVIDER` (default `modal`); fail-open-but-loud on air-gapped degrade.
 - **Evidence-quality line** — #198 contradiction→insufficient, #200 contradiction→SOFT, #202 missing-mandatory→reject, #204 coverage-normalised ranking, #206 grader robustness, #207 regression gates + reranked baseline, #211/#213/#214 cleanups.
 
-Latest benchmark baseline (`benchmark/results/`): grounding 1.00, 0 fabricated, 0 op-failures.
+Latest benchmark baseline (`benchmark/results/`): grounding 1.00, 0 fabricated, 0 op-failures (re-confirmed 2026-06-07 under langgraph 1.2.4 / langchain 1.3.4 — unchanged, $0.426).
 
-**Next action (next session) — pick ONE, one subtask per session:**
-- **#124 OR-001** — Grafana dashboard JSON (Prometheus/Grafana already in docker-compose; just author panels). Recommended next quick win.
-- **P1.4** — cancel running pipeline (1–2 days, full-stack — larger than one session)
-- **P1.9 (#60)** — human feedback capture for score overrides → few-shot bank (1 day, full-stack)
-- **E3.f (#209)** — scanned/OCR document support (P4 — parked; vendors send digital PDFs today, revisit when a customer submits scanned docs; the present-day safety fix = make scanned PDFs fail with a clear message instead of "No usable chunks")
-- **8b** — delivery completion hook + Mode C auto-trigger (engine/channels done #179/#181; needs live infra + Mailtrap/Resend SMTP creds)
+**Dependency cleanup — DONE 2026-06-07 (all 7 dependabot PRs cleared).** 4 green bumps merged as-is (#259 fastapi, #260 @types/react, #261 python-docx, #263 langsmith). 3 red bumps needed real fixes, each superseded by a coordinated PR: **#274** took only `eslint-config-next 16.2.7` (kept eslint ^9 — v10 removed `context.getFilename()`, crashes Next's `react/display-name`); **#275** dropped unmaintained passlib for native bcrypt 5.0 in `app/auth/jwt.py` (hashes stay `$2b$12$` → old passwords verify; fail-CLOSED on bad hash); **#276** bumped `langgraph 1.2.4` + `langchain 1.3.4` together (langchain 1.2.16 capped langgraph <1.2.0). Full suite 391 passed / 1 skipped on both backend PRs; benchmark unchanged. Toolkit `github-pr-flow` patched with a Dependabot-triage/supersede section (`product-toolkit` `44f3bcb`).
 
-P1 GitHub issues: #133 ✅ (#256), #59 P1.8 ✅ (#265), P1.7 ✅ (#267) shipped; #128 DX-001 ✅ built (PR pending). Quick wins next: #124. Bigger (multi-session): #62 Vendor Q&A, #60 feedback bank, #136 LangSmith golden dataset.
+**Next action — START IN A FRESH SESSION: #60 (P1.9) human feedback capture → few-shot bank.** Picked by project-board order (board #3; P1.7 #58 + P1.8 #59 above it are closed). 1 day, full-stack. KICKOFF FIRST (don't jump to code): architect + vision-check → **verify against the existing override path** (`app/domain/override.py` already writes AuditOverride records on every human override — this feature turns those into a learning signal, it does NOT re-build capture) → benchmark-2026 → write `docs/dev/60.md` design doc with the per-feature contract → confirm with user → build. Shape: (1) store corrections as typed few-shot examples (org-scoped — a tenant only learns from its OWN overrides); (2) a config-driven few-shot bank service that selects relevant past corrections by org_id + criterion; (3) inject into the **Evaluation Agent** prompt (Critic still runs; examples guide, never bypass guardrails); (4) feedback UI on the existing `/[runId]/override` page. ALL knobs (example count, on/off, selection strategy) in `product.yaml`/`platform.yaml` — no hardcoding. **Touches the Evaluation Agent prompt → benchmark re-run is mandatory before merge.**
+
+Other open options (not chosen this round): **#124 OR-001** Grafana dashboard JSON (quick win); **P1.4** cancel running pipeline (1–2 days, multi-session); **E3.f #209** scanned/OCR (P4, parked); **8b** delivery hook + Mode C (needs SMTP creds).
+
+P1 GitHub issues: #133 ✅ (#256), #59 P1.8 ✅ (#265), P1.7 ✅ (#267), #128 DX-001 ✅ (#269), #119 SC-001 ✅ (#270) shipped. **#60 P1.9 = next (chosen).** Bigger (multi-session): #62 Vendor Q&A, #136 LangSmith golden dataset.
 
 De-prioritised: **E3.b.1** cert-status contradiction = **#210** (closed / won't-do — domain over-fitting; the generic value-contradiction path #198 already covers the real case. See [[generic_platform_no_domain_special_case]]).
 
