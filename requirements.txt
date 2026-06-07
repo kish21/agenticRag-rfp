@@ -43,8 +43,10 @@ fastembed==0.8.0
 PyJWT==2.13.0                      # JWT mint/verify. HS256 only -> no crypto extra (HMAC = stdlib);
                                    #   replaces python-jose (#222), dropping its ecdsa/pyasn1/rsa chain
                                    #   and clearing PYSEC-2025-185 (JWE-bomb) + CVE-2026-30922 (pyasn1 DoS)
-bcrypt==4.1.3
-passlib[bcrypt]==1.7.4
+bcrypt==5.0.0                      # native bcrypt; passlib dropped (#258) — unmaintained
+                                   #   since 2020 and incompatible with bcrypt 5.x (reads the
+                                   #   removed bcrypt.__about__ + breaks on its >72-byte hard error).
+                                   #   hash/verify now call bcrypt directly in app/auth/jwt.py
 
 # ── Web framework ─────────────────────────────────────────
 fastapi==0.136.3
