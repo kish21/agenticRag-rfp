@@ -302,16 +302,17 @@ Update four fields above. Add one line to .claude/daily_build_log.md.
 ## VERIFIED PACKAGE VERSIONS — May 2026 (grounded from requirements.txt)
 
 ```
-openai==2.41.0          langchain==1.2.16       langgraph==1.1.10
+openai==2.41.0          langchain==1.3.4        langgraph==1.2.4
 langsmith==0.8.0        langfuse==4.5.1         llama-index-core==0.14.21
 qdrant-client==1.18.0   cohere==5.21.1          sentence-transformers==4.1.0
 fastapi==0.136.1        pydantic==2.13.3        sqlalchemy==2.0.40
 uvicorn[standard]==0.34.3  psycopg2-binary==2.9.10  httpx==0.28.1
 ```
 
-NOTE: langgraph 1.1.10 is installed (not 0.4.x as in skill files). The StateGraph API
-is compatible but import paths changed. When building the LangGraph pipeline in Skill 07,
-use:
+NOTE: langgraph 1.2.4 is installed (not 0.4.x as in skill files; bumped from 1.1.10
+in #262, which also moved langchain 1.2.16 -> 1.3.4 since langchain caps langgraph).
+The StateGraph API is compatible but import paths changed. When building the LangGraph
+pipeline in Skill 07, use:
     from langgraph.graph import StateGraph, END
     from langgraph.graph.state import CompiledStateGraph
 Do not use deprecated 0.x import paths.
