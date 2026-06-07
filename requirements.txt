@@ -12,7 +12,7 @@ langchain-openai==1.2.2     # updated: 1.x required for langchain-core 1.x
 langchain-anthropic==1.4.2  # updated: 1.x required for langchain-core 1.x
 langchain-community==0.4.2  # updated: 0.4.x compatible with langchain-core 1.x
 langgraph==1.1.10           # updated: langchain 1.2.16 requires >=1.1.10,<1.2.0
-langsmith==0.8.0            # updated: langchain-community 0.4.1 requires 0.8.0
+langsmith==0.8.9            # updated: langchain-community 0.4.1 requires 0.8.0
 langfuse==4.5.1             # SDK REWRITTEN in v4 March 2026 — NOT backwards compatible with v2.x
 
 # ── LlamaIndex for document processing ───────────────────
