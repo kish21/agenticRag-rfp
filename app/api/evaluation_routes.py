@@ -208,6 +208,12 @@ async def start_evaluation(
 
     engine = get_engine()
     with engine.begin() as conn:
+        # Stamp the tenant on THIS connection so the run/vendor INSERTs pass the
+        # evaluation_runs / vendor_documents RLS WITH CHECK. Mirrors every other
+        # writer (save_evaluation_setup, save_override, fact_store): never rely on
+        # the pooled-connection listener alone — a connection checked out during
+        # startup (no request context) leaves it unstamped and the INSERT 403s.
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(user.org_id)})
         conn.execute(
             sa.text("""
                 INSERT INTO evaluation_runs
@@ -263,6 +269,7 @@ async def start_evaluation(
 
     if gaps_report.get("has_gaps"):
         with engine.begin() as conn:
+            conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(user.org_id)})
             conn.execute(sa.text("""
                 UPDATE evaluation_runs
                 SET gaps_report = CAST(:gaps AS jsonb)
