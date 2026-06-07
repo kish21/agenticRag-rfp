@@ -102,6 +102,28 @@ class PlatformSelfConsistency(BaseModel):
     temperature: float = Field(default=0.5, ge=0.0, le=2.0)
 
 
+class PlatformFewShot(BaseModel):
+    # P1.9 (#60) — few-shot example bank for the Evaluation Agent. Past human
+    # corrections (criterion/check level) are injected as calibration examples
+    # into the evaluate-check / score-criterion prompts. Org-scoped: a tenant
+    # only ever sees its OWN corrections (RLS on evaluation_corrections).
+    #   • enabled=False  → no DB read, empty block, prompts byte-for-byte unchanged
+    #     (this is why the benchmark org — which has no corrections — is unaffected).
+    #   • max_examples   → ceiling on how many corrections are injected per item.
+    #   • selection_strategy → "recent" (newest-first) is the only strategy today;
+    #     the field exists so the policy is config-driven, not hardcoded.
+    #   • min_reason_len → a correction with a thinner reason than this is skipped
+    #     (a poor reason makes a poor example).
+    #   • apply_to_checks / apply_to_scores → gate the two injection points
+    #     independently. Critic still runs regardless — examples GUIDE, never bypass.
+    enabled: bool = True
+    max_examples: int = Field(default=3, ge=0)
+    selection_strategy: str = "recent"
+    min_reason_len: int = Field(default=20, ge=0)
+    apply_to_checks: bool = True
+    apply_to_scores: bool = True
+
+
 class PlatformRetrieval(BaseModel):
     embedding_model: str
     embedding_dimensions: int
@@ -175,6 +197,7 @@ class PlatformConfig(BaseModel):
     injection_defence: PlatformInjectionDefence = PlatformInjectionDefence()
     synthesis_verification: PlatformSynthesisVerification = PlatformSynthesisVerification()
     self_consistency: PlatformSelfConsistency = PlatformSelfConsistency()
+    few_shot: PlatformFewShot = PlatformFewShot()
     retrieval: PlatformRetrieval
     llm: PlatformLLM
     infrastructure: PlatformInfra

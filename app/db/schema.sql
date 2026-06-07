@@ -259,6 +259,25 @@ CREATE TABLE IF NOT EXISTS audit_overrides (
     approved_by       TEXT
 );
 
+-- P1.9 (#60) — human feedback capture → few-shot bank. Criterion/check-level
+-- corrections (finer than the whole-vendor audit_overrides) that the Evaluation
+-- Agent's few-shot bank selects on (org_id + target). Org-isolated by RLS.
+CREATE TABLE IF NOT EXISTS evaluation_corrections (
+    correction_id   UUID PRIMARY KEY,
+    org_id          UUID NOT NULL,
+    run_id          UUID,
+    vendor_id       TEXT,
+    target_type     TEXT NOT NULL CHECK (target_type IN ('criterion','check')),
+    target_id       TEXT NOT NULL,
+    target_name     TEXT,
+    original_value  JSONB,
+    corrected_value JSONB NOT NULL,
+    reason          TEXT NOT NULL CHECK (length(reason) >= 20),
+    corrected_by    TEXT NOT NULL,
+    active          BOOLEAN NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS approvals (
     approval_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id         UUID REFERENCES evaluation_runs(run_id),
@@ -288,6 +307,7 @@ ALTER TABLE extracted_pricing        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE extracted_facts          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE decisions                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_overrides          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evaluation_corrections   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE approvals                ENABLE ROW LEVEL SECURITY;
 
 -- org isolation policy — same pattern for every table
@@ -338,6 +358,10 @@ DO $$ BEGIN
         CREATE POLICY rls_audit_overrides ON audit_overrides
             USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_evaluation_corrections') THEN
+        CREATE POLICY rls_evaluation_corrections ON evaluation_corrections
+            USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'rls_approvals') THEN
         CREATE POLICY rls_approvals ON approvals
             USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
@@ -369,6 +393,10 @@ CREATE INDEX IF NOT EXISTS idx_projects_org_vendor
 
 CREATE INDEX IF NOT EXISTS idx_pricing_org_vendor
     ON extracted_pricing(org_id, vendor_id);
+
+-- few-shot bank lookup: corrections selected by org + target (criterion/check)
+CREATE INDEX IF NOT EXISTS idx_eval_corrections_lookup
+    ON evaluation_corrections(org_id, target_type, target_id, active);
 
 -- extracted_facts needs three indexes — queried by setup, target, and vendor
 CREATE INDEX IF NOT EXISTS idx_facts_org_vendor

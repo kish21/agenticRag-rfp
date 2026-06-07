@@ -65,9 +65,18 @@ def seed(admin_engine):
                 "INSERT INTO audit_log (org_id, event_type, actor) "
                 "VALUES (CAST(:o AS uuid), 'run.created', 'test')"
             ), {"o": o})
+            # P1.9 (#60) — one few-shot correction per org for read-isolation.
+            c.execute(sa.text(
+                "INSERT INTO evaluation_corrections "
+                "(correction_id, org_id, target_type, target_id, corrected_value, "
+                " reason, corrected_by) VALUES "
+                "(gen_random_uuid(), CAST(:o AS uuid), 'criterion', 'crit-1', "
+                " '{\"raw_score\": 8}'::jsonb, :reason, 'test@x.test')"
+            ), {"o": o, "reason": "seeded correction for the rls isolation test (20+ chars)"})
     yield
     with admin_engine.begin() as c:
         for o in (ORG_A, ORG_B):
+            c.execute(sa.text("DELETE FROM evaluation_corrections WHERE org_id = CAST(:o AS uuid)"), {"o": o})
             c.execute(sa.text("DELETE FROM audit_log WHERE org_id = CAST(:o AS uuid)"), {"o": o})
             c.execute(sa.text("DELETE FROM evaluation_runs WHERE org_id = CAST(:o AS uuid)"), {"o": o})
             c.execute(sa.text("DELETE FROM organisations WHERE org_id = CAST(:o AS uuid)"), {"o": o})
@@ -173,6 +182,30 @@ def test_audit_log_isolation(app_engine):
             "SELECT count(*) FROM audit_log WHERE org_id = CAST(:o AS uuid)"
         ), {"o": ORG_B}).scalar()
     assert b_rows == 0, "org A can read org B's audit_log rows"
+
+
+def test_evaluation_corrections_isolation():
+    """P1.9 (#60) — a tenant only ever learns from its OWN corrections: org A
+    cannot read org B's evaluation_corrections rows (the few-shot bank source),
+    and DOES see its own.
+
+    Uses a dedicated platform_app engine (not the module-shared one) so the
+    owner-visibility assertion is immune to pooled-connection GUC state left by
+    sibling tests (e.g. the org_context(None) test) — a test-harness artifact,
+    not a production path. The seed (admin) fixture already inserted one
+    correction per org."""
+    eng = sa.create_engine(app_engine_url())
+    install_org_listener(eng)
+    try:
+        with org_context(ORG_A), eng.connect() as c:
+            b_rows = c.execute(sa.text(
+                "SELECT count(*) FROM evaluation_corrections WHERE org_id = CAST(:o AS uuid)"
+            ), {"o": ORG_B}).scalar()
+            own = c.execute(sa.text("SELECT count(*) FROM evaluation_corrections")).scalar()
+    finally:
+        eng.dispose()
+    assert b_rows == 0, "org A can read org B's corrections — RLS not enforcing"
+    assert own >= 1, "org A cannot see its own corrections"
 
 
 # ── Write isolation ──────────────────────────────────────────────────────────

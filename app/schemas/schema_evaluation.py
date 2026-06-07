@@ -1,7 +1,48 @@
-from pydantic import BaseModel, Field, model_validator
-from typing import Literal, List, Dict
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .schema_enums import ComplianceStatus, DecisionBasis
+
+
+class EvaluationCorrection(BaseModel):
+    """P1.9 (#60) — one human correction of an AI evaluation decision, captured at
+    criterion/check grain so the few-shot bank can select it by org_id + target.
+
+    This is the LEARNING signal. Every correction also writes an AuditOverride
+    (Component Contract #7) for the immutable audit trail — the two are distinct:
+    audit_overrides answers "what was changed and by whom", this answers "how
+    should the AI have judged this so it calibrates next time".
+
+    `reason` is mandatory and ≥20 chars (same audit bar as AuditOverride). The
+    *_value dicts are intentionally open: criterion → {"raw_score": int}, check →
+    {"decision": str}, plus any reviewer-supplied context.
+    """
+    correction_id: str
+    org_id: str
+    run_id: str = ""
+    vendor_id: str = ""
+    target_type: Literal["criterion", "check"]
+    target_id: str
+    target_name: str = ""
+    original_value: Dict[str, Any] = {}
+    corrected_value: Dict[str, Any]
+    reason: str
+    corrected_by: str
+    active: bool = True
+    created_at: Optional[datetime] = None
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_min_length(cls, v: str) -> str:
+        if len(v.strip()) < 20:
+            raise ValueError(
+                "Correction reason must be at least 20 characters. "
+                "Documented reasoning is required for audit compliance and to "
+                "make a useful few-shot example."
+            )
+        return v
 
 
 class ComplianceDecision(BaseModel):
