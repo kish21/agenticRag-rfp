@@ -20,12 +20,22 @@ Token payload:
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import bcrypt
 import jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from app.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt operates on at most 72 bytes of input. We truncate longer passwords
+# explicitly because bcrypt 5.x *raises* on >72 bytes (4.x silently truncated),
+# and because this matches the behaviour of the now-unmaintained passlib backend
+# this code used previously — so password hashes created before the migration
+# still verify. This module is the ONLY place that knows we use the bcrypt
+# library, so swapping it again stays a one-file change (same as TokenError/PyJWT).
+_BCRYPT_MAX_BYTES = 72
+
+
+def _bcrypt_bytes(password: str) -> bytes:
+    return password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
 
 
 class TokenError(Exception):
@@ -68,11 +78,18 @@ class Token(BaseModel):
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_bcrypt_bytes(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    # Fail CLOSED: a malformed stored hash (e.g. not a bcrypt string) makes
+    # bcrypt.checkpw raise — treat that as "does not match", never as success.
+    try:
+        return bcrypt.checkpw(
+            _bcrypt_bytes(plain_password), hashed_password.encode("utf-8")
+        )
+    except (ValueError, TypeError):
+        return False
 
 
 def create_access_token(
