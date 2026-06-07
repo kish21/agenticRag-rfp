@@ -77,6 +77,24 @@ self_consistency:
   # temperature 0 as the deterministic audit baseline.
   temperature: 0.5
 
+# P1.9 (#60) — human feedback capture → few-shot bank. When a reviewer corrects an
+# AI decision (a criterion score or a mandatory pass/fail), the correction is stored
+# org-scoped and injected as a calibration EXAMPLE into the Evaluation Agent's prompt
+# for that same criterion/check on future runs. The Critic still runs — examples GUIDE,
+# they never bypass guardrails. With no stored corrections (e.g. the benchmark org) the
+# injected block is empty, so the prompt is byte-for-byte unchanged.
+few_shot:
+  enabled: true
+  # Max corrections injected per criterion/check (newest first).
+  max_examples: 3
+  # "recent" = newest-first. The only strategy today; field keeps the policy config-driven.
+  selection_strategy: recent
+  # A correction whose reason is thinner than this many chars makes a poor example — skip it.
+  min_reason_len: 20
+  # Gate the two injection points independently.
+  apply_to_checks: true
+  apply_to_scores: true
+
 embedding:
   # Active model is chosen by EMBEDDING_PROVIDER in .env:
   #   openai / azure  → openai_model

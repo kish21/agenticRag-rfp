@@ -29,6 +29,7 @@ from app.schemas.output_models import (
 )
 from app.agents.critic import critic_after_evaluation
 from app.db.fact_store import get_vendor_facts
+from app.domain.few_shot import build_few_shot_block
 from app.infra.cost_tracker import mark_agent
 
 
@@ -324,6 +325,9 @@ async def _evaluate_mandatory_check(
         if relevant_facts
         else "No facts extracted for this requirement."
     )
+    # P1.9 — inject this org's past human corrections for THIS check as calibration
+    # examples. Empty string when the bank is off/empty → prompt unchanged.
+    few_shot = build_few_shot_block(org_id, "check", check.check_id, check.name)
     messages = [
         {"role": "system", "content": get_prompt("evaluation/evaluate_check")},
         {
@@ -335,6 +339,7 @@ async def _evaluate_mandatory_check(
                 f"What passes: {check.what_passes}\n"
                 f"Extraction target: {target.name} — {target.description}\n\n"
                 f"Extracted facts:\n{facts_text}\n\n"
+                f"{few_shot}"
                 "Return JSON:\n"
                 '{"decision": "pass|fail|insufficient_evidence", '
                 '"confidence": 0.0, '
@@ -420,6 +425,7 @@ async def _score_criterion(
     relevant_facts: list[dict],
     vendor_id: str,
     critic_feedback: str = "",
+    org_id: str = "",
 ) -> CriterionScore:
     has_facts = bool(relevant_facts)
     # E3 — no forced scores: if NO evidence feeds this criterion, do not ask the
@@ -442,6 +448,9 @@ async def _score_criterion(
             insufficient_evidence=True,
         )
     facts_text = json.dumps(relevant_facts, indent=2, default=str)
+    # P1.9 — inject this org's past human corrections for THIS criterion as calibration
+    # examples. Empty string when the bank is off/empty → prompt unchanged.
+    few_shot = build_few_shot_block(org_id, "criterion", criterion.criterion_id, criterion.name)
     messages = [
         {"role": "system", "content": get_prompt("evaluation/score_criterion")},
         {
@@ -455,6 +464,7 @@ async def _score_criterion(
                 f"3-5:  {criterion.rubric_3_5}\n"
                 f"0-2:  {criterion.rubric_0_2}\n\n"
                 f"Extracted facts:\n{facts_text}\n\n"
+                f"{few_shot}"
                 "Score this vendor 0-10. "
                 "Set confidence to how certain you are of the score (0.0=uncertain, 1.0=certain). "
                 "Even a score of 0 should have high confidence if evidence is clearly absent.\n"
@@ -559,7 +569,8 @@ async def run_evaluation_agent(
             )
         try:
             score = await _score_criterion(criterion, relevant, vendor_id,
-                                           critic_feedback=critic_feedback)
+                                           critic_feedback=critic_feedback,
+                                           org_id=org_id)
             criterion_scores.append(score)
         except Exception as e:
             warnings.append(f"Criterion {criterion.criterion_id} failed: {e}")

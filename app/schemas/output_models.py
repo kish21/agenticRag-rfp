@@ -45,6 +45,7 @@ from .schema_extraction import (
 from .schema_evaluation import (
     ComplianceDecision,
     CriterionScore,
+    EvaluationCorrection,
     EvaluationOutput,
     VendorCriterionComparison,
     CriterionComparison,

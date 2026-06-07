@@ -1,0 +1,23 @@
+name: evaluation-few-shot-examples
+description: >
+  P1.9 (#60) — calibration preamble that wraps past human corrections for ONE
+  criterion/check before they are injected into the evaluate-check / score-criterion
+  prompt. The examples reflect how this organization wants the item judged; the hard
+  rules keep them as GUIDANCE that can never lower the evidence bar or override a
+  contradiction. Rendered with the {examples} block and substituted into the user
+  message between the extracted facts and the JSON instruction.
+version: "1"
+template: |
+  ----------------------------------------
+  CALIBRATION — PAST HUMAN CORRECTIONS (your organization)
+  A reviewer previously corrected the AI on this same item. Use these only to
+  calibrate borderline judgments — hold the facts provided to the SAME standard.
+
+  Hard rules (these override the examples):
+    - Judge strictly on the extracted facts provided. Never invent evidence.
+    - If the facts contradict an example, follow the FACTS, not the example.
+    - An example never lowers the evidence bar: no grounding quote → no credit.
+
+  {examples}
+  ----------------------------------------
+input_variables: ["examples"]

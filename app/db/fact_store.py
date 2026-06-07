@@ -74,6 +74,7 @@ _PURGE_ORDER: list[tuple[str, str]] = [
     ("access_audit_log",         "DELETE FROM access_audit_log         WHERE org_id = CAST(:oid AS uuid)"),
     ("retrieval_log",            "DELETE FROM retrieval_log            WHERE org_id = CAST(:oid AS uuid)"),
     ("audit_overrides",          "DELETE FROM audit_overrides          WHERE org_id = CAST(:oid AS uuid)"),
+    ("evaluation_corrections",   "DELETE FROM evaluation_corrections   WHERE org_id = CAST(:oid AS uuid)"),
     ("audit_log",                "DELETE FROM audit_log                WHERE org_id = CAST(:oid AS uuid)"),
     ("ingestion_jobs",           "DELETE FROM ingestion_jobs           WHERE org_id = CAST(:oid AS uuid)"),
     ("event_log",                "DELETE FROM event_log                WHERE org_id = CAST(:oid AS uuid)"),
@@ -773,3 +774,106 @@ def get_evaluation_setup(setup_id: str, org_id: str = None) -> EvaluationSetup:
         )
 
     return EvaluationSetup(**row._mapping["setup_json"])
+
+
+# ── P1.9 (#60) — human feedback capture → few-shot bank ──────────────────
+# Criterion/check-level corrections that the Evaluation Agent's few-shot bank
+# selects on. Same RLS-context pattern as every other tenant write/read: set
+# app.current_org_id so background-task calls pass the evaluation_corrections
+# policy (the few-shot lookup runs inside the evaluation pipeline, off-request).
+
+def save_evaluation_correction(correction) -> None:
+    """Persist one human correction. Idempotent on correction_id.
+
+    `correction` is an EvaluationCorrection (typed contract). JSONB payloads are
+    serialised with json.dumps — Python repr() produces single-quoted pseudo-JSON
+    a jsonb column rejects.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"),
+                     {"oid": str(correction.org_id)})
+        conn.execute(
+            sa.text("""
+                INSERT INTO evaluation_corrections (
+                    correction_id, org_id, run_id, vendor_id,
+                    target_type, target_id, target_name,
+                    original_value, corrected_value, reason, corrected_by, active
+                ) VALUES (
+                    CAST(:correction_id AS uuid), CAST(:org_id AS uuid),
+                    CAST(NULLIF(:run_id, '') AS uuid), :vendor_id,
+                    :target_type, :target_id, :target_name,
+                    CAST(:original_value AS jsonb), CAST(:corrected_value AS jsonb),
+                    :reason, :corrected_by, :active
+                )
+                ON CONFLICT (correction_id) DO NOTHING
+            """),
+            {
+                "correction_id": correction.correction_id,
+                "org_id": str(correction.org_id),
+                "run_id": str(correction.run_id or ""),
+                "vendor_id": correction.vendor_id,
+                "target_type": correction.target_type,
+                "target_id": correction.target_id,
+                "target_name": correction.target_name,
+                "original_value": json.dumps(correction.original_value, default=str),
+                "corrected_value": json.dumps(correction.corrected_value, default=str),
+                "reason": correction.reason,
+                "corrected_by": correction.corrected_by,
+                "active": correction.active,
+            },
+        )
+
+
+def get_evaluation_corrections(
+    org_id: str,
+    target_type: str = None,
+    target_id: str = None,
+    run_id: str = None,
+    limit: int = 50,
+    active_only: bool = True,
+) -> list[dict]:
+    """Fetch corrections for an org, newest first.
+
+    Org isolation is enforced by RLS (set below) AND by the explicit org_id
+    filter. target_type/target_id narrow to one criterion/check for the few-shot
+    bank; run_id narrows to a single run for the reviewer UI — all applied in SQL
+    BEFORE the LIMIT so a busy org never silently truncates a run's corrections.
+    `limit` is clamped to a sane ceiling so a caller can never pull an unbounded
+    result set into a prompt.
+    """
+    safe_limit = max(0, min(int(limit), 200))
+    if safe_limit == 0:
+        return []
+    clauses = ["org_id = CAST(:org_id AS uuid)"]
+    params: dict = {"org_id": str(org_id), "limit": safe_limit}
+    if active_only:
+        clauses.append("active = true")
+    if target_type:
+        clauses.append("target_type = :target_type")
+        params["target_type"] = target_type
+    if target_id:
+        clauses.append("target_id = :target_id")
+        params["target_id"] = target_id
+    if run_id:
+        clauses.append("run_id = CAST(:run_id AS uuid)")
+        params["run_id"] = str(run_id)
+    where = " AND ".join(clauses)
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
+        rows = conn.execute(
+            sa.text(f"""
+                SELECT correction_id, org_id, run_id, vendor_id,
+                       target_type, target_id, target_name,
+                       original_value, corrected_value, reason, corrected_by,
+                       active, created_at
+                FROM evaluation_corrections
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """),
+            params,
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]

@@ -35,10 +35,16 @@ from app.auth.jwt import TokenData, decode_token
 from app.infra.audit import audit
 from app.auth.rbac import require_run_access, require_admin_role, require_write_role, log_access
 from app.schemas.output_models import (
-    AuditOverride, EvaluationSetup, MandatoryCheck,
-    ScoringCriterion, ExtractionTarget,
+    AuditOverride, ComplianceStatus, EvaluationCorrection, EvaluationSetup,
+    MandatoryCheck, ScoringCriterion, ExtractionTarget,
 )
-from app.db.fact_store import get_engine, save_evaluation_setup
+from app.domain.override import create_override_record, save_override
+from app.config import settings
+from app.validators.injection import scan_text
+from app.db.fact_store import (
+    get_engine, save_evaluation_setup,
+    save_evaluation_correction, get_evaluation_corrections,
+)
 from app.api.openapi_responses import (
     responses, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, BAD_REQUEST,
     SERVICE_UNAVAILABLE,
@@ -975,6 +981,142 @@ async def submit_override(run_id: str, body: OverrideRequest,
                   "override_id": override.override_id})
 
     return {"override_id": override.override_id, "status": "recorded"}
+
+
+# ── POST /{runId}/correct ──────────────────────────────────────────────────────
+# P1.9 (#60) — capture a criterion/check-level correction (finer than the
+# whole-vendor /override above) that feeds the Evaluation Agent's few-shot bank.
+
+class CorrectionRequest(BaseModel):
+    target_type: str            # "criterion" | "check"
+    target_id: str
+    target_name: str = ""
+    vendor_id: str = ""
+    original_value: dict = {}   # what the AI produced (informational context)
+    corrected_value: dict       # the human-correct value
+    reason: str
+
+
+def _vendor_in_run(decision: dict, vendor_id: str) -> bool:
+    """True if vendor_id is one of the run's shortlisted/rejected vendors."""
+    for v in decision.get("shortlisted_vendors", []) + decision.get("rejected_vendors", []):
+        if v.get("vendor_id") == vendor_id:
+            return True
+    return False
+
+
+@router.post(
+    "/{run_id}/correct",
+    summary="Submit a criterion/check-level correction (feeds the few-shot bank)",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BAD_REQUEST),
+)
+async def submit_correction(run_id: str, body: CorrectionRequest,
+                            user: TokenData = Depends(get_current_user)):
+    """Record a human correction of a single criterion score or mandatory check.
+
+    Stored org-scoped in evaluation_corrections (the learning signal) AND as an
+    immutable AuditOverride (Component Contract #7). The correction is injected
+    as a calibration example into future evaluations of the same criterion/check
+    for this org. Admin-only (403). 400 on a bad target/value or if the reason
+    trips the prompt-injection scanner (fail-CLOSED — the text reaches an LLM)."""
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+    require_admin_role(user)
+
+    # 1 — validate the target type and the corrected value shape.
+    if body.target_type not in ("criterion", "check"):
+        raise HTTPException(status_code=400,
+                            detail="target_type must be 'criterion' or 'check'")
+    if body.target_type == "criterion":
+        score = body.corrected_value.get("raw_score")
+        # bool is a subclass of int — exclude it so {"raw_score": true} is rejected.
+        if not isinstance(score, int) or isinstance(score, bool) or not (0 <= score <= 10):
+            raise HTTPException(
+                status_code=400,
+                detail="criterion correction needs corrected_value.raw_score as an integer 0-10")
+    else:  # check
+        decision_val = body.corrected_value.get("decision")
+        valid = {s.value for s in ComplianceStatus}
+        if decision_val not in valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"check correction needs corrected_value.decision in {sorted(valid)}")
+
+    # 2 — if a vendor is named, it must belong to the run.
+    decision = run.get("decision_output") or {}
+    if body.vendor_id and not _vendor_in_run(decision, body.vendor_id):
+        raise HTTPException(status_code=404,
+                            detail=f"Vendor {body.vendor_id} not found in run {run_id}")
+
+    # 3a — reason is mandatory and ≥20 chars (audit bar + makes a usable example).
+    # Validate here for a clean 400 rather than letting the model validator 500.
+    if len(body.reason.strip()) < 20:
+        raise HTTPException(status_code=400,
+                            detail="Correction reason must be at least 20 characters.")
+
+    # 3b — prompt-injection defence (OWASP LLM01): the reason is injected into the
+    # Evaluation Agent prompt later, so scan it now and reject fail-CLOSED.
+    patterns = settings.platform.injection_defence.patterns
+    if patterns and scan_text(body.reason, patterns):
+        raise HTTPException(
+            status_code=400,
+            detail="Correction reason rejected: it matches a prompt-injection pattern.")
+
+    # 4 — build the typed correction (reason ≥20 chars enforced by the model → 422).
+    correction = EvaluationCorrection(
+        correction_id=str(uuid.uuid4()),
+        org_id=user.org_id,
+        run_id=run_id,
+        vendor_id=body.vendor_id,
+        target_type=body.target_type,
+        target_id=body.target_id,
+        target_name=body.target_name,
+        original_value=body.original_value,
+        corrected_value=body.corrected_value,
+        reason=body.reason,
+        corrected_by=user.email,
+        active=True,
+    )
+    save_evaluation_correction(correction)
+
+    # 5 — immutable audit trail (Contract #7): every correction is also an override.
+    override = create_override_record(
+        org_id=user.org_id,
+        run_id=run_id,
+        overridden_by=user.email,
+        original_decision={"target_type": body.target_type, "target_id": body.target_id,
+                           "vendor_id": body.vendor_id, "value": body.original_value},
+        new_decision={"target_type": body.target_type, "target_id": body.target_id,
+                      "vendor_id": body.vendor_id, "value": body.corrected_value,
+                      "correction_id": correction.correction_id},
+        reason=body.reason,
+    )
+    save_override(override)
+
+    audit(org_id=user.org_id, run_id=run_id, event_type="correction.submitted",
+          actor=user.email,
+          detail={"correction_id": correction.correction_id,
+                  "target_type": body.target_type, "target_id": body.target_id,
+                  "vendor_id": body.vendor_id})
+
+    return {"correction_id": correction.correction_id, "status": "recorded"}
+
+
+# ── GET /{runId}/corrections ───────────────────────────────────────────────────
+
+@router.get(
+    "/{run_id}/corrections",
+    summary="List human corrections recorded for this run",
+    responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
+)
+async def list_corrections(run_id: str, user: TokenData = Depends(get_current_user)):
+    """Return the org's corrections (newest first) so the reviewer screen can show
+    what has already been corrected. Org-scoped by RLS + org_id filter."""
+    run = _db_get_run(run_id, user.org_id)
+    require_run_access(user, run)
+    # Filter to this run in SQL (before LIMIT) so a busy org never truncates it.
+    corrections = get_evaluation_corrections(org_id=user.org_id, run_id=run_id, limit=200)
+    return {"run_id": run_id, "corrections": corrections}
 
 
 # ── POST /{runId}/re-evaluate ──────────────────────────────────────────────────
