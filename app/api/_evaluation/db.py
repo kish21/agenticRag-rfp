@@ -11,6 +11,11 @@ def _db_get_run(run_id: str, org_id: str) -> dict:
     """Load a run row from PostgreSQL. Raises 404/403 on miss/mismatch."""
     engine = get_engine()
     with engine.connect() as conn:
+        # Stamp the tenant on THIS connection so the RLS USING policy returns the
+        # row. Never rely on the pooled-connection listener alone for a read — an
+        # unstamped connection makes RLS hide the row and the run looks "not found"
+        # (mirrors save_evaluation_setup / the /start write fix).
+        conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
         row = conn.execute(
             sa.text("""
                 SELECT run_id::text, org_id::text, setup_id, rfp_id,
@@ -131,9 +136,14 @@ def _db_load_vendor_files(run_id: str) -> dict[str, tuple[bytes, str]]:
     return {r[0]: (bytes(r[1]), r[2] or r[0]) for r in rows if r[1]}
 
 
-def _db_get_setup(setup_id: str) -> dict | None:
+def _db_get_setup(setup_id: str, org_id: str = None) -> dict | None:
     engine = get_engine()
     with engine.connect() as conn:
+        # Stamp tenant context so the evaluation_setups RLS policy returns the row
+        # on a request connection (callers that have org_id should pass it; the
+        # pipeline runs under org_context()). See _db_get_run.
+        if org_id:
+            conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
         row = conn.execute(
             sa.text("SELECT setup_json FROM evaluation_setups WHERE setup_id = :sid"),
             {"sid": setup_id},
