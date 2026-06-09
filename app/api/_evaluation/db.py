@@ -114,10 +114,15 @@ def _db_save_explanation(run_id: str, explanation: dict) -> None:
         )
 
 
-def _db_load_vendor_files(run_id: str) -> dict[str, tuple[bytes, str]]:
+def _db_load_vendor_files(run_id: str, org_id: str = None) -> dict[str, tuple[bytes, str]]:
     """Load vendor file bytes from vendor_documents for this run's rfp_id."""
     engine = get_engine()
     with engine.connect() as conn:
+        # Stamp tenant context so the evaluation_runs / vendor_documents RLS
+        # policies return rows — never trust the pool listener alone (see
+        # _db_get_run). Callers in the pipeline run under org_context and pass org_id.
+        if org_id:
+            conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
         row = conn.execute(
             sa.text("SELECT rfp_id FROM evaluation_runs WHERE run_id = CAST(:rid AS uuid)"),
             {"rid": run_id},

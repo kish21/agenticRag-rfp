@@ -362,6 +362,11 @@ async def list_runs(
             params = {"oid": user.org_id}
 
         with engine.connect() as conn:
+            # Stamp the tenant so the evaluation_runs RLS USING policy returns
+            # rows — the pool-checkout listener alone is unreliable (a rolled-back
+            # request can undo its session set_config), which intermittently hides
+            # the whole list. Mirrors _db_get_run / the /start write fix.
+            conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(user.org_id)})
             rows = conn.execute(query, params).fetchall()
     else:
         # Phase 9 scoped path — delegate to the visibility wrapper.
@@ -377,6 +382,7 @@ async def list_runs(
         else:
             run_ids = [str(v["run_id"]) for v in visible]
             with engine.connect() as conn:
+                conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(user.org_id)})
                 rows = conn.execute(
                     sa.text("""
                         SELECT
@@ -729,7 +735,8 @@ async def _compute_divergence(
     summary="Stream agent status for a run (SSE)",
     responses=responses(UNAUTHORIZED, FORBIDDEN, NOT_FOUND),
 )
-async def run_status_stream(run_id: str, user: TokenData = Depends(get_current_user)):
+async def run_status_stream(run_id: str, request: Request,
+                            user: TokenData = Depends(get_current_user)):
     """Server-sent events stream of the pipeline's per-agent progress for a run.
     Authenticates via Bearer token or session cookie."""
     run = _db_get_run(run_id, user.org_id)
@@ -738,7 +745,7 @@ async def run_status_stream(run_id: str, user: TokenData = Depends(get_current_u
     # (was org-scoped only; a same-org non-collaborator/auditor could subscribe).
     require_run_access(user, run)
     return StreamingResponse(
-        _event_stream(run_id, user.org_id),
+        _event_stream(run_id, user.org_id, request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -774,7 +781,7 @@ async def run_stream_alias(run_id: str, request: Request):
     # #55: enforce within-org visibility on the cookie-auth SSE alias too.
     require_run_access(user, run)
     return StreamingResponse(
-        _event_stream(run_id, user.org_id),
+        _event_stream(run_id, user.org_id, request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

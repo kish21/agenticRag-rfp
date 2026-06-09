@@ -19,8 +19,10 @@ Two engines, two trust levels:
 The org context (``app.current_org_id``, read by every RLS policy) is carried
 in a ContextVar and stamped onto each app-engine connection by a pool
 ``checkout`` listener — so route handlers and DB helpers do NOT each have to
-remember to ``SET`` it. It is RESET on ``checkin`` so a pooled connection never
-leaks one tenant's context into another tenant's request.
+remember to ``SET`` it. The stamp is COMMITTED at checkout, so a later
+transaction rollback on that pooled connection cannot silently undo it; and it
+is re-applied (overwritten) whenever the active tenant differs, so a pooled
+connection can never serve another tenant with a stale context.
 
 Request scope: AuthMiddleware sets the ContextVar from the verified JWT.
 Background scope: wrap per-org work in ``with org_context(org_id): ...``.
@@ -64,11 +66,22 @@ def org_context(org_id: str | None):
 def _apply_org_context(dbapi_conn, org_id: str | None) -> None:
     """Stamp (or clear) app.current_org_id on a raw DBAPI connection.
 
-    Uses set_config(...) — parameterised, injection-safe — at SESSION scope so
-    it survives across the multiple transactions a single checked-out
-    connection may run. Cleared (empty string) when no tenant is active, which
-    makes every RLS policy (``org_id::text = current_setting(...)``) match zero
-    rows rather than fall open.
+    Uses set_config(..., is_local=false) — parameterised, injection-safe — at
+    SESSION scope so it survives across the multiple transactions a single
+    checked-out connection may run, then COMMITS it immediately.
+
+    Why the commit matters: a session-level ``SET`` issued inside a transaction
+    is rolled back with that transaction. Without the commit, a stamp applied at
+    checkout would silently vanish the moment the caller's request hit an error
+    and rolled back — yet the cached ``app_org`` marker would still report the
+    connection as stamped, so the NEXT borrower ran with an empty tenant and RLS
+    hid every row (the "run not found" / empty-list bug). Committing pins the
+    GUC for the whole session, immune to any later rollback, keeping the GUC and
+    the cache marker in lock-step. Safe to commit here: the pool hands the
+    connection out clean (reset-on-return), so no caller transaction is open yet.
+
+    Cleared (empty string) when no tenant is active, which makes every RLS policy
+    (``org_id::text = current_setting(...)``) match zero rows rather than fall open.
     """
     cur = dbapi_conn.cursor()
     try:
@@ -78,6 +91,9 @@ def _apply_org_context(dbapi_conn, org_id: str | None) -> None:
         )
     finally:
         cur.close()
+    # Persist the session GUC so a later transaction rollback on this pooled
+    # connection cannot undo it (see docstring).
+    dbapi_conn.commit()
 
 
 def install_org_listener(engine: sa.Engine) -> None:
