@@ -131,6 +131,9 @@ PLATFORM_REVIEW_2026.md
 Codex_review.md
 copilot_appreview.md
 
+# Local debugging notes — contain dummy credentials, local-only
+LOCAL_VERIFICATION_NOTES.md
+
 # Phase 5 test-generated drop folders (transient)
 tests/_drops_*/
 tests/_phase7_*
