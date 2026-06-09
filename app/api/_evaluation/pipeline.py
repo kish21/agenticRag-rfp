@@ -53,6 +53,11 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         # ── 1. Load run data from PostgreSQL ──────────────────────────────────
         engine = get_engine()
         with engine.connect() as conn:
+            # Stamp the tenant on THIS connection so the RLS USING policy returns
+            # the row. Never rely on the pooled-connection listener alone for a
+            # read — an unstamped connection makes RLS hide the row and the run
+            # looks "not found" (mirrors _db_get_run / the /start write fix).
+            conn.execute(sa.text("SET LOCAL app.current_org_id = :oid"), {"oid": str(org_id)})
             row = conn.execute(
                 sa.text("""
                     SELECT rfp_id, rfp_title, department, rfp_filename,
@@ -80,7 +85,7 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
             raise RuntimeError("EvaluationSetup not found")
         evaluation_setup = EvaluationSetup(**setup_json)
         org_settings     = get_org_settings(org_id)
-        vendor_file_map  = _db_load_vendor_files(run_id)
+        vendor_file_map  = _db_load_vendor_files(run_id, org_id)
         n_vendors        = len(vendor_ids)
 
         rfp_logger.dev(DevLevel.AGENT, "Pipeline",
@@ -133,7 +138,10 @@ async def _run_pipeline(run_id: str, org_id: str) -> None:
         ):
             # state_diff is {node_name: updated_fields_dict}
             node_name = next(iter(state_diff))
-            updated   = state_diff[node_name]
+            # langgraph 1.2.x "updates" mode yields {node: None} for a node whose
+            # return is empty/no-op (e.g. planner_node returns {}). Coerce to an
+            # empty dict so the merge below never hits `{**state, **None}`.
+            updated   = state_diff[node_name] or {}
             # Merge diff into our local view of final_state for post-run access.
             # astream "updates" mode yields each node's RAW return, not the
             # reducer-applied channel — so critic telemetry (a deep-merge reducer
