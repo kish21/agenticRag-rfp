@@ -176,6 +176,49 @@ def test_missing_context_sees_zero_rows(app_engine):
         assert c.execute(sa.text("SELECT count(*) FROM evaluation_runs")).scalar() == 0
 
 
+def test_org_stamp_survives_rolled_back_txn():
+    """Regression for the durable-commit in ``_apply_org_context`` (PR #281).
+
+    The pool-checkout listener stamps ``app.current_org_id`` via a session-level
+    ``set_config``. It used to run INSIDE a transaction, so a request that hit an
+    error and rolled back silently reverted the stamp — while the cached
+    ``app_org`` marker still claimed the connection was stamped. The next user of
+    that pooled connection then ran with an EMPTY tenant and RLS hid every row:
+    the background ``_run_pipeline`` got 'Run not found in DB' and the dashboard
+    ``/list`` came back empty. The fix COMMITS the stamp at checkout; this proves
+    it survives a rollback and that RLS still returns the org's rows afterwards.
+
+    Dedicated engine (not the module-shared one) so pooled-connection GUC state
+    left by sibling tests can't mask the assertion."""
+    eng = sa.create_engine(app_engine_url())
+    install_org_listener(eng)
+    try:
+        with org_context(ORG_A):
+            raw = eng.raw_connection()  # checkout → listener stamps + commits
+            try:
+                cur = raw.cursor()
+                cur.execute("SELECT current_setting('app.current_org_id', true)")
+                assert (cur.fetchone()[0] or "") == ORG_A, "stamp not applied at checkout"
+                # Simulate a request that opens a txn and then rolls back.
+                cur.execute("SELECT 1")
+                raw.rollback()
+                # Pre-fix the rollback reverted the session GUC back to ''.
+                cur.execute("SELECT current_setting('app.current_org_id', true)")
+                assert (cur.fetchone()[0] or "") == ORG_A, \
+                    "rollback erased the tenant stamp — durable-commit regressed"
+                # And RLS must still return this org's seeded run.
+                cur.execute(
+                    "SELECT count(*) FROM evaluation_runs WHERE org_id = CAST(%s AS uuid)",
+                    (ORG_A,))
+                assert cur.fetchone()[0] >= 1, \
+                    "RLS hid the org's rows after rollback — durable-commit regressed"
+                cur.close()
+            finally:
+                raw.close()
+    finally:
+        eng.dispose()
+
+
 def test_audit_log_isolation(app_engine):
     with org_context(ORG_A), app_engine.connect() as c:
         b_rows = c.execute(sa.text(
