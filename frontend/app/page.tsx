@@ -245,7 +245,10 @@ export default function HomePage() {
       setShellState("running"); setCanvasPage("progress"); setRightExpanded(true);
     } else if (run.status === "pending_confirm") {
       setConfirmRunId(run.run_id); setCanvasPage("confirm");
-    } else if (run.status === "interrupted" || run.status === "failed") {
+    } else if (run.status === "interrupted" || run.status === "failed" || run.status === "blocked") {
+      // Terminal-but-incomplete states all open the results view, which renders
+      // any partial decision plus a "blocked / didn't finish" banner. Without
+      // "blocked" here a blocked run fell through to the empty welcome canvas.
       setShellState("completed"); setCanvasPage("results");
     } else {
       setCanvasPage("welcome");

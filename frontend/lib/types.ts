@@ -25,12 +25,14 @@ export interface VendorScore {
 }
 
 export interface EvalResults {
+  status?: string;
   recommendation?: string;
   approval_tier?: string;
   decision_confidence?: number | null;
   requires_human_review?: boolean;
   review_reasons?: string[];
   vendors?: VendorScore[];
+  agent_log?: { message?: string; log_msg?: string }[];
 }
 
 export interface ChatMessage {

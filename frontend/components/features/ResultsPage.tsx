@@ -207,6 +207,13 @@ export function ResultsPage({ results, activeRunId, isMobile, onStartNewEval }: 
   const shortlisted = allVendors.filter(v => v.decision === "shortlisted");
   const rejected    = allVendors.filter(v => v.decision === "rejected");
 
+  // A blocked run is terminal-but-incomplete (Critic hard-block or a mid-run
+  // error). It still opens here; we surface the reason and render whatever
+  // partial decision exists rather than leaving a dead canvas.
+  const isBlocked   = results.status === "blocked";
+  const lastLog     = (results.agent_log ?? []).filter(Boolean).slice(-1)[0];
+  const blockReason = lastLog?.log_msg || lastLog?.message || "";
+
   function confidenceTier(c: number | null | undefined): { label: string; color: string } {
     if (c == null)  return { label: "—",    color: "var(--color-text-muted)" };
     if (c >= 0.85)  return { label: "high",  color: "var(--color-success)" };
@@ -228,9 +235,9 @@ export function ResultsPage({ results, activeRunId, isMobile, onStartNewEval }: 
           <p style={{
             fontFamily: FONT, fontWeight: 600, fontSize: 11,
             letterSpacing: "0.1em", textTransform: "uppercase",
-            color: "var(--color-success)",
+            color: isBlocked ? "var(--color-error)" : "var(--color-success)",
           }}>
-            Evaluation complete
+            {isBlocked ? "Evaluation blocked" : "Evaluation complete"}
           </p>
           {results.decision_confidence != null && (
             <span style={{
@@ -249,6 +256,30 @@ export function ResultsPage({ results, activeRunId, isMobile, onStartNewEval }: 
         }}>
           Vendor Rankings
         </h1>
+
+        {/* Blocked banner — terminal-but-incomplete run (Critic block / error) */}
+        {isBlocked && (
+          <div role="alert" style={{
+            marginBottom: 16, padding: "12px 16px",
+            backgroundColor: "color-mix(in srgb, var(--color-error) 8%, transparent)",
+            borderTop: "1px solid var(--color-border)",
+            borderBottom: "1px solid var(--color-border)",
+            borderLeft: "3px solid var(--color-error)",
+            borderRight: "1px solid var(--color-border)",
+            borderRadius: "var(--radius)",
+          }}>
+            <p style={{
+              fontFamily: FONT, fontWeight: 700, fontSize: 12,
+              color: "var(--color-error)", marginBottom: 2,
+            }}>Evaluation blocked — did not finish</p>
+            <p style={{ fontFamily: FONT, fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+              {blockReason || "A quality check stopped this run before it produced a full result."}
+              {allVendors.length === 0
+                ? " No vendor results were produced."
+                : " Partial results are shown below."}
+            </p>
+          </div>
+        )}
 
         {/* Human review required banner */}
         {results.requires_human_review && (
