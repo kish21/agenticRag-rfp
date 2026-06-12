@@ -17,7 +17,7 @@ langfuse==4.5.1             # SDK REWRITTEN in v4 March 2026 — NOT backwards c
 
 # ── LlamaIndex for document processing ───────────────────
 llama-index-core==0.14.21           # updated: latest stable
-llama-index-vector-stores-qdrant==0.10.0  # updated: latest
+llama-index-vector-stores-qdrant==0.10.1  # updated: latest
 llama-index-embeddings-openai==0.6.0      # updated: latest
 llama-index-retrievers-bm25==0.7.1        # updated: latest
 # NOTE: in llama-index 0.12.x, install core + integrations separately
