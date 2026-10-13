@@ -220,8 +220,10 @@ alembic upgrade head
 # Create Azure Container Registry
 az acr create --name rfpacr --resource-group rfp-eval-rg --sku Basic
 
-# Build and push
-az acr build --registry rfpacr --image rfp-api:latest .
+# Build and push — tag every build with the git short SHA (never `latest`),
+# so each deploy points at one exact, traceable image.
+IMAGE_TAG=$(git rev-parse --short HEAD)
+az acr build --registry rfpacr --image rfp-api:$IMAGE_TAG .
 ```
 
 **Step 5: Configure .env (Azure profile)**
@@ -257,7 +259,7 @@ az containerapp create \
   --name rfp-api \
   --resource-group rfp-eval-rg \
   --environment rfp-env \
-  --image rfpacr.azurecr.io/rfp-api:latest \
+  --image rfpacr.azurecr.io/rfp-api:$IMAGE_TAG \
   --target-port 8000 \
   --ingress external \
   --min-replicas 1 \
@@ -265,6 +267,12 @@ az containerapp create \
   --env-vars LLM_PROVIDER=azure \
              AZURE_OPENAI_API_KEY=secretref:azure-openai-key \
              ...
+
+# Later deploys: rebuild (Step 4, new IMAGE_TAG) and point the app at that exact tag
+az containerapp update \
+  --name rfp-api \
+  --resource-group rfp-eval-rg \
+  --image rfpacr.azurecr.io/rfp-api:$IMAGE_TAG
 ```
 
 **Step 7: Deploy Next.js frontend to Azure Static Web Apps**
