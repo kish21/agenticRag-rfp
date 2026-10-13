@@ -29,7 +29,7 @@ Agents call `call_llm()`, `get_embeddings()`, `rerank()` — they never import p
 | Profile | LLM | Embeddings | Reranker | Compute | Best For |
 |---|---|---|---|---|---|
 | **Modal** | Qwen 2.5 72B (A100) | BGE (A10G) | BGE local | Modal serverless | Demo, cost-optimised |
-| **Azure** | Azure OpenAI GPT-4o | Azure OpenAI | BGE local | Azure Container Apps | Enterprise, EU data residency |
+| **Azure** | Azure OpenAI GPT-4o | Azure OpenAI | Cohere Rerank API | Azure Container Apps | Enterprise, EU data residency |
 | **AWS** | OpenAI GPT-4o | Local BGE | BGE local | ECS Fargate | AWS-native teams |
 | **Google Cloud** | Vertex AI Gemini 1.5 Pro | Vertex AI | BGE local | Cloud Run | GCP-native, multimodal |
 | **Air-gapped** | Ollama (Qwen 7B/14B) | Local BGE | BGE local | Local workers | NHS, government, no internet |
@@ -126,7 +126,10 @@ python scripts/test_llm_call.py
 ### What it uses
 - LLM: Azure OpenAI GPT-4o (in-region, no data leaves Azure)
 - Embeddings: Azure OpenAI text-embedding-3-large (in-region)
-- Reranker: BAAI/bge-reranker-v2-m3 (local, runs in container)
+- Reranker: Cohere Rerank API (`rerank-english-v3.0`). The local BGE re-ranker is NOT in the
+  production image, so `RERANKER_PROVIDER=bge` would fail on Azure and search would silently degrade.
+  Note: Cohere is outside Azure — query text and chunk snippets are sent to Cohere.
+  If that is not acceptable, set `RERANKER_PROVIDER=none` (re-ranking off; logged at startup).
 - API: Azure Container Apps (auto-scaling)
 - Storage: Azure Database for PostgreSQL + Qdrant Cloud (or Azure VM with Qdrant)
 - Observability: LangFuse Cloud or self-hosted on Azure
@@ -225,7 +228,8 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4o
 EMBEDDING_PROVIDER=azure
 # Azure embedding uses same endpoint and key
 
-RERANKER_PROVIDER=bge
+RERANKER_PROVIDER=cohere
+COHERE_API_KEY=<cohere-api-key>   # required for RERANKER_PROVIDER=cohere
 OBSERVABILITY_PROVIDER=langfuse
 
 DATABASE_URL=postgresql://rfpadmin:<pass>@rfp-postgres.postgres.database.azure.com:5432/postgres?sslmode=require

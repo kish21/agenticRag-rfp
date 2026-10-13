@@ -29,6 +29,17 @@ def _run_migrations() -> None:
         print(f"[startup] Alembic migration warning: {exc}")
 
 
+def _check_reranker() -> None:
+    """Say clearly at startup if re-ranking is off or cannot work."""
+    provider = (settings.reranker_provider or "").lower()
+    if provider == "none":
+        print("[startup] WARNING — re-ranking is OFF (RERANKER_PROVIDER=none); "
+              "search results use vector-score order only.")
+    elif provider == "cohere" and not settings.cohere_api_key:
+        print("[startup] WARNING — RERANKER_PROVIDER=cohere but COHERE_API_KEY is empty; "
+              "re-ranking will fail and fall back to vector-score order.")
+
+
 def _check_cors_origins() -> None:
     """Refuse to start with wildcard CORS origins when an API key is set."""
     has_api_key = bool(settings.app_api_key and settings.app_api_key != "changeme-internal-api-key")
@@ -161,6 +172,7 @@ async def lifespan(app: FastAPI):
     _check_cors_origins()
     _check_auth_secrets()
     _run_migrations()
+    _check_reranker()
     _check_db_app_role()
     _mark_orphaned_runs()
     yield
