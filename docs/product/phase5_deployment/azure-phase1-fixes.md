@@ -19,11 +19,11 @@ The runbook is `05_multi_cloud_deployment_guide.md` (Profile 2 — Azure).
 
 **What was wrong:** A re-ranker re-orders search results so the best evidence comes first. The runbook chose the local BGE re-ranker, but its library is not in the production Docker image. On Azure every re-rank call would fail, and search would quietly fall back to a weaker order.
 
-**The change:** The code already supports Cohere's hosted re-rank API, which needs no local library. The Azure runbook now sets `RERANKER_PROVIDER=cohere` and lists the key it needs, `COHERE_API_KEY`. At startup the app now prints a clear warning if re-ranking is off (`none`) or if Cohere is chosen without a key.
+**The change:** Re-ranking uses Cohere Rerank deployed inside Azure, from the Azure AI Foundry model catalog (a serverless API, pay per use). The code already supported Cohere; one small change lets it call the Azure endpoint instead of Cohere's own (`COHERE_BASE_URL`). At startup the app warns if re-ranking is off or the key is missing.
 
-**Decision for you:** Cohere runs outside Azure, so query text and short document snippets go to Cohere. If a client needs everything inside Azure, set `RERANKER_PROVIDER=none` for phase 1. The startup warning will then say re-ranking is off.
+**Why not the open-source BGE:** it is my default locally, but it needs a 2.3 GB model and ideally a GPU. Phase 2 can host it as its own container in Azure. The rule for this project: use the Azure equivalent where one exists, and host it in Azure where it does not.
 
-**Interview line:** "A fallback that fails silently is a hidden quality bug, so I made the re-ranker an explicit deployment choice and made the app say out loud when it is running degraded."
+**Interview line:** "My first choice sent text outside Azure, so I moved the re-ranker to a deployment inside Azure. A fallback that fails silently is a hidden quality bug, so I made the re-ranker an explicit deployment choice and made the app say out loud when it is running degraded."
 
 ---
 

@@ -126,10 +126,13 @@ python scripts/test_llm_call.py
 ### What it uses
 - LLM: Azure OpenAI GPT-4o (in-region, no data leaves Azure)
 - Embeddings: Azure OpenAI text-embedding-3-large (in-region)
-- Reranker: Cohere Rerank API (`rerank-english-v3.0`). The local BGE re-ranker is NOT in the
-  production image, so `RERANKER_PROVIDER=bge` would fail on Azure and search would silently degrade.
-  Note: Cohere is outside Azure — query text and chunk snippets are sent to Cohere.
-  If that is not acceptable, set `RERANKER_PROVIDER=none` (re-ranking off; logged at startup).
+- Reranker: Cohere Rerank deployed from the Azure AI Foundry model catalog as a serverless API
+  (pay per use, billed through Azure Marketplace), so re-ranking runs inside Azure, not at Cohere.
+  The app calls it with the Cohere SDK pointed at the Azure endpoint (`COHERE_BASE_URL`).
+  Check at deploy time which Rerank version and region Foundry offers (Sweden Central if listed).
+  The local BGE re-ranker is NOT in the production image, so `RERANKER_PROVIDER=bge` would fail on
+  Azure. Fallback: `RERANKER_PROVIDER=none` (re-ranking off; logged at startup).
+  Phase 2 option: host the open-source BGE re-ranker as its own container inside Azure.
 - API: Azure Container Apps (auto-scaling)
 - Storage: Azure Database for PostgreSQL + Qdrant Cloud (or Azure VM with Qdrant)
 - Observability: LangFuse Cloud or self-hosted on Azure
@@ -238,7 +241,8 @@ EMBEDDING_PROVIDER=azure
 # Azure embedding uses same endpoint and key
 
 RERANKER_PROVIDER=cohere
-COHERE_API_KEY=<cohere-api-key>   # required for RERANKER_PROVIDER=cohere
+COHERE_API_KEY=<azure-foundry-rerank-key>        # key of the Foundry serverless deployment
+COHERE_BASE_URL=<azure-foundry-rerank-endpoint>   # e.g. https://<name>.<region>.models.ai.azure.com/
 OBSERVABILITY_PROVIDER=langfuse
 
 DATABASE_URL=postgresql://rfpadmin:<pass>@rfp-postgres.postgres.database.azure.com:5432/postgres?sslmode=require

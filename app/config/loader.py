@@ -326,6 +326,7 @@ class Settings(BaseModel):
     # ── Reranker ──────────────────────────────────────────────────────
     reranker_provider: str = "bge"
     cohere_api_key: str = ""
+    cohere_base_url: str = ""   # set to an Azure AI Foundry Cohere Rerank endpoint to keep re-ranking inside Azure
     cohere_rerank_model: str = "rerank-english-v3.0"   # legacy shim — prefer platform.retrieval.reranker_models['cohere']
 
     # ── App ───────────────────────────────────────────────────────────
@@ -467,6 +468,7 @@ def load_settings() -> Settings:
         "observability_provider":     _e("OBSERVABILITY_PROVIDER", "langfuse"),
         "reranker_provider":          _e("RERANKER_PROVIDER", "bge"),
         "cohere_api_key":             _e("COHERE_API_KEY"),
+        "cohere_base_url":            _e("COHERE_BASE_URL", ""),
         "cohere_rerank_model":        _e("COHERE_RERANK_MODEL", "rerank-english-v3.0"),
         "app_api_key":                _e("APP_API_KEY"),
         "allowed_origins":            [o.strip() for o in _e("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()],

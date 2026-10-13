@@ -14,7 +14,9 @@ Providers:
             and the local box never needs to reach HuggingFace. Requires the Modal
             app to be deployed (`modal deploy deploy/modal_app.py`); falls back to
             vector order if Modal is unreachable.
-  cohere  — managed Cohere Rerank API (not open source).
+  cohere  — managed Cohere Rerank API (not open source). Set COHERE_BASE_URL to an
+            Azure AI Foundry Cohere Rerank endpoint to call it inside Azure
+            instead of Cohere's own API.
   colbert — ColBERT via ragatouille (unmaintained; opt-in).
   none    — no rerank; vector-score order.
 """
@@ -138,7 +140,8 @@ def _rerank_cohere(
     top_n: int
 ) -> list[dict]:
     import cohere
-    co = cohere.ClientV2(api_key=settings.cohere_api_key)
+    base_url = getattr(settings, "cohere_base_url", "") or None
+    co = cohere.ClientV2(api_key=settings.cohere_api_key, base_url=base_url)
     _max_chars = settings.platform.ingestion.max_chunk_chars_for_rerank
     docs = [c["text"][:_max_chars] for c in candidates]
     results = co.rerank(
