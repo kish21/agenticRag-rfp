@@ -23,6 +23,13 @@ COPY app/ app/
 COPY alembic/ alembic/
 COPY alembic.ini .
 
+# Bake the BM25 keyword model (fastembed "Qdrant/bm25", used in
+# app/retrieval/pipeline.py) into the image at build time, so a fresh container
+# does not download it on first ingestion. fastembed reads FASTEMBED_CACHE_PATH.
+ENV FASTEMBED_CACHE_PATH=/opt/fastembed_cache
+RUN python -c "from fastembed import SparseTextEmbedding; SparseTextEmbedding(model_name='Qdrant/bm25')" \
+ && chown -R appuser:appgroup /opt/fastembed_cache
+
 USER appuser
 
 EXPOSE 8000
