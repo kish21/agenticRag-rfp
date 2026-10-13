@@ -204,9 +204,16 @@ az postgres flexible-server show-connection-string --server-name rfp-postgres
 
 **Step 3: Run database migrations**
 ```bash
-DATABASE_URL="postgresql://rfpadmin:<pass>@rfp-postgres.postgres.database.azure.com:5432/postgres?sslmode=require" \
-python scripts/migrate.py
+# Run from the repo root (where alembic.ini lives).
+# alembic/env.py builds the DB URL from the POSTGRES_* settings, not DATABASE_URL.
+POSTGRES_HOST=rfp-postgres.postgres.database.azure.com \
+POSTGRES_PORT=5432 \
+POSTGRES_DB=postgres \
+POSTGRES_USER=rfpadmin \
+POSTGRES_PASSWORD=<pass> \
+alembic upgrade head
 ```
+(The API also runs `alembic upgrade head` on startup, so this step just makes the first deploy predictable.)
 
 **Step 4: Build and push container**
 ```bash
