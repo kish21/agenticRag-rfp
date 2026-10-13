@@ -139,14 +139,21 @@ python scripts/test_llm_call.py
 ### Step-by-Step Deploy
 
 **Step 1: Create Azure OpenAI resource**
+
+> Region: `swedencentral` (Sweden Central) — an EU region where Azure OpenAI models are available.
+> Note: the model versions below (`gpt-4o` "2024-05-13", API version "2024-02-01") are from 2024.
+> Before deploying, check which model and API versions Sweden Central offers today
+> (`az cognitiveservices account list-models --name rfp-openai --resource-group rfp-eval-rg`)
+> and update the values here and in Step 5 to match.
+
 ```bash
-az group create --name rfp-eval-rg --location uksouth
+az group create --name rfp-eval-rg --location swedencentral
 az cognitiveservices account create \
   --name rfp-openai \
   --resource-group rfp-eval-rg \
   --kind OpenAI \
   --sku S0 \
-  --location uksouth
+  --location swedencentral
 
 # Deploy GPT-4o
 az cognitiveservices account deployment create \
@@ -180,7 +187,7 @@ az cognitiveservices account keys list --name rfp-openai --resource-group rfp-ev
 az postgres flexible-server create \
   --name rfp-postgres \
   --resource-group rfp-eval-rg \
-  --location uksouth \
+  --location swedencentral \
   --admin-user rfpadmin \
   --admin-password <strong-password> \
   --sku-name Standard_D2s_v3 \
@@ -233,7 +240,7 @@ SSL_VERIFY=true
 az containerapp env create \
   --name rfp-env \
   --resource-group rfp-eval-rg \
-  --location uksouth
+  --location swedencentral
 
 az containerapp create \
   --name rfp-api \
@@ -266,7 +273,7 @@ curl https://rfp-api.<region>.azurecontainerapps.io/health
 ```
 
 ### Data Residency
-All data stays in `uksouth` (or your chosen Azure region). Azure OpenAI processes prompts in-region. No data crosses Azure region boundaries unless you configure geo-redundancy.
+All data stays in `swedencentral` (Sweden Central, EU) or your chosen Azure region. Azure OpenAI processes prompts in-region. No data crosses Azure region boundaries unless you configure geo-redundancy.
 
 ### Cost at this profile
 - Azure OpenAI: pay per token (~$0.002–0.01/1K tokens depending on model)
