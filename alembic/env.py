@@ -10,7 +10,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep loggers created before migrations ran (uvicorn, app) switched on.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Pull DB URL from .env via app settings (overrides alembic.ini placeholder)
 try:
